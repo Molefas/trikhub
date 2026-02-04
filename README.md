@@ -56,7 +56,7 @@ pnpm demo
 DEBUG=true pnpm demo
 ```
 
-You'll need `ANTHROPIC_API_KEY` set in `example/.env`.
+You'll need `ANTHROPIC_API_KEY` set in `/.env`.
 
 ## Example Session
 
