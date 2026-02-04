@@ -8,14 +8,21 @@ import {
 
 describe('skill-manifest', () => {
   describe('validateManifest', () => {
+    // Proves: Well-formed manifests with actions pass validation
     it('should validate a complete manifest', () => {
       const manifest: SkillManifest = {
         id: 'test-skill',
         name: 'Test Skill',
         description: 'A test skill',
         version: '1.0.0',
-        inputSchema: { type: 'object', properties: { input: { type: 'string' } } },
-        outputSchema: { type: 'object', properties: { output: { type: 'string' } } },
+        actions: {
+          search: {
+            responseMode: 'template',
+            inputSchema: { type: 'object', properties: { query: { type: 'string' } } },
+            agentDataSchema: { type: 'object', properties: { count: { type: 'integer' } } },
+            responseTemplates: { success: { text: 'Found {{count}} results' } },
+          },
+        },
         capabilities: { tools: [], canRequestClarification: false },
         limits: { maxExecutionTimeMs: 30000, maxLlmCalls: 5, maxToolCalls: 10 },
         entry: { module: './graph.js', export: 'default' },
@@ -25,6 +32,7 @@ describe('skill-manifest', () => {
       expect(result.valid).toBe(true);
     });
 
+    // Proves: Incomplete manifests are rejected (all required fields enforced)
     it('should reject manifest with missing required fields', () => {
       const manifest = {
         id: 'test-skill',
@@ -37,14 +45,21 @@ describe('skill-manifest', () => {
       expect(result.errors!.length).toBeGreaterThan(0);
     });
 
+    // Proves: Version format is validated (prevents malformed manifests)
     it('should reject manifest with invalid version format', () => {
       const manifest = {
         id: 'test-skill',
         name: 'Test',
         description: 'Test',
         version: 'not-semver', // invalid
-        inputSchema: {},
-        outputSchema: {},
+        actions: {
+          test: {
+            responseMode: 'template',
+            inputSchema: { type: 'object' },
+            agentDataSchema: { type: 'object' },
+            responseTemplates: { success: { text: 'Done' } },
+          },
+        },
         capabilities: { tools: [], canRequestClarification: false },
         limits: { maxExecutionTimeMs: 30000, maxLlmCalls: 5, maxToolCalls: 10 },
         entry: { module: './graph.js', export: 'default' },
@@ -53,9 +68,85 @@ describe('skill-manifest', () => {
       const result = validateManifest(manifest);
       expect(result.valid).toBe(false);
     });
+
+    // Proves: Template mode requires agentDataSchema and responseTemplates
+    it('should reject template mode action without agentDataSchema', () => {
+      const manifest = {
+        id: 'test-skill',
+        name: 'Test',
+        description: 'Test',
+        version: '1.0.0',
+        actions: {
+          test: {
+            responseMode: 'template',
+            inputSchema: { type: 'object' },
+            // Missing agentDataSchema and responseTemplates
+          },
+        },
+        capabilities: { tools: [], canRequestClarification: false },
+        limits: { maxExecutionTimeMs: 30000, maxLlmCalls: 5, maxToolCalls: 10 },
+        entry: { module: './graph.js', export: 'default' },
+      };
+
+      const result = validateManifest(manifest);
+      expect(result.valid).toBe(false);
+    });
+
+    // Proves: Passthrough mode requires userContentSchema
+    it('should reject passthrough mode action without userContentSchema', () => {
+      const manifest = {
+        id: 'test-skill',
+        name: 'Test',
+        description: 'Test',
+        version: '1.0.0',
+        actions: {
+          test: {
+            responseMode: 'passthrough',
+            inputSchema: { type: 'object' },
+            // Missing userContentSchema
+          },
+        },
+        capabilities: { tools: [], canRequestClarification: false },
+        limits: { maxExecutionTimeMs: 30000, maxLlmCalls: 5, maxToolCalls: 10 },
+        entry: { module: './graph.js', export: 'default' },
+      };
+
+      const result = validateManifest(manifest);
+      expect(result.valid).toBe(false);
+    });
+
+    // Proves: Valid passthrough mode manifest passes
+    it('should validate passthrough mode action with userContentSchema', () => {
+      const manifest = {
+        id: 'test-skill',
+        name: 'Test',
+        description: 'Test',
+        version: '1.0.0',
+        actions: {
+          details: {
+            responseMode: 'passthrough',
+            inputSchema: { type: 'object', properties: { id: { type: 'string' } } },
+            userContentSchema: {
+              type: 'object',
+              properties: {
+                contentType: { type: 'string' },
+                content: { type: 'string' },
+              },
+            },
+          },
+        },
+        capabilities: { tools: [], canRequestClarification: false },
+        limits: { maxExecutionTimeMs: 30000, maxLlmCalls: 5, maxToolCalls: 10 },
+        entry: { module: './graph.js', export: 'default' },
+      };
+
+      const result = validateManifest(manifest);
+      expect(result.valid).toBe(true);
+    });
   });
 
   describe('validateData', () => {
+    // Proves: Schema validation works for runtime data checking
     it('should validate data against schema', () => {
       const schema = {
         type: 'object',
@@ -74,6 +165,7 @@ describe('skill-manifest', () => {
   });
 
   describe('SchemaValidator', () => {
+    // Proves: Validators are cached for performance
     it('should cache validators', () => {
       const validator = new SchemaValidator();
       const schema = { type: 'string' };
@@ -84,6 +176,7 @@ describe('skill-manifest', () => {
       expect(v1).toBe(v2); // same instance
     });
 
+    // Proves: Cached validators work correctly for repeated validation
     it('should validate with cached validator', () => {
       const validator = new SchemaValidator();
       const schema = { type: 'number', minimum: 0 };

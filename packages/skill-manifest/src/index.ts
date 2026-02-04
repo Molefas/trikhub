@@ -15,36 +15,28 @@ export type {
   ClarificationAnswer,
   GatewayResult,
   GatewaySuccess,
+  GatewaySuccessTemplate,
+  GatewaySuccessPassthrough,
   GatewayError,
   GatewayClarification,
   GatewayErrorCode,
-  // V2 Types
+  // Type-directed privilege separation types
   AllowedAgentStringFormat,
   ResponseMode,
   ResponseTemplate,
   ActionDefinition,
-  SkillManifestV2,
-  GatewaySuccessV2,
-  GatewaySuccessV2Template,
-  GatewaySuccessV2Passthrough,
-  GatewayResultV2,
-  SuccessResponseV2,
-  ExecuteResponseV2,
   // Session types
   SessionCapabilities,
   SessionHistoryEntry,
   SkillSession,
   SessionContext,
-  GraphInputV2,
-  GraphResultV2,
+  GraphInput,
+  GraphResult,
   // Passthrough types
   PassthroughContent,
   PassthroughDeliveryReceipt,
   UserContentReference,
 } from './types.js';
-
-// V2 type guard
-export { isManifestV2 } from './types.js';
 
 // Validation
 export {

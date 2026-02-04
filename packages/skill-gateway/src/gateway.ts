@@ -3,10 +3,10 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
-  type SkillManifestV2,
-  type GatewayResultV2,
-  type GatewaySuccessV2Template,
-  type GatewaySuccessV2Passthrough,
+  type SkillManifest,
+  type GatewayResult,
+  type GatewaySuccessTemplate,
+  type GatewaySuccessPassthrough,
   type ClarificationQuestion,
   type ClarificationAnswer,
   type ActionDefinition,
@@ -19,7 +19,6 @@ import {
   type SessionHistoryEntry,
   validateManifest,
   SchemaValidator,
-  isManifestV2,
 } from '@saaas-poc/skill-manifest';
 import { type SessionStorage, InMemorySessionStorage } from './session-storage.js';
 
@@ -58,12 +57,12 @@ export interface ExecuteSkillOptions {
   sessionId?: string;
 }
 
-export type GatewayResultWithSession<TAgent = unknown> = GatewayResultV2<TAgent> & {
+export type GatewayResultWithSession<TAgent = unknown> = GatewayResult<TAgent> & {
   sessionId?: string;
 };
 
 interface LoadedSkill {
-  manifest: SkillManifestV2;
+  manifest: SkillManifest;
   graph: SkillGraph;
   path: string;
 }
@@ -103,7 +102,7 @@ export class SkillGateway {
     this.sessionStorage = config.sessionStorage ?? new InMemorySessionStorage();
   }
 
-  async loadSkill(skillPath: string): Promise<SkillManifestV2> {
+  async loadSkill(skillPath: string): Promise<SkillManifest> {
     const manifestPath = join(skillPath, 'manifest.json');
     const manifestContent = await readFile(manifestPath, 'utf-8');
     const manifestData = JSON.parse(manifestContent);
@@ -113,11 +112,7 @@ export class SkillGateway {
       throw new Error(`Invalid manifest at ${manifestPath}: ${validation.errors?.join(', ')}`);
     }
 
-    if (!isManifestV2(manifestData)) {
-      throw new Error(`Not a V2 manifest: ${manifestPath}`);
-    }
-
-    const manifest = manifestData as SkillManifestV2;
+    const manifest = manifestData as SkillManifest;
 
     if (this.config.allowedSkills && !this.config.allowedSkills.includes(manifest.id)) {
       throw new Error(`Skill "${manifest.id}" is not in the allowlist`);
@@ -139,7 +134,7 @@ export class SkillGateway {
     return manifest;
   }
 
-  getManifest(skillId: string): SkillManifestV2 | undefined {
+  getManifest(skillId: string): SkillManifest | undefined {
     return this.skills.get(skillId)?.manifest;
   }
 
@@ -345,7 +340,7 @@ export class SkillGateway {
       const userContent = result.userContent;
       const contentRef = this.storePassthroughContent(skillId, actionName, userContent);
 
-      const gatewayResult: GatewaySuccessV2Passthrough = {
+      const gatewayResult: GatewaySuccessPassthrough = {
         success: true,
         responseMode: 'passthrough',
         userContentRef: contentRef,
@@ -381,7 +376,7 @@ export class SkillGateway {
     const templateId = agentData.template as string | undefined;
     const templateText = templateId && action.responseTemplates?.[templateId]?.text;
 
-    const gatewayResult: GatewaySuccessV2Template<TAgent> = {
+    const gatewayResult: GatewaySuccessTemplate<TAgent> = {
       success: true,
       responseMode: 'template',
       agentData: result.agentData as TAgent,
@@ -394,7 +389,7 @@ export class SkillGateway {
   /**
    * Add sessionId to result if session exists
    */
-  private addSessionId<T extends GatewayResultV2>(
+  private addSessionId<T extends GatewayResult>(
     result: T,
     session: SkillSession | null
   ): T & { sessionId?: string } {

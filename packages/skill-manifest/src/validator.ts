@@ -1,12 +1,12 @@
 import Ajv from 'ajv';
 import type { ValidateFunction, ErrorObject } from 'ajv';
-import type { SkillManifest, JSONSchema } from './types.js';
+import type { JSONSchema } from './types.js';
 
 // Create Ajv instance
 const ajv = new Ajv.default({ allErrors: true, strict: false });
 
 /**
- * Common properties shared by V1 and V2 manifests
+ * Common manifest properties
  */
 const commonManifestProperties = {
   id: { type: 'string', minLength: 1 },
@@ -44,55 +44,55 @@ const commonManifestProperties = {
 };
 
 /**
- * JSON Schema for validating V1 SkillManifest
+ * Action definition for template mode (requires agentDataSchema + responseTemplates)
  */
-const manifestSchemaV1: JSONSchema = {
+const actionSchemaTemplate: JSONSchema = {
   type: 'object',
   properties: {
-    ...commonManifestProperties,
+    responseMode: { type: 'string', const: 'template' },
     inputSchema: { type: 'object' },
-    outputSchema: { type: 'object' },
+    agentDataSchema: { type: 'object' },
+    userContentSchema: { type: 'object' },
+    responseTemplates: {
+      type: 'object',
+      additionalProperties: {
+        type: 'object',
+        properties: {
+          text: { type: 'string' },
+        },
+        required: ['text'],
+      },
+    },
+    description: { type: 'string' },
   },
-  required: [
-    'id',
-    'name',
-    'description',
-    'version',
-    'inputSchema',
-    'outputSchema',
-    'capabilities',
-    'limits',
-    'entry',
-  ],
+  required: ['responseMode', 'inputSchema', 'agentDataSchema', 'responseTemplates'],
 };
 
 /**
- * JSON Schema for validating V2 SkillManifest with actions
+ * Action definition for passthrough mode (requires userContentSchema)
  */
-const manifestSchemaV2: JSONSchema = {
+const actionSchemaPassthrough: JSONSchema = {
+  type: 'object',
+  properties: {
+    responseMode: { type: 'string', const: 'passthrough' },
+    inputSchema: { type: 'object' },
+    userContentSchema: { type: 'object' },
+    description: { type: 'string' },
+  },
+  required: ['responseMode', 'inputSchema', 'userContentSchema'],
+};
+
+/**
+ * JSON Schema for validating SkillManifest
+ */
+const manifestSchema: JSONSchema = {
   type: 'object',
   properties: {
     ...commonManifestProperties,
     actions: {
       type: 'object',
       additionalProperties: {
-        type: 'object',
-        properties: {
-          inputSchema: { type: 'object' },
-          agentDataSchema: { type: 'object' },
-          userContentSchema: { type: 'object' },
-          responseTemplates: {
-            type: 'object',
-            additionalProperties: {
-              type: 'object',
-              properties: {
-                text: { type: 'string' },
-              },
-              required: ['text'],
-            },
-          },
-        },
-        required: ['inputSchema', 'agentDataSchema', 'responseTemplates'],
+        anyOf: [actionSchemaTemplate, actionSchemaPassthrough],
       },
       minProperties: 1,
     },
@@ -107,13 +107,6 @@ const manifestSchemaV2: JSONSchema = {
     'limits',
     'entry',
   ],
-};
-
-/**
- * Combined schema that accepts either V1 or V2 manifests
- */
-const manifestSchema: JSONSchema = {
-  anyOf: [manifestSchemaV1, manifestSchemaV2],
 };
 
 const validateManifestSchema = ajv.compile(manifestSchema);

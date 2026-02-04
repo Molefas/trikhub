@@ -16,19 +16,16 @@ export { type SessionStorage, InMemorySessionStorage } from './session-storage.j
 // Re-export types from skill-manifest for convenience
 export type {
   SkillManifest,
-  SkillManifestV2,
   ActionDefinition,
   ResponseMode,
   JSONSchema,
   ResponseTemplate,
   GatewayResult,
-  GatewayResultV2,
   GatewaySuccess,
+  GatewaySuccessTemplate,
+  GatewaySuccessPassthrough,
   GatewayError,
   GatewayClarification,
-  GatewaySuccessV2,
-  GatewaySuccessV2Template,
-  GatewaySuccessV2Passthrough,
   ClarificationQuestion,
   ClarificationAnswer,
   // Session types
@@ -41,6 +38,3 @@ export type {
   PassthroughDeliveryReceipt,
   UserContentReference,
 } from '@saaas-poc/skill-manifest';
-
-// Type guard
-export { isManifestV2 } from '@saaas-poc/skill-manifest';
