@@ -17,15 +17,15 @@ The agent's decision-making LLM never sees untrusted free text.
 pnpm install
 pnpm build
 
-# Run the interactive demo
-cd demo2
+# Run the interactive example
+cd example
 pnpm demo
 
 # With debug output
 DEBUG=true pnpm demo
 ```
 
-You'll need `ANTHROPIC_API_KEY` set in `demo2/.env`.
+You'll need `ANTHROPIC_API_KEY` set in `example/.env`.
 
 ## Example Session
 
@@ -52,7 +52,7 @@ packages/
 ├── skill-gateway/      # Loads and executes skills, manages sessions
 └── skill-linter/       # Static analysis (forbidden imports, etc.)
 
-demo2/
+example/
 ├── agent.ts            # LangGraph agent with tool bindings
 ├── tool-adapter.ts     # Converts gateway tools to LangChain format
 ├── cli.ts              # Interactive REPL
@@ -108,7 +108,7 @@ The skill uses an internal LLM call to resolve these references from session his
 ## Linting
 
 ```bash
-pnpm lint:skill ./demo2/skills/demo/article-search
+pnpm lint:skill ./example/skills/demo/article-search
 ```
 
 Checks for:

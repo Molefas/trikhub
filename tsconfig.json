@@ -4,6 +4,6 @@
     { "path": "packages/skill-manifest" },
     { "path": "packages/skill-gateway" },
     { "path": "packages/skill-linter" },
-    { "path": "demo2" }
+    { "path": "example" }
   ]
 }
