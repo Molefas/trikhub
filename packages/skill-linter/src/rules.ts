@@ -255,10 +255,10 @@ export function checkProcessEnvAccess(sourceFile: ts.SourceFile): LintResult[] {
 }
 
 // ============================================
-// V2 Linter Rules: Type-Directed Privilege Separation
+// Linter Rules: Type-Directed Privilege Separation
 // ============================================
 
-import type { JSONSchema, SkillManifestV2 } from '@saaas-poc/skill-manifest';
+import type { JSONSchema, SkillManifest } from '@saaas-poc/skill-manifest';
 
 /**
  * Allowed string formats in agentDataSchema.
@@ -352,7 +352,7 @@ function isConstrainedString(schema: JSONSchema): boolean {
  * This is the core security rule for type-directed privilege separation.
  */
 export function checkNoFreeStringsInAgentData(
-  manifest: SkillManifestV2,
+  manifest: SkillManifest,
   manifestPath: string
 ): LintResult[] {
   const results: LintResult[] = [];
@@ -413,7 +413,7 @@ export function getSchemaFieldNames(schema: JSONSchema): string[] {
  * Check that all template placeholders reference fields in agentDataSchema.
  */
 export function checkTemplateFieldsExist(
-  manifest: SkillManifestV2,
+  manifest: SkillManifest,
   manifestPath: string
 ): LintResult[] {
   const results: LintResult[] = [];
@@ -450,7 +450,7 @@ export function checkTemplateFieldsExist(
  * Check that template mode V2 actions have at least one response template.
  */
 export function checkHasResponseTemplates(
-  manifest: SkillManifestV2,
+  manifest: SkillManifest,
   manifestPath: string
 ): LintResult[] {
   const results: LintResult[] = [];
@@ -481,7 +481,7 @@ export function checkHasResponseTemplates(
  * Check that template mode V2 actions have a "default" or commonly expected template.
  */
 export function checkDefaultTemplateRecommended(
-  manifest: SkillManifestV2,
+  manifest: SkillManifest,
   manifestPath: string
 ): LintResult[] {
   const results: LintResult[] = [];

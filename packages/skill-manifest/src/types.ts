@@ -68,39 +68,6 @@ export interface SkillEntry {
   export: string;
 }
 
-/**
- * The skill manifest - the single source of truth for the skill contract
- */
-export interface SkillManifest {
-  /** Unique identifier for the skill */
-  id: string;
-  /** Human-readable name */
-  name: string;
-  /** Description of what the skill does */
-  description: string;
-  /** Semantic version */
-  version: string;
-
-  /** JSON Schema for input validation */
-  inputSchema: JSONSchema;
-  /** JSON Schema for output validation */
-  outputSchema: JSONSchema;
-
-  /** Declared capabilities */
-  capabilities: SkillCapabilities;
-  /** Resource limits */
-  limits: SkillLimits;
-  /** Entry point */
-  entry: SkillEntry;
-
-  /** Optional: author name */
-  author?: string;
-  /** Optional: repository URL */
-  repository?: string;
-  /** Optional: license identifier */
-  license?: string;
-}
-
 // ============================================
 // Wire Protocol Types (for remote skills)
 // ============================================
@@ -146,7 +113,8 @@ export interface ClarifyRequest {
 export interface SuccessResponse {
   requestId: string;
   type: 'result';
-  data: unknown;
+  agentData: unknown;
+  userContent?: unknown;
 }
 
 /**
@@ -187,11 +155,6 @@ export type GatewayErrorCode =
   | 'NOT_ALLOWED'
   | 'NETWORK_ERROR';
 
-export interface GatewaySuccess<T> {
-  success: true;
-  data: T;
-}
-
 export interface GatewayError {
   success: false;
   code: GatewayErrorCode;
@@ -206,10 +169,8 @@ export interface GatewayClarification {
   questions: ClarificationQuestion[];
 }
 
-export type GatewayResult<T> = GatewaySuccess<T> | GatewayError | GatewayClarification;
-
 // ============================================
-// V2 Types: Type-Directed Privilege Separation
+// Type-Directed Privilege Separation Types
 // ============================================
 
 /**
@@ -237,7 +198,7 @@ export interface ResponseTemplate {
 export type ResponseMode = 'template' | 'passthrough';
 
 /**
- * Action definition for V2 skills.
+ * Action definition for skills.
  * Each action declares ONE response mode: template OR passthrough.
  */
 export interface ActionDefinition {
@@ -287,17 +248,17 @@ export interface ActionDefinition {
 }
 
 /**
- * V2 Skill Manifest with type-directed privilege separation.
- * Skills define actions instead of a single input/output schema.
+ * The skill manifest - the single source of truth for the skill contract.
+ * Skills define actions with type-directed privilege separation.
  */
-export interface SkillManifestV2 {
+export interface SkillManifest {
   /** Unique identifier for the skill */
   id: string;
   /** Human-readable name */
   name: string;
   /** Description of what the skill does */
   description: string;
-  /** Semantic version - should be 2.x.x for V2 manifests */
+  /** Semantic version */
   version: string;
 
   /** Map of action names to their definitions */
@@ -318,21 +279,14 @@ export interface SkillManifestV2 {
   license?: string;
 }
 
-/**
- * Type guard to check if a manifest is V2 format
- */
-export function isManifestV2(manifest: SkillManifest | SkillManifestV2): manifest is SkillManifestV2 {
-  return 'actions' in manifest && typeof manifest.actions === 'object';
-}
-
 // ============================================
-// V2 Gateway Result Types
+// Gateway Success Types
 // ============================================
 
 /**
- * V2 Gateway success for template mode
+ * Gateway success for template mode
  */
-export interface GatewaySuccessV2Template<TAgent> {
+export interface GatewaySuccessTemplate<TAgent> {
   success: true;
   /** Response mode */
   responseMode: 'template';
@@ -343,9 +297,9 @@ export interface GatewaySuccessV2Template<TAgent> {
 }
 
 /**
- * V2 Gateway success for passthrough mode
+ * Gateway success for passthrough mode
  */
-export interface GatewaySuccessV2Passthrough {
+export interface GatewaySuccessPassthrough {
   success: true;
   /** Response mode */
   responseMode: 'passthrough';
@@ -358,17 +312,17 @@ export interface GatewaySuccessV2Passthrough {
 }
 
 /**
- * V2 Gateway success - either template or passthrough mode
+ * Gateway success - either template or passthrough mode
  */
-export type GatewaySuccessV2<TAgent = unknown> =
-  | GatewaySuccessV2Template<TAgent>
-  | GatewaySuccessV2Passthrough;
+export type GatewaySuccess<TAgent = unknown> =
+  | GatewaySuccessTemplate<TAgent>
+  | GatewaySuccessPassthrough;
 
 /**
- * V2 Gateway result type
+ * Gateway result type
  */
-export type GatewayResultV2<TAgent = unknown> =
-  | GatewaySuccessV2<TAgent>
+export type GatewayResult<TAgent = unknown> =
+  | GatewaySuccess<TAgent>
   | GatewayError
   | GatewayClarification;
 
@@ -421,25 +375,6 @@ export interface UserContentReference {
 }
 
 // ============================================
-// V2 Wire Protocol Types
-// ============================================
-
-/**
- * V2 Success response with separated data
- */
-export interface SuccessResponseV2 {
-  requestId: string;
-  type: 'result';
-  agentData: unknown;
-  userContent?: unknown;
-}
-
-/**
- * V2 Execute response union
- */
-export type ExecuteResponseV2 = SuccessResponseV2 | ClarificationResponse | ErrorResponse;
-
-// ============================================
 // Session State Types
 // ============================================
 
@@ -490,13 +425,13 @@ export interface SessionContext {
 }
 
 // ============================================
-// V2 Graph Input/Output Types (for local skills)
+// Graph Input/Output Types (for local skills)
 // ============================================
 
 /**
- * Input passed to a V2 skill graph
+ * Input passed to a skill graph
  */
-export interface GraphInputV2 {
+export interface GraphInput {
   /** The action input */
   input: unknown;
   /** Which action to execute */
@@ -508,9 +443,9 @@ export interface GraphInputV2 {
 }
 
 /**
- * Result returned from a V2 skill graph
+ * Result returned from a skill graph
  */
-export interface GraphResultV2 {
+export interface GraphResult {
   /**
    * Response mode for this result.
    * Can override the manifest's default responseMode for this action.

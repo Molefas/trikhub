@@ -3,9 +3,7 @@ import { join, extname } from 'node:path';
 import ts from 'typescript';
 import {
   type SkillManifest,
-  type SkillManifestV2,
   validateManifest,
-  isManifestV2,
 } from '@saaas-poc/skill-manifest';
 import {
   type LintResult,
@@ -13,7 +11,7 @@ import {
   checkDynamicCodeExecution,
   checkUndeclaredTools,
   checkProcessEnvAccess,
-  // V2 rules
+  // Privilege separation rules
   checkNoFreeStringsInAgentData,
   checkTemplateFieldsExist,
   checkHasResponseTemplates,
@@ -50,23 +48,19 @@ export class SkillLinter {
   }
 
   /**
-   * Load and parse the manifest (V1 or V2)
+   * Load and parse the manifest
    */
-  private async loadManifest(skillPath: string): Promise<SkillManifest | SkillManifestV2> {
+  private async loadManifest(skillPath: string): Promise<SkillManifest> {
     const manifestPath = join(skillPath, 'manifest.json');
     const content = await readFile(manifestPath, 'utf-8');
     const data = JSON.parse(content);
 
-    // V2 manifests have 'actions' instead of 'inputSchema'/'outputSchema'
-    // Skip standard validation for V2 - we validate differently
-    if (!isManifestV2(data)) {
-      const validation = validateManifest(data);
-      if (!validation.valid) {
-        throw new Error(`Invalid manifest: ${validation.errors?.join(', ')}`);
-      }
+    const validation = validateManifest(data);
+    if (!validation.valid) {
+      throw new Error(`Invalid manifest: ${validation.errors?.join(', ')}`);
     }
 
-    return data as SkillManifest | SkillManifestV2;
+    return data as SkillManifest;
   }
 
   /**
@@ -97,14 +91,14 @@ export class SkillLinter {
   }
 
   /**
-   * Lint a skill (V1 or V2)
+   * Lint a skill
    */
   async lint(skillPath: string): Promise<LintResult[]> {
     const results: LintResult[] = [];
     const manifestPath = join(skillPath, 'manifest.json');
 
     // 1. Load and validate manifest
-    let manifest: SkillManifest | SkillManifestV2;
+    let manifest: SkillManifest;
     try {
       manifest = await this.loadManifest(skillPath);
     } catch (error) {
@@ -117,17 +111,15 @@ export class SkillLinter {
       return results;
     }
 
-    // 2. Check if V2 manifest and apply V2-specific rules
-    if (isManifestV2(manifest)) {
-      results.push(...this.lintV2Manifest(manifest, manifestPath));
-    } else {
-      // V1: Check manifest completeness
-      if (!this.shouldSkipRule('manifest-completeness')) {
-        results.push(...this.checkManifestCompleteness(manifest, skillPath));
-      }
+    // 2. Apply manifest-specific rules (privilege separation)
+    results.push(...this.lintManifest(manifest, manifestPath));
+
+    // 3. Check manifest completeness
+    if (!this.shouldSkipRule('manifest-completeness')) {
+      results.push(...this.checkManifestCompleteness(manifest, skillPath));
     }
 
-    // 3. Find and analyze source files
+    // 4. Find and analyze source files
     const sourceFiles = await this.findSourceFiles(skillPath);
 
     if (sourceFiles.length === 0) {
@@ -140,7 +132,7 @@ export class SkillLinter {
       return results;
     }
 
-    // 4. Check entry point exists
+    // 5. Check entry point exists
     const entryPath = join(skillPath, manifest.entry.module.replace('.js', '.ts'));
     if (!sourceFiles.some((f) => f.endsWith(entryPath.split('/').pop()!.replace('.js', '.ts')))) {
       results.push({
@@ -151,7 +143,7 @@ export class SkillLinter {
       });
     }
 
-    // 5. Analyze each source file
+    // 6. Analyze each source file
     for (const filePath of sourceFiles) {
       const content = await readFile(filePath, 'utf-8');
       const sourceFile = this.parseTypeScript(filePath, content);
@@ -190,9 +182,9 @@ export class SkillLinter {
   }
 
   /**
-   * Lint a V2 manifest with privilege separation rules
+   * Lint manifest with privilege separation rules
    */
-  private lintV2Manifest(manifest: SkillManifestV2, manifestPath: string): LintResult[] {
+  private lintManifest(manifest: SkillManifest, manifestPath: string): LintResult[] {
     const results: LintResult[] = [];
 
     // Core security rule: no free-form strings in agentDataSchema
