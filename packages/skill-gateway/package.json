@@ -8,6 +8,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./langchain": {
+      "import": "./dist/langchain/index.js",
+      "types": "./dist/langchain/index.d.ts"
     }
   },
   "scripts": {
@@ -17,5 +21,21 @@
   "dependencies": {
     "@saaas-poc/skill-manifest": "workspace:*",
     "ajv": "^8.17.1"
+  },
+  "devDependencies": {
+    "@langchain/core": "^0.3.0",
+    "zod": "^3.0.0"
+  },
+  "peerDependencies": {
+    "@langchain/core": ">=0.3.0",
+    "zod": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@langchain/core": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
+    }
   }
 }
