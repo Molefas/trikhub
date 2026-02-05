@@ -1,4 +1,4 @@
-# Software As An AI Skill - POC
+# Software As An AI Skill - SDK POC
 
 A framework for AI agents to safely consume third-party "skills" without prompt injection risks.
 
