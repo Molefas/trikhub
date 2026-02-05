@@ -2,7 +2,7 @@
   "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
   "changelog": ["@changesets/changelog-github", { "repo": "Muffles/saaas" }],
   "commit": false,
-  "fixed": [["@saaas/manifest", "@saaas/gateway", "@saaas/linter"]],
+  "fixed": [["@saaas-sdk/manifest", "@saaas-sdk/gateway", "@saaas-sdk/linter"]],
   "linked": [],
   "access": "public",
   "baseBranch": "main",

@@ -1,5 +1,5 @@
 {
-  "name": "@saaas/linter",
+  "name": "@saaas-sdk/linter",
   "version": "0.1.0",
   "description": "Linter and validator for AI skill manifests and handlers",
   "type": "module",
@@ -50,7 +50,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@saaas/manifest": "workspace:*",
+    "@saaas-sdk/manifest": "workspace:*",
     "typescript": "^5.5.0"
   }
 }

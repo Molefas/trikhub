@@ -37,4 +37,4 @@ export type {
   PassthroughContent,
   PassthroughDeliveryReceipt,
   UserContentReference,
-} from '@saaas/manifest';
+} from '@saaas-sdk/manifest';

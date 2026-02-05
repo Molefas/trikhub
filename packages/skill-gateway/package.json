@@ -1,5 +1,5 @@
 {
-  "name": "@saaas/gateway",
+  "name": "@saaas-sdk/gateway",
   "version": "0.1.0",
   "description": "Secure skill execution gateway for AI agents with prompt injection protection",
   "type": "module",
@@ -52,7 +52,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@saaas/manifest": "workspace:*",
+    "@saaas-sdk/manifest": "workspace:*",
     "ajv": "^8.17.1"
   },
   "devDependencies": {

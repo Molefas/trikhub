@@ -4,7 +4,7 @@ import ts from 'typescript';
 import {
   type SkillManifest,
   validateManifest,
-} from '@saaas/manifest';
+} from '@saaas-sdk/manifest';
 import {
   type LintResult,
   checkForbiddenImports,

@@ -38,10 +38,10 @@ importers:
       '@langchain/langgraph':
         specifier: ^0.2.0
         version: 0.2.74(@langchain/core@0.3.80)(zod-to-json-schema@3.25.1(zod@3.25.76))
-      '@saaas/gateway':
+      '@saaas-sdk/gateway':
         specifier: workspace:*
         version: link:../packages/skill-gateway
-      '@saaas/manifest':
+      '@saaas-sdk/manifest':
         specifier: workspace:*
         version: link:../packages/skill-manifest
       dotenv:
@@ -60,7 +60,7 @@ importers:
 
   packages/skill-gateway:
     dependencies:
-      '@saaas/manifest':
+      '@saaas-sdk/manifest':
         specifier: workspace:*
         version: link:../skill-manifest
       ajv:
@@ -76,7 +76,7 @@ importers:
 
   packages/skill-linter:
     dependencies:
-      '@saaas/manifest':
+      '@saaas-sdk/manifest':
         specifier: workspace:*
         version: link:../skill-manifest
       typescript:
@@ -100,13 +100,13 @@ importers:
       '@fastify/swagger-ui':
         specifier: ^5.2.1
         version: 5.2.5
-      '@saaas/gateway':
+      '@saaas-sdk/gateway':
         specifier: workspace:*
         version: link:../skill-gateway
-      '@saaas/linter':
+      '@saaas-sdk/linter':
         specifier: workspace:*
         version: link:../skill-linter
-      '@saaas/manifest':
+      '@saaas-sdk/manifest':
         specifier: workspace:*
         version: link:../skill-manifest
       fastify:

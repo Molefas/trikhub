@@ -16,9 +16,9 @@ pnpm test
 
 ```
 packages/
-├── skill-manifest/   # @saaas/manifest - Types and validation
-├── skill-gateway/    # @saaas/gateway - Core runtime
-└── skill-linter/     # @saaas/linter - Static analysis CLI
+├── skill-manifest/   # @saaas-sdk/manifest - Types and validation
+├── skill-gateway/    # @saaas-sdk/gateway - Core runtime
+└── skill-linter/     # @saaas-sdk/linter - Static analysis CLI
 example/              # Demo skills and agent
 ```
 
@@ -39,7 +39,7 @@ docs: clarify passthrough mode
 
 ### Changesets
 
-Any change to `@saaas/manifest`, `@saaas/gateway`, or `@saaas/linter` needs a changeset:
+Any change to `@saaas-sdk/manifest`, `@saaas-sdk/gateway`, or `@saaas-sdk/linter` needs a changeset:
 
 ```bash
 pnpm changeset

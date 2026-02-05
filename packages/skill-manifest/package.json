@@ -1,5 +1,5 @@
 {
-  "name": "@saaas/manifest",
+  "name": "@saaas-sdk/manifest",
   "version": "0.1.0",
   "description": "Type definitions and validation for AI skill manifests",
   "type": "module",
