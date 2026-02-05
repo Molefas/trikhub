@@ -1,6 +1,7 @@
 {
-  "name": "@saaas-poc/skill-manifest",
+  "name": "@saaas/manifest",
   "version": "0.1.0",
+  "description": "Type definitions and validation for AI skill manifests",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -9,6 +10,37 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "skill",
+    "manifest",
+    "validation",
+    "schema",
+    "typescript"
+  ],
+  "author": "Muffles",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Muffles/saaas.git",
+    "directory": "packages/skill-manifest"
+  },
+  "bugs": {
+    "url": "https://github.com/Muffles/saaas/issues"
+  },
+  "homepage": "https://github.com/Muffles/saaas/tree/main/packages/skill-manifest#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "scripts": {
     "build": "tsc",

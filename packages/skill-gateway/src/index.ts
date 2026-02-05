@@ -37,4 +37,4 @@ export type {
   PassthroughContent,
   PassthroughDeliveryReceipt,
   UserContentReference,
-} from '@saaas-poc/skill-manifest';
+} from '@saaas/manifest';

@@ -1,5 +1,5 @@
 import { z, type ZodTypeAny } from 'zod';
-import type { JSONSchema } from '@saaas-poc/skill-manifest';
+import type { JSONSchema } from '@saaas/manifest';
 
 export function jsonSchemaToZod(schema: JSONSchema, path: string = 'root'): ZodTypeAny {
   if (!schema.type && !schema.$ref) {

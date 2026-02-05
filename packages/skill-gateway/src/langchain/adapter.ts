@@ -1,7 +1,7 @@
 import { tool, type DynamicStructuredTool } from '@langchain/core/tools';
 import { z, type ZodTypeAny } from 'zod';
 import type { SkillGateway, ToolDefinition } from '../gateway.js';
-import type { PassthroughContent } from '@saaas-poc/skill-manifest';
+import type { PassthroughContent } from '@saaas/manifest';
 import { jsonSchemaToZod } from './schema-converter.js';
 
 export interface LangChainAdapterOptions {
