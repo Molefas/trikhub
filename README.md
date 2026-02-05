@@ -156,7 +156,7 @@ Checks for:
 pnpm test
 ```
 
-## Security Guarantees
+## Security (attempted) Guarantees
 
 This framework provides defense-in-depth against prompt injection:
 

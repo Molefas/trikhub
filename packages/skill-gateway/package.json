@@ -1,6 +1,7 @@
 {
-  "name": "@saaas-poc/skill-gateway",
+  "name": "@saaas/gateway",
   "version": "0.1.0",
+  "description": "Secure skill execution gateway for AI agents with prompt injection protection",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -14,12 +15,44 @@
       "types": "./dist/langchain/index.d.ts"
     }
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "skill",
+    "gateway",
+    "security",
+    "prompt-injection",
+    "langchain",
+    "typescript"
+  ],
+  "author": "Muffles",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Muffles/saaas.git",
+    "directory": "packages/skill-gateway"
+  },
+  "bugs": {
+    "url": "https://github.com/Muffles/saaas/issues"
+  },
+  "homepage": "https://github.com/Muffles/saaas/tree/main/packages/skill-gateway#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@saaas-poc/skill-manifest": "workspace:*",
+    "@saaas/manifest": "workspace:*",
     "ajv": "^8.17.1"
   },
   "devDependencies": {

@@ -1,5 +1,5 @@
 {
-  "name": "@saaas-poc/example",
+  "name": "@saaas/example",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -10,8 +10,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
-    "@saaas-poc/skill-gateway": "workspace:*",
-    "@saaas-poc/skill-manifest": "workspace:*",
+    "@saaas/gateway": "workspace:*",
+    "@saaas/manifest": "workspace:*",
     "@langchain/anthropic": "^0.3.0",
     "@langchain/core": "^0.3.0",
     "@langchain/langgraph": "^0.2.0",

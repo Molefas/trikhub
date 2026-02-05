@@ -1,17 +1,33 @@
 {
-  "name": "saaas-poc",
+  "name": "saaas",
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "description": "AI Skill Gateway - Secure skill execution for AI agents",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Muffles/saaas.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Muffles/saaas/issues"
+  },
+  "homepage": "https://github.com/Muffles/saaas#readme",
+  "author": "Muffles",
+  "license": "MIT",
   "scripts": {
     "build": "tsc -b",
     "clean": "rm -rf packages/*/dist packages/*/*.tsbuildinfo example/dist example/*.tsbuildinfo",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint:skill": "node packages/skill-linter/dist/cli.js"
+    "lint:skill": "node packages/skill-linter/dist/cli.js",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "pnpm build && changeset publish"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.27.0",
+    "@changesets/changelog-github": "^0.5.0",
     "@types/node": "^22.0.0",
     "typescript": "^5.5.0",
     "vitest": "^3.2.0"
