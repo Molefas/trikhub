@@ -5,8 +5,8 @@ import { ChatAnthropic } from '@langchain/anthropic';
 import { StateGraph, Annotation, END } from '@langchain/langgraph';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 import type { DynamicStructuredTool } from '@langchain/core/tools';
-import { SkillGateway } from '@saaas-poc/skill-gateway';
-import { createToolsFromGateway } from './tool-adapter.js';
+import { SkillGateway } from '@saaas-sdk/gateway';
+import { createLangChainTools } from '@saaas-sdk/gateway/langchain';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 config({ path: resolve(__dirname, '../.env') });
@@ -53,8 +53,7 @@ export class LangGraphAgent {
       console.log(`[Agent] Available actions: ${Object.keys(manifest.actions).join(', ')}`);
     }
 
-    this.tools = createToolsFromGateway({
-      gateway: this.gateway,
+    this.tools = createLangChainTools(this.gateway, {
       getSessionId: (skillId) => this.activeSessions.get(skillId),
       setSessionId: (skillId, sessionId) => this.activeSessions.set(skillId, sessionId),
       debug: this.debug,

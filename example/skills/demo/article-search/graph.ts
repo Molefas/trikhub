@@ -9,7 +9,7 @@
  * - details: Get article details by ID or natural language reference
  */
 
-import type { SessionHistoryEntry } from '@saaas-poc/skill-manifest';
+import type { SessionHistoryEntry } from '@saaas-sdk/manifest';
 import Anthropic from '@anthropic-ai/sdk';
 
 // Mock article database

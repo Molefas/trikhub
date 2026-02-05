@@ -1,99 +1,18 @@
 import { tool, type DynamicStructuredTool } from '@langchain/core/tools';
 import { z, type ZodTypeAny } from 'zod';
-import type { SkillGateway, ToolDefinition, JSONSchema } from '@saaas-poc/skill-gateway';
+import type { SkillGateway, ToolDefinition } from '../gateway.js';
+import type { PassthroughContent } from '@saaas-sdk/manifest';
+import { jsonSchemaToZod } from './schema-converter.js';
 
-export interface CreateToolsOptions {
-  gateway: SkillGateway;
+export interface LangChainAdapterOptions {
+  /** Get session ID for a skill (for multi-turn conversations) */
   getSessionId?: (skillId: string) => string | undefined;
+  /** Store session ID for a skill */
   setSessionId?: (skillId: string, sessionId: string) => void;
+  /** Callback when passthrough content is delivered */
+  onPassthrough?: (content: PassthroughContent) => void;
+  /** Enable debug logging */
   debug?: boolean;
-}
-
-function jsonSchemaToZod(schema: JSONSchema, path: string = 'root'): ZodTypeAny {
-  if (!schema.type && !schema.$ref) {
-    return z.unknown();
-  }
-
-  if (schema.type === 'string') {
-    let zodSchema = z.string();
-
-    if (schema.description) {
-      zodSchema = zodSchema.describe(schema.description);
-    }
-
-    if (schema.minLength !== undefined) {
-      zodSchema = zodSchema.min(schema.minLength);
-    }
-    if (schema.maxLength !== undefined) {
-      zodSchema = zodSchema.max(schema.maxLength);
-    }
-    if (schema.pattern !== undefined) {
-      zodSchema = zodSchema.regex(new RegExp(schema.pattern));
-    }
-
-    if (schema.enum && schema.enum.length > 0) {
-      return z.enum(schema.enum as [string, ...string[]]).describe(schema.description || '');
-    }
-
-    return zodSchema;
-  }
-
-  if (schema.type === 'number' || schema.type === 'integer') {
-    let zodSchema = schema.type === 'integer' ? z.number().int() : z.number();
-
-    if (schema.description) {
-      zodSchema = zodSchema.describe(schema.description);
-    }
-    if (schema.minimum !== undefined) {
-      zodSchema = zodSchema.min(schema.minimum);
-    }
-    if (schema.maximum !== undefined) {
-      zodSchema = zodSchema.max(schema.maximum);
-    }
-
-    return zodSchema;
-  }
-
-  if (schema.type === 'boolean') {
-    let zodSchema = z.boolean();
-    if (schema.description) {
-      zodSchema = zodSchema.describe(schema.description);
-    }
-    return zodSchema;
-  }
-
-  if (schema.type === 'array') {
-    const itemSchema = schema.items ? jsonSchemaToZod(schema.items, `${path}.items`) : z.unknown();
-    let zodSchema = z.array(itemSchema);
-    if (schema.description) {
-      zodSchema = zodSchema.describe(schema.description);
-    }
-    return zodSchema;
-  }
-
-  if (schema.type === 'object') {
-    const shape: Record<string, ZodTypeAny> = {};
-
-    if (schema.properties) {
-      for (const [key, propSchema] of Object.entries(schema.properties)) {
-        const propZod = jsonSchemaToZod(propSchema as JSONSchema, `${path}.${key}`);
-
-        if (!schema.required?.includes(key)) {
-          shape[key] = propZod.optional();
-        } else {
-          shape[key] = propZod;
-        }
-      }
-    }
-
-    let zodSchema = z.object(shape);
-    if (schema.description) {
-      zodSchema = zodSchema.describe(schema.description);
-    }
-    return zodSchema;
-  }
-
-  return z.unknown();
 }
 
 function fillTemplate(template: string, data: Record<string, unknown>): string {
@@ -123,9 +42,10 @@ export function parseToolName(toolName: string): { skillId: string; actionName: 
 
 function createToolFromDefinition(
   toolDef: ToolDefinition,
-  options: CreateToolsOptions
+  gateway: SkillGateway,
+  options: LangChainAdapterOptions
 ): DynamicStructuredTool {
-  const { gateway, getSessionId, setSessionId, debug } = options;
+  const { getSessionId, setSessionId, onPassthrough, debug } = options;
   const langChainName = toToolName(toolDef.name);
 
   const [skillIdPart, actionName] = toolDef.name.split(':');
@@ -175,6 +95,10 @@ function createToolFromDefinition(
           console.log(`[Tool] Auto-delivered passthrough content: ${delivery.receipt.contentType}`);
         }
 
+        if (onPassthrough) {
+          onPassthrough(delivery.content);
+        }
+
         return JSON.stringify({
           success: true,
           response: 'Content delivered.',
@@ -203,18 +127,21 @@ function createToolFromDefinition(
   );
 }
 
-export function createToolsFromGateway(options: CreateToolsOptions): DynamicStructuredTool[] {
-  const { gateway, debug } = options;
+export function createLangChainTools(
+  gateway: SkillGateway,
+  options: LangChainAdapterOptions = {}
+): DynamicStructuredTool[] {
+  const { debug } = options;
   const toolDefs = gateway.getToolDefinitions();
 
   if (debug) {
-    console.log(`[ToolAdapter] Creating ${toolDefs.length} tools from gateway:`);
+    console.log(`[LangChainAdapter] Creating ${toolDefs.length} tools from gateway:`);
     for (const def of toolDefs) {
       console.log(`  - ${def.name} (${def.responseMode})`);
     }
   }
 
-  return toolDefs.map((def) => createToolFromDefinition(def, options));
+  return toolDefs.map((def) => createToolFromDefinition(def, gateway, options));
 }
 
 export function getToolNameMap(gateway: SkillGateway): Map<string, string> {
