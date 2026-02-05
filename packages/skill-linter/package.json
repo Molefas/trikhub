@@ -1,6 +1,6 @@
 {
   "name": "@saaas-sdk/linter",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Linter and validator for AI skill manifests and handlers",
   "type": "module",
   "main": "./dist/index.js",

@@ -1,6 +1,6 @@
 {
   "name": "@saaas-sdk/gateway",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Secure skill execution gateway for AI agents with prompt injection protection",
   "type": "module",
   "main": "./dist/index.js",
