@@ -1,6 +1,7 @@
 {
-  "name": "@saaas-poc/skill-linter",
+  "name": "@saaas-sdk/linter",
   "version": "0.1.0",
+  "description": "Linter and validator for AI skill manifests and handlers",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,12 +14,43 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "skill",
+    "linter",
+    "validator",
+    "cli",
+    "typescript"
+  ],
+  "author": "Muffles",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Muffles/saaas.git",
+    "directory": "packages/skill-linter"
+  },
+  "bugs": {
+    "url": "https://github.com/Muffles/saaas/issues"
+  },
+  "homepage": "https://github.com/Muffles/saaas/tree/main/packages/skill-linter#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@saaas-poc/skill-manifest": "workspace:*",
+    "@saaas-sdk/manifest": "workspace:*",
     "typescript": "^5.5.0"
   }
 }

@@ -2,7 +2,7 @@ import type {
   SkillSession,
   SessionHistoryEntry,
   SessionCapabilities,
-} from '@saaas-poc/skill-manifest';
+} from '@saaas-sdk/manifest';
 
 /**
  * Interface for session storage implementations

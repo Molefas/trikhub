@@ -258,7 +258,7 @@ export function checkProcessEnvAccess(sourceFile: ts.SourceFile): LintResult[] {
 // Linter Rules: Type-Directed Privilege Separation
 // ============================================
 
-import type { JSONSchema, SkillManifest } from '@saaas-poc/skill-manifest';
+import type { JSONSchema, SkillManifest } from '@saaas-sdk/manifest';
 
 /**
  * Allowed string formats in agentDataSchema.

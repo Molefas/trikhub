@@ -27,3 +27,12 @@ pnpm-debug.log*
 
 # Test coverage
 coverage/
+
+# Local review documents
+SECURITY_REVIEW.md
+
+# Local skill server (not part of main repo)
+packages/skill-server/
+
+# Local plan file
+PLAN.md

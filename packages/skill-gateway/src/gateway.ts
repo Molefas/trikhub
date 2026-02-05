@@ -19,7 +19,7 @@ import {
   type SessionHistoryEntry,
   validateManifest,
   SchemaValidator,
-} from '@saaas-poc/skill-manifest';
+} from '@saaas-sdk/manifest';
 import { type SessionStorage, InMemorySessionStorage } from './session-storage.js';
 
 interface SkillInput {
@@ -70,7 +70,7 @@ interface LoadedSkill {
 export interface ToolDefinition {
   name: string;
   description: string;
-  inputSchema: import('@saaas-poc/skill-manifest').JSONSchema;
+  inputSchema: import('@saaas-sdk/manifest').JSONSchema;
   responseMode: ResponseMode;
   isGatewayTool?: boolean;
 }
