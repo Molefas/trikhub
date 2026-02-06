@@ -91,6 +91,57 @@ export class SkillLinter {
   }
 
   /**
+   * Lint only the manifest (for downloaded/compiled skills without TypeScript source)
+   *
+   * This validates:
+   * - Manifest structure and required fields
+   * - Privilege separation rules (no free strings in agentData)
+   * - Template field existence
+   * - Response templates presence
+   *
+   * This does NOT validate:
+   * - Source code (forbidden imports, eval, etc.)
+   * - Entry point existence as TypeScript
+   */
+  async lintManifestOnly(skillPath: string): Promise<LintResult[]> {
+    const results: LintResult[] = [];
+    const manifestPath = join(skillPath, 'manifest.json');
+
+    // 1. Load and validate manifest
+    let manifest: SkillManifest;
+    try {
+      manifest = await this.loadManifest(skillPath);
+    } catch (error) {
+      results.push({
+        rule: 'valid-manifest',
+        severity: 'error',
+        message: error instanceof Error ? error.message : 'Failed to load manifest',
+        file: manifestPath,
+      });
+      return results;
+    }
+
+    // 2. Apply manifest-specific rules (privilege separation)
+    results.push(...this.lintManifest(manifest, manifestPath));
+
+    // 3. Check manifest completeness
+    if (!this.shouldSkipRule('manifest-completeness')) {
+      results.push(...this.checkManifestCompleteness(manifest, skillPath));
+    }
+
+    // Apply warningsAsErrors if configured
+    if (this.config.warningsAsErrors) {
+      for (const result of results) {
+        if (result.severity === 'warning') {
+          result.severity = 'error';
+        }
+      }
+    }
+
+    return results;
+  }
+
+  /**
    * Lint a skill
    */
   async lint(skillPath: string): Promise<LintResult[]> {

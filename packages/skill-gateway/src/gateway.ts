@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile, readdir, stat } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import {
   type SkillManifest,
@@ -51,6 +52,12 @@ export interface SkillGatewayConfig {
     questions: ClarificationQuestion[]
   ) => Promise<ClarificationAnswer[]>;
   sessionStorage?: SessionStorage;
+  /**
+   * Directory containing installed triks (skills) for auto-discovery.
+   * Supports scoped directory structure: triksDirectory/@scope/trik-name/
+   * Use '~' for home directory (e.g., '~/.trikhub/triks')
+   */
+  triksDirectory?: string;
 }
 
 export interface ExecuteSkillOptions {
@@ -132,6 +139,110 @@ export class SkillGateway {
     this.skills.set(manifest.id, { manifest, graph, path: skillPath });
 
     return manifest;
+  }
+
+  /**
+   * Load all skills from a directory.
+   * Supports scoped directory structure: directory/@scope/skill-name/
+   *
+   * @param directory - Path to the directory containing skills.
+   *                   Use '~' prefix for home directory (e.g., '~/.trikhub/triks')
+   * @returns Array of successfully loaded manifests
+   */
+  async loadSkillsFromDirectory(directory: string): Promise<SkillManifest[]> {
+    // Resolve ~ to home directory
+    const resolvedDir = directory.startsWith('~')
+      ? join(homedir(), directory.slice(1))
+      : resolve(directory);
+
+    const manifests: SkillManifest[] = [];
+    const errors: Array<{ path: string; error: string }> = [];
+
+    try {
+      const entries = await readdir(resolvedDir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+
+        const entryPath = join(resolvedDir, entry.name);
+
+        // Check if this is a scoped directory (starts with @)
+        if (entry.name.startsWith('@')) {
+          // Scoped directory: @scope/skill-name structure
+          const scopedEntries = await readdir(entryPath, { withFileTypes: true });
+
+          for (const scopedEntry of scopedEntries) {
+            if (!scopedEntry.isDirectory()) continue;
+
+            const skillPath = join(entryPath, scopedEntry.name);
+            const manifestPath = join(skillPath, 'manifest.json');
+
+            try {
+              const manifestStat = await stat(manifestPath);
+              if (manifestStat.isFile()) {
+                const manifest = await this.loadSkill(skillPath);
+                manifests.push(manifest);
+              }
+            } catch (error) {
+              // Skill failed to load, record error but continue
+              errors.push({
+                path: skillPath,
+                error: error instanceof Error ? error.message : 'Unknown error',
+              });
+            }
+          }
+        } else {
+          // Non-scoped directory: direct skill-name structure
+          const skillPath = entryPath;
+          const manifestPath = join(skillPath, 'manifest.json');
+
+          try {
+            const manifestStat = await stat(manifestPath);
+            if (manifestStat.isFile()) {
+              const manifest = await this.loadSkill(skillPath);
+              manifests.push(manifest);
+            }
+          } catch (error) {
+            // Skill failed to load, record error but continue
+            errors.push({
+              path: skillPath,
+              error: error instanceof Error ? error.message : 'Unknown error',
+            });
+          }
+        }
+      }
+    } catch (error) {
+      // Directory doesn't exist or isn't readable - not necessarily an error
+      // (e.g., user hasn't installed any triks yet)
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw new Error(
+          `Failed to read skills directory "${resolvedDir}": ${
+            error instanceof Error ? error.message : 'Unknown error'
+          }`
+        );
+      }
+    }
+
+    // Log errors for debugging (skills that failed to load)
+    if (errors.length > 0) {
+      console.warn(`[SkillGateway] Failed to load ${errors.length} skill(s):`);
+      for (const { path, error } of errors) {
+        console.warn(`  - ${path}: ${error}`);
+      }
+    }
+
+    return manifests;
+  }
+
+  /**
+   * Load skills from the configured triksDirectory (if set).
+   * This is a convenience method for loading the default TrikHub directory.
+   */
+  async loadInstalledTriks(): Promise<SkillManifest[]> {
+    if (!this.config.triksDirectory) {
+      return [];
+    }
+    return this.loadSkillsFromDirectory(this.config.triksDirectory);
   }
 
   getManifest(skillId: string): SkillManifest | undefined {

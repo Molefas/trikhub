@@ -42,9 +42,85 @@ The agent reasons over safe structured data. Free text bypasses the agent entire
                     └─────────────────────────────┘
 ```
 
-## Quick Start
+## Installation
 
 ```bash
+npm install @saaas-sdk/gateway
+# or
+pnpm add @saaas-sdk/gateway
+```
+
+The gateway package includes everything needed to load and execute skills. For manifest types only:
+
+```bash
+npm install @saaas-sdk/manifest
+```
+
+For the static analysis CLI:
+
+```bash
+npm install -D @saaas-sdk/linter
+```
+
+## Integration Options
+
+Choose the integration approach based on your agent's runtime environment:
+
+### Option 1: In-Process (Node.js Only)
+
+Use `@saaas-sdk/gateway/langchain` when your agent runs in the **same Node.js process** as the gateway. This provides direct function calls with no network overhead.
+
+```typescript
+import { SkillGateway } from '@saaas-sdk/gateway';
+import { createLangChainTools } from '@saaas-sdk/gateway/langchain';
+
+const gateway = new SkillGateway({ skills: [...] });
+const tools = createLangChainTools(gateway, { /* options */ });
+
+// Tools call gateway.execute() directly - same memory, no HTTP
+const model = new ChatAnthropic().bindTools(tools);
+```
+
+**Use this when**: Your agent is a Node.js/TypeScript application using LangChain JS or LangGraph JS.
+
+### Option 2: HTTP Server (Any Language)
+
+Use `@saaas-sdk/server` when your agent is written in **Python, Go, or any other language**, or runs in a separate process. The gateway runs as an HTTP service that any client can consume.
+
+```
+┌─────────────────────────┐         HTTP          ┌─────────────────────────┐
+│   skill-server (Node)   │◄──────────────────────│   Your Agent (Python)   │
+│   └── SkillGateway      │      JSON API         │   └── LangChain Python  │
+└─────────────────────────┘                       └─────────────────────────┘
+```
+
+```python
+# Python client creates its own LangChain tools that wrap HTTP calls
+from gateway_client import GatewayClient
+from langgraph_tools import SkillToolAdapter
+
+client = GatewayClient("http://localhost:3000")
+tools = SkillToolAdapter(client).create_tools()
+
+# Tools make HTTP requests to the gateway - language agnostic
+llm = ChatAnthropic().bind_tools(tools)
+```
+
+**Use this when**:
+
+- Your agent is written in Python or another non-Node.js language
+- Your agent runs in a separate process or container
+- You want to share one gateway across multiple agents
+
+See [packages/skill-server](packages/skill-server) for the HTTP server and [Python examples](packages/skill-server/examples/python) for client integration.
+
+## Quick Start (Development)
+
+To run the example locally:
+
+```bash
+git clone https://github.com/Muffles/saaas-sdk.git
+cd saaas-sdk
 pnpm install
 pnpm build
 
