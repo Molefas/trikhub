@@ -3,17 +3,17 @@ import {
   validateManifest,
   validateData,
   SchemaValidator,
-  type SkillManifest,
-} from '../packages/skill-manifest/src/index.js';
+  type TrikManifest,
+} from '../packages/trik-manifest/src/index.js';
 
-describe('skill-manifest', () => {
+describe('trik-manifest', () => {
   describe('validateManifest', () => {
     // Proves: Well-formed manifests with actions pass validation
     it('should validate a complete manifest', () => {
-      const manifest: SkillManifest = {
-        id: 'test-skill',
-        name: 'Test Skill',
-        description: 'A test skill',
+      const manifest: TrikManifest = {
+        id: 'test-trik',
+        name: 'Test Trik',
+        description: 'A test trik',
         version: '1.0.0',
         actions: {
           search: {
@@ -35,7 +35,7 @@ describe('skill-manifest', () => {
     // Proves: Incomplete manifests are rejected (all required fields enforced)
     it('should reject manifest with missing required fields', () => {
       const manifest = {
-        id: 'test-skill',
+        id: 'test-trik',
         // missing other required fields
       };
 
@@ -48,7 +48,7 @@ describe('skill-manifest', () => {
     // Proves: Version format is validated (prevents malformed manifests)
     it('should reject manifest with invalid version format', () => {
       const manifest = {
-        id: 'test-skill',
+        id: 'test-trik',
         name: 'Test',
         description: 'Test',
         version: 'not-semver', // invalid
@@ -72,7 +72,7 @@ describe('skill-manifest', () => {
     // Proves: Template mode requires agentDataSchema and responseTemplates
     it('should reject template mode action without agentDataSchema', () => {
       const manifest = {
-        id: 'test-skill',
+        id: 'test-trik',
         name: 'Test',
         description: 'Test',
         version: '1.0.0',
@@ -95,7 +95,7 @@ describe('skill-manifest', () => {
     // Proves: Passthrough mode requires userContentSchema
     it('should reject passthrough mode action without userContentSchema', () => {
       const manifest = {
-        id: 'test-skill',
+        id: 'test-trik',
         name: 'Test',
         description: 'Test',
         version: '1.0.0',
@@ -118,7 +118,7 @@ describe('skill-manifest', () => {
     // Proves: Valid passthrough mode manifest passes
     it('should validate passthrough mode action with userContentSchema', () => {
       const manifest = {
-        id: 'test-skill',
+        id: 'test-trik',
         name: 'Test',
         description: 'Test',
         version: '1.0.0',

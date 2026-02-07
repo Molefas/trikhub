@@ -1,0 +1,57 @@
+{
+  "name": "@trikhub/linter",
+  "version": "0.1.0",
+  "description": "Linter and validator for trik manifests and handlers",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "trik-lint": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "trik",
+    "linter",
+    "validator",
+    "cli",
+    "typescript",
+    "trikhub"
+  ],
+  "author": "Muffles",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Muffles/trikhub.git",
+    "directory": "packages/trik-linter"
+  },
+  "bugs": {
+    "url": "https://github.com/Muffles/trikhub/issues"
+  },
+  "homepage": "https://github.com/Muffles/trikhub/tree/main/packages/trik-linter#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@trikhub/manifest": "workspace:*",
+    "typescript": "^5.5.0"
+  }
+}
