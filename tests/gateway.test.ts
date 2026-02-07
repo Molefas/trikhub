@@ -1,46 +1,46 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SkillGateway } from '../packages/skill-gateway/src/gateway.js';
+import { TrikGateway } from '../packages/trik-gateway/src/gateway.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
-describe('SkillGateway', () => {
-  let gateway: SkillGateway;
+describe('TrikGateway', () => {
+  let gateway: TrikGateway;
 
   beforeEach(() => {
-    gateway = new SkillGateway();
+    gateway = new TrikGateway();
   });
 
-  describe('loadSkill', () => {
-    // Proves: Gateway can load and register skills with valid manifests
-    it('should load a valid skill', async () => {
-      const manifest = await gateway.loadSkill(join(__dirname, 'fixtures/template-skill'));
+  describe('loadTrik', () => {
+    // Proves: Gateway can load and register triks with valid manifests
+    it('should load a valid trik', async () => {
+      const manifest = await gateway.loadTrik(join(__dirname, 'fixtures/template-trik'));
 
-      expect(manifest.id).toBe('template-skill');
-      expect(gateway.isLoaded('template-skill')).toBe(true);
+      expect(manifest.id).toBe('template-trik');
+      expect(gateway.isLoaded('template-trik')).toBe(true);
     });
 
-    // Proves: Allowlist enforcement - only explicitly allowed skills can be loaded
-    it('should reject skill not in allowlist', async () => {
-      const restrictedGateway = new SkillGateway({
-        allowedSkills: ['other-skill'],
+    // Proves: Allowlist enforcement - only explicitly allowed triks can be loaded
+    it('should reject trik not in allowlist', async () => {
+      const restrictedGateway = new TrikGateway({
+        allowedTriks: ['other-trik'],
       });
 
       await expect(
-        restrictedGateway.loadSkill(join(__dirname, 'fixtures/template-skill'))
+        restrictedGateway.loadTrik(join(__dirname, 'fixtures/template-trik'))
       ).rejects.toThrow('not in the allowlist');
     });
   });
 
   describe('template mode', () => {
     beforeEach(async () => {
-      await gateway.loadSkill(join(__dirname, 'fixtures/template-skill'));
+      await gateway.loadTrik(join(__dirname, 'fixtures/template-trik'));
     });
 
     // Proves: Template mode returns structured agentData (safe for agent reasoning)
     it('should return agentData for template mode actions', async () => {
-      const result = await gateway.execute('template-skill', 'search', { topic: 'AI' });
+      const result = await gateway.execute('template-trik', 'search', { topic: 'AI' });
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -50,9 +50,9 @@ describe('SkillGateway', () => {
       }
     });
 
-    // Proves: Agent receives pre-defined template text to fill (not arbitrary skill output)
+    // Proves: Agent receives pre-defined template text to fill (not arbitrary trik output)
     it('should include templateText when template is specified', async () => {
-      const result = await gateway.execute('template-skill', 'search', { topic: 'AI' });
+      const result = await gateway.execute('template-trik', 'search', { topic: 'AI' });
 
       expect(result.success).toBe(true);
       if (result.success && result.responseMode === 'template') {
@@ -60,9 +60,9 @@ describe('SkillGateway', () => {
       }
     });
 
-    // Proves: Runtime validation rejects skills returning malformed agentData
+    // Proves: Runtime validation rejects triks returning malformed agentData
     it('should validate agentData against schema', async () => {
-      const result = await gateway.execute('template-skill', 'badOutput', {});
+      const result = await gateway.execute('template-trik', 'badOutput', {});
 
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -74,12 +74,12 @@ describe('SkillGateway', () => {
 
   describe('passthrough mode', () => {
     beforeEach(async () => {
-      await gateway.loadSkill(join(__dirname, 'fixtures/passthrough-skill'));
+      await gateway.loadTrik(join(__dirname, 'fixtures/passthrough-trik'));
     });
 
     // Proves: Passthrough content is NOT exposed to agent - only a reference is returned
     it('should return content reference, not raw content', async () => {
-      const result = await gateway.execute('passthrough-skill', 'details', { id: 'article-1' });
+      const result = await gateway.execute('passthrough-trik', 'details', { id: 'article-1' });
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -93,7 +93,7 @@ describe('SkillGateway', () => {
 
     // Proves: Content can be retrieved separately for user display (bypassing agent)
     it('should deliver content via deliverContent()', async () => {
-      const result = await gateway.execute('passthrough-skill', 'details', { id: 'article-1' });
+      const result = await gateway.execute('passthrough-trik', 'details', { id: 'article-1' });
 
       expect(result.success).toBe(true);
       if (result.success && result.responseMode === 'passthrough') {
@@ -108,7 +108,7 @@ describe('SkillGateway', () => {
 
     // Proves: Content references are single-use (prevents replay attacks)
     it('should only allow one-time delivery', async () => {
-      const result = await gateway.execute('passthrough-skill', 'details', { id: 'article-1' });
+      const result = await gateway.execute('passthrough-trik', 'details', { id: 'article-1' });
 
       if (result.success && result.responseMode === 'passthrough') {
         const ref = (result as { userContentRef: string }).userContentRef;
@@ -126,13 +126,13 @@ describe('SkillGateway', () => {
 
   describe('input validation', () => {
     beforeEach(async () => {
-      await gateway.loadSkill(join(__dirname, 'fixtures/passthrough-skill'));
+      await gateway.loadTrik(join(__dirname, 'fixtures/passthrough-trik'));
     });
 
-    // Proves: Input schema validation prevents malformed requests from reaching skills
+    // Proves: Input schema validation prevents malformed requests from reaching triks
     it('should reject input not matching schema', async () => {
       // 'id' is required but not provided
-      const result = await gateway.execute('passthrough-skill', 'details', {});
+      const result = await gateway.execute('passthrough-trik', 'details', {});
 
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -140,9 +140,9 @@ describe('SkillGateway', () => {
       }
     });
 
-    // Proves: Only declared actions can be invoked (no arbitrary skill method calls)
+    // Proves: Only declared actions can be invoked (no arbitrary trik method calls)
     it('should reject unknown action', async () => {
-      const result = await gateway.execute('passthrough-skill', 'unknown-action', {});
+      const result = await gateway.execute('passthrough-trik', 'unknown-action', {});
 
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -154,12 +154,12 @@ describe('SkillGateway', () => {
 
   describe('session management', () => {
     beforeEach(async () => {
-      await gateway.loadSkill(join(__dirname, 'fixtures/passthrough-skill'));
+      await gateway.loadTrik(join(__dirname, 'fixtures/passthrough-trik'));
     });
 
-    // Proves: Session-enabled skills get unique session identifiers
-    it('should create session for session-enabled skills', async () => {
-      const result = await gateway.execute('passthrough-skill', 'details', { id: 'article-1' });
+    // Proves: Session-enabled triks get unique session identifiers
+    it('should create session for session-enabled triks', async () => {
+      const result = await gateway.execute('passthrough-trik', 'details', { id: 'article-1' });
 
       expect(result.success).toBe(true);
       expect((result as { sessionId?: string }).sessionId).toBeDefined();
@@ -167,14 +167,14 @@ describe('SkillGateway', () => {
 
     // Proves: Sessions persist across multiple calls for stateful interactions
     it('should maintain session across calls', async () => {
-      const r1 = await gateway.execute('passthrough-skill', 'details', { id: 'article-1' });
+      const r1 = await gateway.execute('passthrough-trik', 'details', { id: 'article-1' });
 
       expect(r1.success).toBe(true);
       const sessionId = (r1 as { sessionId?: string }).sessionId;
       expect(sessionId).toBeDefined();
 
       // Second call with same session
-      const r2 = await gateway.execute('passthrough-skill', 'details', { id: 'article-2' }, {
+      const r2 = await gateway.execute('passthrough-trik', 'details', { id: 'article-2' }, {
         sessionId,
       });
 
@@ -183,14 +183,14 @@ describe('SkillGateway', () => {
     });
   });
 
-  describe('skill not loaded', () => {
-    // Proves: Gateway rejects execution of unregistered skills
-    it('should return error for unloaded skill', async () => {
-      const result = await gateway.execute('nonexistent-skill', 'action', {});
+  describe('trik not loaded', () => {
+    // Proves: Gateway rejects execution of unregistered triks
+    it('should return error for unloaded trik', async () => {
+      const result = await gateway.execute('nonexistent-trik', 'action', {});
 
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.code).toBe('SKILL_NOT_FOUND');
+        expect(result.code).toBe('TRIK_NOT_FOUND');
       }
     });
   });

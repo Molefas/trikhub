@@ -1,9 +1,9 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/skill-manifest" },
-    { "path": "packages/skill-gateway" },
-    { "path": "packages/skill-linter" },
+    { "path": "packages/trik-manifest" },
+    { "path": "packages/trik-gateway" },
+    { "path": "packages/trik-linter" },
     { "path": "example" }
   ]
 }
