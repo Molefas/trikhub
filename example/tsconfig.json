@@ -10,6 +10,6 @@
     "rootDir": ".",
     "declaration": true
   },
-  "include": ["*.ts", "skills/**/*.ts"],
+  "include": ["*.ts", "triks/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

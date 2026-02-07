@@ -1,7 +1,7 @@
 ---
-"@saaas-sdk/manifest": minor
-"@saaas-sdk/gateway": minor
-"@saaas-sdk/linter": minor
+"@trikhub/manifest": minor
+"@trikhub/gateway": minor
+"@trikhub/linter": minor
 ---
 
 initial release

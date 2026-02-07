@@ -1,5 +1,5 @@
 {
-  "name": "@saaas-sdk/example",
+  "name": "@trikhub/example",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -10,8 +10,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
-    "@saaas-sdk/gateway": "workspace:*",
-    "@saaas-sdk/manifest": "workspace:*",
+    "@trikhub/gateway": "workspace:*",
+    "@trikhub/manifest": "workspace:*",
     "@langchain/anthropic": "^0.3.0",
     "@langchain/core": "^0.3.0",
     "@langchain/langgraph": "^0.2.0",

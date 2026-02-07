@@ -1,17 +1,17 @@
 {
-  "name": "saaas",
+  "name": "trikhub",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "AI Skill Gateway - Secure skill execution for AI agents",
+  "description": "TrikHub SDK - Secure trik execution for AI agents",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Muffles/saaas.git"
+    "url": "git+https://github.com/Muffles/trikhub.git"
   },
   "bugs": {
-    "url": "https://github.com/Muffles/saaas/issues"
+    "url": "https://github.com/Muffles/trikhub/issues"
   },
-  "homepage": "https://github.com/Muffles/saaas#readme",
+  "homepage": "https://github.com/Muffles/trikhub#readme",
   "author": "Muffles",
   "license": "MIT",
   "scripts": {
@@ -20,7 +20,7 @@
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint:skill": "node packages/skill-linter/dist/cli.js",
+    "lint:trik": "node packages/trik-linter/dist/cli.js",
     "changeset": "changeset",
     "version": "changeset version",
     "release": "pnpm build && changeset publish"

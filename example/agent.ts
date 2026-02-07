@@ -5,8 +5,8 @@ import { ChatAnthropic } from '@langchain/anthropic';
 import { StateGraph, Annotation, END } from '@langchain/langgraph';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 import type { DynamicStructuredTool } from '@langchain/core/tools';
-import { SkillGateway } from '@saaas-sdk/gateway';
-import { createLangChainTools } from '@saaas-sdk/gateway/langchain';
+import { TrikGateway } from '@trikhub/gateway';
+import { createLangChainTools } from '@trikhub/gateway/langchain';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 config({ path: resolve(__dirname, '../.env') });
@@ -17,45 +17,45 @@ const AgentState = Annotation.Root({
     reducer: (curr, update) => [...curr, ...update],
     default: () => [],
   }),
-  nextAction: Annotation<'call_skill' | 'respond' | null>,
+  nextAction: Annotation<'call_trik' | 'respond' | null>,
   response: Annotation<string | null>,
 });
 
 export interface AgentConfig {
-  skillPath?: string;
+  trikPath?: string;
   debug?: boolean;
 }
 
 export class LangGraphAgent {
-  private gateway: SkillGateway;
+  private gateway: TrikGateway;
   private graph: ReturnType<typeof this.buildGraph> | null = null;
   private tools: DynamicStructuredTool[] = [];
   private debug: boolean;
-  private skillPath: string;
+  private trikPath: string;
   private activeSessions = new Map<string, string>();
   private conversationHistory: (HumanMessage | AIMessage | SystemMessage | ToolMessage)[] = [];
 
   constructor(config: AgentConfig = {}) {
-    this.gateway = new SkillGateway();
+    this.gateway = new TrikGateway();
     this.debug = config.debug ?? false;
-    this.skillPath = config.skillPath ?? resolve(__dirname, 'skills/demo/article-search');
+    this.trikPath = config.trikPath ?? resolve(__dirname, 'triks/demo/article-search');
   }
 
   async initialize(): Promise<void> {
     if (this.debug) {
-      console.log(`[Agent] Loading skill from ${this.skillPath}...`);
+      console.log(`[Agent] Loading trik from ${this.trikPath}...`);
     }
 
-    const manifest = await this.gateway.loadSkill(this.skillPath);
+    const manifest = await this.gateway.loadTrik(this.trikPath);
 
     if (this.debug) {
-      console.log(`[Agent] Loaded skill: ${manifest.id}`);
+      console.log(`[Agent] Loaded trik: ${manifest.id}`);
       console.log(`[Agent] Available actions: ${Object.keys(manifest.actions).join(', ')}`);
     }
 
     this.tools = createLangChainTools(this.gateway, {
-      getSessionId: (skillId) => this.activeSessions.get(skillId),
-      setSessionId: (skillId, sessionId) => this.activeSessions.set(skillId, sessionId),
+      getSessionId: (trikId) => this.activeSessions.get(trikId),
+      setSessionId: (trikId, sessionId) => this.activeSessions.set(trikId, sessionId),
       debug: this.debug,
     });
 
@@ -66,7 +66,7 @@ export class LangGraphAgent {
     this.graph = this.buildGraph();
 
     if (this.debug) {
-      console.log('[Agent] LangGraph initialized with nodes: decisionNode, executeSkill');
+      console.log('[Agent] LangGraph initialized with nodes: decisionNode, executeTrik');
     }
   }
 
@@ -88,12 +88,12 @@ export class LangGraphAgent {
         console.log('[Decision] Processing user message...');
       }
 
-      const systemPrompt = `You are an AI assistant with access to skills via tools.
+      const systemPrompt = `You are an AI assistant with access to triks via tools.
 
 AVAILABLE TOOLS:
 ${toolDescriptions}
 
-When you call a skill, you'll receive a response field with ready-to-use text.
+When you call a trik, you'll receive a response field with ready-to-use text.
 Present this response to the user. That's it - no special handling needed.`;
 
       const messages = [
@@ -110,7 +110,7 @@ Present this response to the user. That's it - no special handling needed.`;
       if (response.tool_calls && response.tool_calls.length > 0) {
         return {
           messages: [response],
-          nextAction: 'call_skill' as const,
+          nextAction: 'call_trik' as const,
         };
       }
 
@@ -127,9 +127,9 @@ Present this response to the user. That's it - no special handling needed.`;
       };
     }
 
-    async function executeSkillNode(state: typeof AgentState.State) {
+    async function executeTrikNode(state: typeof AgentState.State) {
       if (self.debug) {
-        console.log('\n--- EXECUTE SKILL NODE ---');
+        console.log('\n--- EXECUTE TRIK NODE ---');
       }
 
       const lastMessage = state.messages[state.messages.length - 1];
@@ -140,8 +140,8 @@ Present this response to the user. That's it - no special handling needed.`;
       const toolCall = lastMessage.tool_calls[0];
 
       if (self.debug) {
-        console.log(`[ExecuteSkill] Calling tool: ${toolCall.name}`);
-        console.log(`[ExecuteSkill] Arguments: ${JSON.stringify(toolCall.args)}`);
+        console.log(`[ExecuteTrik] Calling tool: ${toolCall.name}`);
+        console.log(`[ExecuteTrik] Arguments: ${JSON.stringify(toolCall.args)}`);
       }
 
       const matchingTool = self.tools.find((t) => t.name === toolCall.name);
@@ -156,12 +156,12 @@ Present this response to the user. That's it - no special handling needed.`;
       const parsed = JSON.parse(result);
 
       if (self.debug) {
-        console.log(`[ExecuteSkill] Result: ${JSON.stringify(parsed)}`);
+        console.log(`[ExecuteTrik] Result: ${JSON.stringify(parsed)}`);
       }
 
       if (parsed._directOutput) {
         if (self.debug) {
-          console.log('[ExecuteSkill] Direct output detected - bypassing LLM');
+          console.log('[ExecuteTrik] Direct output detected - bypassing LLM');
         }
 
         const toolMessageContent = { ...parsed };
@@ -186,17 +186,17 @@ Present this response to the user. That's it - no special handling needed.`;
 
       return {
         messages: [toolMessage],
-        nextAction: null as 'call_skill' | 'respond' | null,
+        nextAction: null as 'call_trik' | 'respond' | null,
       };
     }
 
-    function shouldContinue(state: typeof AgentState.State): 'executeSkill' | 'decisionNode' | '__end__' {
+    function shouldContinue(state: typeof AgentState.State): 'executeTrik' | 'decisionNode' | '__end__' {
       if (state.response) {
         return '__end__';
       }
 
-      if (state.nextAction === 'call_skill') {
-        return 'executeSkill';
+      if (state.nextAction === 'call_trik') {
+        return 'executeTrik';
       }
 
       if (state.nextAction === null) {
@@ -208,16 +208,16 @@ Present this response to the user. That's it - no special handling needed.`;
 
     const workflow = new StateGraph(AgentState)
       .addNode('decisionNode', decisionNode)
-      .addNode('executeSkill', executeSkillNode)
+      .addNode('executeTrik', executeTrikNode)
       .addEdge('__start__', 'decisionNode')
       .addConditionalEdges('decisionNode', shouldContinue, {
-        executeSkill: 'executeSkill',
+        executeTrik: 'executeTrik',
         decisionNode: 'decisionNode',
         __end__: END,
       })
-      .addConditionalEdges('executeSkill', shouldContinue, {
+      .addConditionalEdges('executeTrik', shouldContinue, {
         decisionNode: 'decisionNode',
-        executeSkill: 'executeSkill',
+        executeTrik: 'executeTrik',
         __end__: END,
       });
 

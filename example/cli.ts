@@ -40,7 +40,7 @@ async function main() {
   // Initialize agent
   const agent = new LangGraphAgent({ debug: DEBUG });
 
-  console.log('\nInitializing agent (loading skill + building LangGraph)...');
+  console.log('\nInitializing agent (loading trik + building LangGraph)...');
 
   try {
     await agent.initialize();
