@@ -1,6 +1,6 @@
-# Software As An AI Skill - SDK POC
+# TrikHub SDK
 
-A framework for AI agents to safely consume third-party "skills" without prompt injection risks.
+A framework for AI agents to safely consume third-party "triks" without prompt injection risks.
 
 ## The Problem
 
@@ -17,7 +17,7 @@ If the agent's LLM sees this text, it may follow the injected instructions. This
 
 The key insight: **the agent doesn't need to see free-form text to make decisions about it.**
 
-We split skill outputs into two channels:
+We split trik outputs into two channels:
 
 | Channel       | Contains                                              | Agent Sees? | Example                                    |
 |---------------|-------------------------------------------------------|-------------|--------------------------------------------|
@@ -28,7 +28,7 @@ The agent reasons over safe structured data. Free text bypasses the agent entire
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Skill     │────▶│   Gateway   │────▶│    Agent    │
+│   Trik     │────▶│   Gateway   │────▶│    Agent    │
 │  (external) │     │  (enforces  │     │   (LLM)     │
 └─────────────┘     │   schemas)  │     └─────────────┘
                     └──────┬──────┘            │
@@ -42,9 +42,85 @@ The agent reasons over safe structured data. Free text bypasses the agent entire
                     └─────────────────────────────┘
 ```
 
-## Quick Start
+## Installation
 
 ```bash
+npm install @trikhub/gateway
+# or
+pnpm add @trikhub/gateway
+```
+
+The gateway package includes everything needed to load and execute triks. For manifest types only:
+
+```bash
+npm install @trikhub/manifest
+```
+
+For the static analysis CLI:
+
+```bash
+npm install -D @trikhub/linter
+```
+
+## Integration Options
+
+Choose the integration approach based on your agent's runtime environment:
+
+### Option 1: In-Process (Node.js Only)
+
+Use `@trikhub/gateway/langchain` when your agent runs in the **same Node.js process** as the gateway. This provides direct function calls with no network overhead.
+
+```typescript
+import { TrikGateway } from '@trikhub/gateway';
+import { createLangChainTools } from '@trikhub/gateway/langchain';
+
+const gateway = new TrikGateway({ triks: [...] });
+const tools = createLangChainTools(gateway, { /* options */ });
+
+// Tools call gateway.execute() directly - same memory, no HTTP
+const model = new ChatAnthropic().bindTools(tools);
+```
+
+**Use this when**: Your agent is a Node.js/TypeScript application using LangChain JS or LangGraph JS.
+
+### Option 2: HTTP Server (Any Language)
+
+Use `@trikhub/server` when your agent is written in **Python, Go, or any other language**, or runs in a separate process. The gateway runs as an HTTP service that any client can consume.
+
+```
+┌─────────────────────────┐         HTTP          ┌─────────────────────────┐
+│   trik-server (Node)   │◄──────────────────────│   Your Agent (Python)   │
+│   └── TrikGateway      │      JSON API         │   └── LangChain Python  │
+└─────────────────────────┘                       └─────────────────────────┘
+```
+
+```python
+# Python client creates its own LangChain tools that wrap HTTP calls
+from gateway_client import GatewayClient
+from langgraph_tools import TrikToolAdapter
+
+client = GatewayClient("http://localhost:3000")
+tools = TrikToolAdapter(client).create_tools()
+
+# Tools make HTTP requests to the gateway - language agnostic
+llm = ChatAnthropic().bind_tools(tools)
+```
+
+**Use this when**:
+
+- Your agent is written in Python or another non-Node.js language
+- Your agent runs in a separate process or container
+- You want to share one gateway across multiple agents
+
+See [packages/trik-server](packages/trik-server) for the HTTP server and [Python examples](packages/trik-server/examples/python) for client integration.
+
+## Quick Start (Development)
+
+To run the example locally:
+
+```bash
+git clone https://github.com/Muffles/trikhub.git
+cd trikhub
 pnpm install
 pnpm build
 
@@ -73,31 +149,31 @@ You: Read the second one
 Agent: [Full article content delivered directly]
 ```
 
-The agent handles "the second one" via LLM-based reference resolution inside the skill. The malicious title in article #2 never reaches the agent's decision layer.
+The agent handles "the second one" via LLM-based reference resolution inside the trik. The malicious title in article #2 never reaches the agent's decision layer.
 
 ## Project Structure
 
 ```
 packages/
-├── skill-manifest/     # Types and JSON Schema validation
-├── skill-gateway/      # Loads and executes skills, manages sessions
-└── skill-linter/       # Static analysis (forbidden imports, etc.)
+├── trik-manifest/     # Types and JSON Schema validation
+├── trik-gateway/      # Loads and executes triks, manages sessions
+└── trik-linter/       # Static analysis (forbidden imports, etc.)
 
 example/
 ├── agent.ts            # LangGraph agent with tool bindings
 ├── tool-adapter.ts     # Converts gateway tools to LangChain format
 ├── cli.ts              # Interactive REPL
-└── skills/
+└── triks/
     └── demo/article-search/
-        ├── manifest.json   # Skill contract
-        └── graph.ts        # Skill implementation
+        ├── manifest.json   # Trik contract
+        └── graph.ts        # Trik implementation
 ```
 
 ## How It Works
 
 ### Manifest
 
-Each skill declares its actions, schemas, and response mode:
+Each trik declares its actions, schemas, and response mode:
 
 ```json
 {
@@ -130,18 +206,197 @@ Each skill declares its actions, schemas, and response mode:
 
 **Template mode** - Agent receives structured `agentData` and a template. The tool adapter fills the template and returns it. Good for search results, confirmations.
 
-**Passthrough mode** - Skill returns `userContent` (free text). The gateway returns a reference; the tool adapter delivers content directly to the user. The agent never sees it. Good for reading articles, documents.
+**Passthrough mode** - Trik returns `userContent` (free text). The gateway returns a reference; the tool adapter delivers content directly to the user. The agent never sees it. Good for reading articles, documents.
 
 ### Sessions
 
-Skills can maintain session state. The gateway passes full history to the skill on each call, enabling reference resolution like "the third article" or "the healthcare one".
+Triks can maintain session state. The gateway passes full history to the trik on each call, enabling reference resolution like "the third article" or "the healthcare one".
 
-The skill uses an internal LLM call to resolve these references from session history.
+The trik uses an internal LLM call to resolve these references from session history.
+
+## Building a Trik
+
+### Directory Structure
+
+```
+my-trik/
+├── manifest.json     # Trik contract (actions, schemas, templates)
+├── src/
+│   └── graph.ts      # Trik implementation (TypeScript)
+├── dist/
+│   └── graph.js      # Compiled output (JavaScript)
+├── package.json      # Dependencies and build scripts
+└── tsconfig.json     # TypeScript configuration
+```
+
+### The `invoke` Function
+
+Every trik must export an `invoke` function. This is the entry point called by the gateway.
+
+```typescript
+import type { SessionHistoryEntry } from '@trikhub/manifest';
+
+// Input passed to your trik
+interface TrikInput {
+  input: Record<string, unknown>;  // Action-specific input (matches inputSchema)
+  action: string;                   // Which action to execute
+  session?: {
+    sessionId: string;
+    history: SessionHistoryEntry[]; // Previous interactions for reference resolution
+  };
+}
+
+// Your invoke function
+async function invoke(input: TrikInput): Promise<TrikOutput> {
+  const { action, session } = input;
+  const history = session?.history ?? [];
+
+  switch (action) {
+    case 'search':
+      return handleSearch(input.input);
+    case 'details':
+      return handleDetails(input.input, history);
+    default:
+      return { responseMode: 'template', agentData: { template: 'error' } };
+  }
+}
+
+// Export as default (matches manifest entry.export)
+export default { invoke };
+```
+
+### Return Types
+
+Your handlers must return a `TrikOutput` with the appropriate response mode.
+
+**Template Mode** - Agent sees structured data, uses templates:
+
+```typescript
+interface TemplateOutput {
+  responseMode: 'template';
+  agentData: {
+    template: 'success' | 'empty' | 'error';  // Must match responseTemplates keys
+    count?: number;                            // Safe types only (numbers, booleans, enums)
+    articleIds?: string[];                     // IDs are safe (constrained format)
+  };
+}
+
+// Example handler
+function handleSearch(input: { topic: string }): TemplateOutput {
+  const results = searchDatabase(input.topic);
+
+  if (results.length === 0) {
+    return {
+      responseMode: 'template',
+      agentData: { template: 'empty', count: 0 },
+    };
+  }
+
+  return {
+    responseMode: 'template',
+    agentData: {
+      template: 'success',
+      count: results.length,
+      articleIds: results.map(r => r.id),
+    },
+  };
+}
+```
+
+**Passthrough Mode** - Content goes directly to user, agent never sees it:
+
+```typescript
+interface PassthroughOutput {
+  responseMode: 'passthrough';
+  userContent: {
+    contentType: string;              // e.g., 'article', 'recipe'
+    content: string;                  // Free-form text (can contain anything)
+    metadata?: Record<string, unknown>; // Optional metadata
+  };
+}
+
+// Example handler
+function handleDetails(articleId: string): PassthroughOutput {
+  const article = getArticle(articleId);
+
+  return {
+    responseMode: 'passthrough',
+    userContent: {
+      contentType: 'article',
+      content: `# ${article.title}\n\n${article.body}`,
+      metadata: {
+        title: article.title,
+        articleId: article.id,
+      },
+    },
+  };
+}
+```
+
+### Reference Resolution
+
+Triks can use session history to resolve natural language references like "the second one" or "the healthcare article".
+
+```typescript
+async function handleDetails(
+  articleId: string | undefined,
+  reference: string | undefined,
+  history: SessionHistoryEntry[]
+): Promise<DetailsOutput> {
+  let targetId = articleId;
+
+  // If no ID provided, resolve from reference using session history
+  if (!targetId && reference) {
+    targetId = await resolveReferenceWithLLM(reference, history);
+  }
+
+  if (!targetId) {
+    return { responseMode: 'template', agentData: { template: 'not_found' } };
+  }
+
+  const article = getArticle(targetId);
+  return {
+    responseMode: 'passthrough',
+    userContent: {
+      contentType: 'article',
+      content: article.content,
+    },
+  };
+}
+```
+
+### Building and Testing
+
+```bash
+# Install dependencies
+npm install
+
+# Build TypeScript to JavaScript
+npm run build
+
+# Lint your trik
+pnpm lint:trik ./my-trik
+
+# Test locally with the example agent
+cd example && pnpm demo
+```
+
+### Manifest + Implementation Alignment
+
+Your `manifest.json` declares the contract. Your `graph.ts` must implement it:
+
+| Manifest | Implementation |
+|----------|----------------|
+| `actions.search` | `case 'search':` in switch |
+| `inputSchema` | `input` parameter type |
+| `agentDataSchema` | `agentData` return value |
+| `responseTemplates` | `template` field values |
+| `userContentSchema` | `userContent` return value |
 
 ## Linting
 
 ```bash
-pnpm lint:skill ./example/skills/demo/article-search
+pnpm lint:trik ./example/triks/demo/article-search
 ```
 
 Checks for:
@@ -160,12 +415,116 @@ pnpm test
 
 This framework provides defense-in-depth against prompt injection:
 
-1. **Type-level enforcement** - `agentDataSchema` cannot contain free-form strings. The linter rejects skills that try to pass arbitrary text to the agent.
+1. **Type-level enforcement** - `agentDataSchema` cannot contain free-form strings. The linter rejects triks that try to pass arbitrary text to the agent.
 
-2. **Runtime validation** - The gateway validates all skill outputs against declared schemas before returning them to the agent.
+2. **Runtime validation** - The gateway validates all trik outputs against declared schemas before returning them to the agent.
 
 3. **Passthrough isolation** - Content marked as `userContent` is stored and delivered directly to the user. The agent only receives a reference ID.
 
 4. **Static analysis** - The linter catches dangerous patterns: forbidden imports (fs, net), dynamic code (eval), and schema violations.
 
-**What this does NOT protect against**: A malicious skill author who controls both the manifest and implementation. This framework assumes skills are audited/trusted at install time. The protection is against *data* from external sources flowing through skills to the agent.
+**What this does NOT protect against**: A malicious trik author who controls both the manifest and implementation. This framework assumes triks are audited/trusted at install time. The protection is against *data* from external sources flowing through triks to the agent.
+
+## Publishing to TrikHub
+
+Triks can be published to the [TrikHub Registry](https://trikhub.com) for discovery and installation by others.
+
+### Required Files
+
+```text
+your-trik/
+├── manifest.json      # Trik manifest (required)
+├── trikhub.json       # Registry metadata (required)
+├── dist/
+│   └── graph.js       # Compiled entry point (required)
+├── package.json       # Dependencies
+└── README.md          # Documentation (recommended)
+```
+
+### trikhub.json
+
+Registry metadata for your trik:
+
+```json
+{
+  "displayName": "Article Search",
+  "shortDescription": "Search and read articles from various sources",
+  "categories": ["search", "content"],
+  "keywords": ["articles", "search", "news", "reading"],
+  "author": {
+    "name": "Your Name",
+    "github": "your-username"
+  },
+  "repository": "https://github.com/your-username/your-trik"
+}
+```
+
+| Field | Required | Description |
+| ----- | -------- | ----------- |
+| `displayName` | Yes | Human-readable name |
+| `shortDescription` | Yes | Short description (max 160 chars) |
+| `categories` | Yes | Array of categories for filtering |
+| `keywords` | Yes | Array of keywords for search |
+| `author.name` | Yes | Author's display name |
+| `author.github` | Yes | GitHub username |
+| `repository` | Yes | GitHub repository URL |
+| `homepage` | No | Documentation/homepage URL |
+| `funding` | No | GitHub Sponsors or similar URL |
+| `icon` | No | Square icon URL (min 128x128) |
+
+### Categories
+
+Available categories:
+
+- `search` - Search and discovery
+- `content` - Content creation and management
+- `productivity` - Productivity and workflow
+- `communication` - Email, messaging, notifications
+- `data` - Data processing and analysis
+- `developer` - Developer tools
+- `finance` - Financial tools
+- `entertainment` - Games, media, fun
+- `education` - Learning and education
+- `utilities` - General utilities
+- `other` - Other
+
+### Publishing
+
+```bash
+# Install the TrikHub CLI
+npm install -g @trikhub/cli
+
+# Authenticate with GitHub
+trik login
+
+# Build your trik
+npm run build
+
+# Publish to TrikHub
+trik publish
+```
+
+The CLI will:
+
+1. Validate your manifest and trikhub.json
+2. Create a tarball with required files
+3. Create a GitHub Release
+4. Register with the TrikHub registry
+
+### Installing Published Triks
+
+```bash
+# Search for triks
+trik search article
+
+# Install a trik
+trik install @your-username/your-trik
+
+# Triks are installed to ~/.trikhub/triks/
+```
+
+## Related Projects
+
+- **[TrikHub CLI](https://github.com/trikhub/trikhub)** - Install and manage triks
+- **[TrikHub Registry](https://github.com/trikhub/registry)** - The backend registry service
+- **[trikhub.com](https://trikhub.com)** - Web interface for browsing triks

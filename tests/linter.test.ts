@@ -12,14 +12,14 @@ import {
   checkTemplateFieldsExist,
   checkHasResponseTemplates,
   extractTemplatePlaceholders,
-} from '../packages/skill-linter/src/rules.js';
-import type { SkillManifest, ActionDefinition } from '../packages/skill-manifest/src/types.js';
+} from '../packages/trik-linter/src/rules.js';
+import type { TrikManifest, ActionDefinition } from '../packages/trik-manifest/src/types.js';
 
 function createSourceFile(code: string): ts.SourceFile {
   return ts.createSourceFile('test.ts', code, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS);
 }
 
-describe('skill-linter rules', () => {
+describe('trik-linter rules', () => {
   describe('getImports', () => {
     // Proves: Linter can detect static ES module imports
     it('should extract static imports', () => {
@@ -49,7 +49,7 @@ describe('skill-linter rules', () => {
   });
 
   describe('checkForbiddenImports', () => {
-    // Proves: Skills cannot import dangerous Node.js modules (fs, child_process)
+    // Proves: Triks cannot import dangerous Node.js modules (fs, child_process)
     it('should detect forbidden imports', () => {
       const code = `
         import fs from 'fs';
@@ -146,11 +146,11 @@ describe('skill-linter rules', () => {
 });
 
 // Helper to create manifests for testing
-interface ManifestOverrides extends Omit<Partial<SkillManifest>, 'actions'> {
+interface ManifestOverrides extends Omit<Partial<TrikManifest>, 'actions'> {
   actions: Record<string, Partial<ActionDefinition>>;
 }
 
-function createManifest(overrides: ManifestOverrides): SkillManifest {
+function createManifest(overrides: ManifestOverrides): TrikManifest {
   const actions: Record<string, ActionDefinition> = {};
   for (const [name, actionDef] of Object.entries(overrides.actions)) {
     actions[name] = {
@@ -164,9 +164,9 @@ function createManifest(overrides: ManifestOverrides): SkillManifest {
   }
 
   return {
-    id: overrides.id ?? 'test-skill',
-    name: overrides.name ?? 'Test Skill',
-    description: overrides.description ?? 'A test skill',
+    id: overrides.id ?? 'test-trik',
+    name: overrides.name ?? 'Test Trik',
+    description: overrides.description ?? 'A test trik',
     version: overrides.version ?? '1.0.0',
     actions,
     capabilities: overrides.capabilities ?? { tools: [], canRequestClarification: false },
@@ -379,7 +379,7 @@ describe('Linter rules - type-directed privilege separation', () => {
   });
 
   describe('checkHasResponseTemplates', () => {
-    // Proves: Template mode requires templates (no arbitrary skill output)
+    // Proves: Template mode requires templates (no arbitrary trik output)
     it('should error when template mode action has no templates', () => {
       const manifest = createManifest({
         actions: {
