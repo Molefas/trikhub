@@ -97,11 +97,28 @@ function loadConfigFromPath(configPath: string): TrikConfig {
 
 /**
  * Create a ConfigContext from a base directory
+ *
+ * For local configs, we merge global auth settings with local settings.
+ * This ensures auth tokens are always inherited from global config.
  */
 function createContext(baseDir: string, scope: ConfigScope): ConfigContext {
   const trikhubDir = join(baseDir, '.trikhub');
   const configPath = join(trikhubDir, 'config.json');
-  const config = loadConfigFromPath(configPath);
+  let config = loadConfigFromPath(configPath);
+
+  // For local configs, inherit auth from global config
+  if (scope === 'local') {
+    const globalConfigPath = join(getGlobalTrikhubDir(), 'config.json');
+    const globalConfig = loadConfigFromPath(globalConfigPath);
+
+    // Merge: local overrides global, but inherit auth settings from global
+    config = {
+      ...config,
+      authToken: config.authToken ?? globalConfig.authToken,
+      authExpiresAt: config.authExpiresAt ?? globalConfig.authExpiresAt,
+      publisherUsername: config.publisherUsername ?? globalConfig.publisherUsername,
+    };
+  }
 
   // For local configs, triksDirectory is relative to the .trikhub folder
   // For global configs, it uses the config value (which may be absolute)

@@ -48,14 +48,15 @@ trik install @scope/trik-name --version 1.2.3
 ```
 
 The install process:
-1. Resolves configuration (see [Local vs Global Configuration](#local-vs-global-configuration))
-2. Fetches trik metadata from the registry
-3. Downloads the tarball from GitHub Releases
-4. Extracts to the configured triks directory
-5. **Validates** the trik (manifest structure, security rules)
-6. Updates the lockfile
 
-If validation fails, the trik is removed and installation aborts.
+1. **Tries npm registry first** - If the package is published to npm, installs via your package manager (npm/pnpm/yarn)
+2. **Falls back to TrikHub registry** - For GitHub-only packages, downloads the tarball from GitHub Releases
+3. Adds the dependency to `package.json` (npm packages use version, TrikHub packages use tarball URL)
+4. Extracts to `node_modules/`
+5. **Validates** the trik (manifest structure, security rules)
+6. Registers the trik in `.trikhub/config.json`
+
+This hybrid approach means triks work like regular npm packages while supporting GitHub-only distributions.
 
 ### `trik search <query>`
 
@@ -106,6 +107,23 @@ trik upgrade @acme/article-search
 # Force reinstall even if up to date
 trik upgrade --force
 ```
+
+### `trik sync`
+
+Discover trik packages in `node_modules` and register them in `.trikhub/config.json`.
+
+```bash
+# Scan node_modules and add triks to config
+trik sync
+
+# Preview what would be synced
+trik sync --dry-run
+
+# Output as JSON
+trik sync --json
+```
+
+This is useful when you manually add a trik to `package.json` and run `npm install`. The sync command will detect the trik and register it.
 
 ## Authentication
 
@@ -168,16 +186,19 @@ trik publish --skip-release
 
 The CLI will:
 
-1. Validate your trik structure (manifest.json, trikhub.json, dist/)
-2. Create a tarball with required files
+1. Validate your trik structure (manifest.json, trikhub.json, package.json, dist/)
+2. Create an **npm-compatible tarball** with files inside a `package/` directory
 3. Compute SHA-256 hash for integrity verification
 4. Create a GitHub Release with the tarball attached
 5. Register the trik with the TrikHub registry
+
+The tarball format is compatible with npm, so users can install directly via the tarball URL.
 
 ### Required Files
 
 ```
 your-trik/
+├── package.json       # npm package definition (required)
 ├── manifest.json      # Trik manifest (required)
 ├── trikhub.json       # Registry metadata (required)
 ├── dist/
@@ -210,102 +231,59 @@ Triks use scoped names similar to npm:
 
 **Note:** All trik names are normalized to lowercase. `@Acme/Article-Search` becomes `@acme/article-search`.
 
-## Local vs Global Configuration
+## How Triks Work with npm
 
-The CLI supports both **local** (project-level) and **global** (user-level) configurations. This allows you to have project-specific trik installations or share triks across all projects.
+Triks are installed as regular npm packages in your project's `node_modules/`. The CLI tracks which packages are triks in `.trikhub/config.json`.
 
-### Configuration Resolution
-
-When you run a command like `trik install`, the CLI resolves configuration in this order:
-
-1. **Local config**: Checks for `.trikhub/config.json` in the current directory
-2. **Global config**: Falls back to `~/.trikhub/config.json` in your home directory
-3. **Setup prompt**: If neither exists, prompts you to choose where to set up
-
-```
-$ trik install @acme/article-search
-
-No TrikHub configuration found.
-Triks need a place to be installed.
-
-? Where would you like to set up TrikHub?
-❯ Global (~/.trikhub)      - Available to all projects
-  Local (./.trikhub)       - Project-specific configuration
-```
-
-### Global Configuration (Default)
-
-Triks are installed in your home directory and available to all projects:
-
-```
-~/.trikhub/
-├── config.json      # CLI configuration
-├── triks.lock       # Lockfile tracking installed versions
-└── triks/           # Installed triks
-    └── @scope/trik-name/
-```
-
-### Local Configuration
-
-Triks are installed in the current project directory. Useful for:
-
-- Project-specific trik versions
-- Sharing trik configurations with your team (commit `.trikhub/` to git)
-- Isolated environments
+### Project Structure
 
 ```
 ./your-project/
+├── package.json           # Trik dependencies listed here
+├── node_modules/
+│   └── @scope/trik-name/  # Trik installed like any npm package
 └── .trikhub/
-    ├── config.json      # Project-specific configuration
-    ├── triks.lock       # Project lockfile
-    └── triks/           # Project-specific triks
-        └── @scope/trik-name/
+    └── config.json        # Lists which packages are triks
 ```
 
-### Switching Between Scopes
+### The Config File
 
-The CLI automatically detects which scope to use based on the presence of `.trikhub/config.json` in the current directory:
+`.trikhub/config.json` tracks which npm packages are triks:
 
-```bash
-# In a project with local config
-$ trik list
-Installed triks (2) (local: /path/to/project/.trikhub):
-  ● @acme/article-search v1.0.0
-
-# In a directory without local config (uses global)
-$ cd ~
-$ trik list
-Installed triks (5) (global):
-  ● @acme/other-trik v2.0.0
+```json
+{
+  "triks": ["@acme/article-search", "@acme/web-scraper"]
+}
 ```
 
-### Initializing a Local Config
+This file is used by the TrikHub Gateway to know which packages to load as triks.
 
-If you have a global config but want to set up a local one for a project:
+### TrikHub Registry Packages
 
-```bash
-$ trik install @scope/some-trik
-# When prompted "Use global configuration?", select "No"
-# This will initialize a local .trikhub/ directory
+For packages not published to npm (GitHub-only), the CLI:
+
+1. Downloads the tarball from GitHub Releases
+2. Extracts to `node_modules/`
+3. Adds the tarball URL to `package.json`
+
+```json
+{
+  "dependencies": {
+    "@acme/article-search": "https://github.com/acme/article-search/releases/download/v1.0.0/article-search-1.0.0.tar.gz"
+  }
+}
 ```
+
+This means `npm install` works natively - npm fetches from the tarball URL.
 
 ## File Locations
 
-### Global (Default)
-
 | Path | Description |
 |------|-------------|
-| `~/.trikhub/config.json` | CLI configuration |
-| `~/.trikhub/triks.lock` | Lockfile tracking installed versions |
-| `~/.trikhub/triks/` | Installed triks directory |
-
-### Local (Project-Level)
-
-| Path | Description |
-|------|-------------|
-| `./.trikhub/config.json` | Project-specific configuration |
-| `./.trikhub/triks.lock` | Project lockfile |
-| `./.trikhub/triks/` | Project-specific triks |
+| `~/.trikhub/config.json` | Global CLI configuration (auth tokens, registry URL) |
+| `./.trikhub/config.json` | Project trik registry (list of trik package names) |
+| `./package.json` | Trik dependencies (managed by npm) |
+| `./node_modules/` | Installed triks (managed by npm) |
 
 ## Validation
 
@@ -322,26 +300,39 @@ Triks that fail validation are rejected to prevent prompt injection vulnerabilit
 
 ### Registry URL
 
-By default, the CLI connects to `https://api.trikhub.com`. For development, you can override this:
+The registry URL is determined by environment:
+
+| Environment | Registry URL |
+| ----------- | ------------ |
+| Production (default) | `https://api.trikhub.com` |
+| Development (`--dev` flag) | `http://localhost:3001` |
+
+Use the `--dev` flag for local development:
 
 ```bash
-# Environment variable (highest priority)
-export TRIKHUB_REGISTRY=http://localhost:3000
-
-# Or edit your config.json (local or global)
-{
-  "registry": "http://localhost:3000"
-}
+trik --dev search article
+trik --dev install @scope/name
 ```
 
-### Config File
+Alternatively, set `NODE_ENV=development`:
 
-The `config.json` file (either local `.trikhub/config.json` or global `~/.trikhub/config.json`) stores:
+```bash
+export NODE_ENV=development
+trik search article
+```
+
+You can also override the registry URL with an environment variable:
+
+```bash
+export TRIKHUB_REGISTRY=http://localhost:3000
+```
+
+### Global Config File (`~/.trikhub/config.json`)
+
+Stores authentication and CLI settings:
 
 ```json
 {
-  "registry": "https://api.trikhub.com",
-  "triksDirectory": ".trikhub/triks",
   "analytics": true,
   "authToken": "...",
   "authExpiresAt": "2026-03-09T11:24:12.401Z",
@@ -351,12 +342,28 @@ The `config.json` file (either local `.trikhub/config.json` or global `~/.trikhu
 
 | Field | Description |
 | ----- | ----------- |
-| `registry` | TrikHub registry URL |
-| `triksDirectory` | Where triks are installed (relative to config location for local) |
 | `analytics` | Whether to send anonymous download analytics |
 | `authToken` | Authentication token (set by `trik login`) |
 | `authExpiresAt` | Token expiration timestamp |
 | `publisherUsername` | Authenticated GitHub username |
+
+### Project Config File (`.trikhub/config.json`)
+
+Tracks which npm packages are triks:
+
+```json
+{
+  "triks": ["@acme/article-search", "@acme/web-scraper"],
+  "trikhub": {
+    "@acme/article-search": "1.0.0"
+  }
+}
+```
+
+| Field | Description |
+| ----- | ----------- |
+| `triks` | List of npm package names that are triks |
+| `trikhub` | Packages installed from TrikHub registry (version tracking) |
 
 ## Development
 
