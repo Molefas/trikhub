@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { readFile, readdir, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { join, resolve, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 import {
   type TrikManifest,
   type GatewayResult,
@@ -92,6 +94,21 @@ export interface TrikInfo {
 
 export interface GetToolDefinitionsOptions {
   includeReadContent?: boolean;
+}
+
+/**
+ * Configuration file structure for .trikhub/config.json
+ */
+export interface TrikHubConfig {
+  /** List of installed trik package names */
+  triks: string[];
+}
+
+export interface LoadFromConfigOptions {
+  /** Path to the config file. Defaults to .trikhub/config.json in cwd */
+  configPath?: string;
+  /** Base directory for resolving node_modules. Defaults to dirname of configPath */
+  baseDir?: string;
 }
 
 export class TrikGateway {
@@ -243,6 +260,106 @@ export class TrikGateway {
       return [];
     }
     return this.loadTriksFromDirectory(this.config.triksDirectory);
+  }
+
+  /**
+   * Load triks from a config file (.trikhub/config.json).
+   * Triks are resolved from node_modules based on the package names in config.
+   *
+   * Config file format:
+   * ```json
+   * {
+   *   "triks": ["@muffles/article-search", "some-other-trik"]
+   * }
+   * ```
+   *
+   * @param options - Configuration options
+   * @returns Array of successfully loaded manifests
+   */
+  async loadTriksFromConfig(options: LoadFromConfigOptions = {}): Promise<TrikManifest[]> {
+    const configPath = options.configPath ?? join(process.cwd(), '.trikhub', 'config.json');
+    const baseDir = options.baseDir ?? dirname(configPath);
+
+    // Check if config file exists
+    if (!existsSync(configPath)) {
+      console.log(`[TrikGateway] No config file found at ${configPath}`);
+      return [];
+    }
+
+    // Read and parse config
+    let config: TrikHubConfig;
+    try {
+      const configContent = await readFile(configPath, 'utf-8');
+      config = JSON.parse(configContent);
+    } catch (error) {
+      throw new Error(
+        `Failed to read config file "${configPath}": ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+    }
+
+    if (!Array.isArray(config.triks)) {
+      console.log('[TrikGateway] Config file has no triks array');
+      return [];
+    }
+
+    const manifests: TrikManifest[] = [];
+    const errors: Array<{ trik: string; error: string }> = [];
+
+    // Create a require function relative to the base directory
+    // This allows us to resolve packages from the project's node_modules
+    const require = createRequire(join(baseDir, 'package.json'));
+
+    for (const trikName of config.triks) {
+      try {
+        // Resolve the package path from node_modules
+        // First, try to find the manifest.json in the package
+        let trikPath: string;
+        try {
+          const manifestPath = require.resolve(`${trikName}/manifest.json`);
+          trikPath = dirname(manifestPath);
+        } catch {
+          // Fall back to resolving the package main and getting its directory
+          const packageMain = require.resolve(trikName);
+          trikPath = dirname(packageMain);
+
+          // Check if manifest.json exists in the package root
+          const manifestPath = join(trikPath, 'manifest.json');
+          if (!existsSync(manifestPath)) {
+            // Try going up one level (for packages with dist/ structure)
+            const parentManifest = join(dirname(trikPath), 'manifest.json');
+            if (existsSync(parentManifest)) {
+              trikPath = dirname(trikPath);
+            } else {
+              throw new Error(`Package "${trikName}" does not have a manifest.json`);
+            }
+          }
+        }
+
+        const manifest = await this.loadTrik(trikPath);
+        manifests.push(manifest);
+      } catch (error) {
+        errors.push({
+          trik: trikName,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+
+    // Log errors for debugging
+    if (errors.length > 0) {
+      console.warn(`[TrikGateway] Failed to load ${errors.length} trik(s) from config:`);
+      for (const { trik, error } of errors) {
+        console.warn(`  - ${trik}: ${error}`);
+      }
+    }
+
+    if (manifests.length > 0) {
+      console.log(`[TrikGateway] Loaded ${manifests.length} trik(s) from config`);
+    }
+
+    return manifests;
   }
 
   getManifest(trikId: string): TrikManifest | undefined {
