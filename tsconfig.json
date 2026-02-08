@@ -4,6 +4,7 @@
     { "path": "packages/trik-manifest" },
     { "path": "packages/trik-gateway" },
     { "path": "packages/trik-linter" },
+    { "path": "packages/trik-cli" },
     { "path": "example" }
   ]
 }

@@ -8,6 +8,9 @@ export {
   type ToolDefinition,
   type TrikInfo,
   type GetToolDefinitionsOptions,
+  // Config-based loading types
+  type TrikHubConfig,
+  type LoadFromConfigOptions,
 } from './gateway.js';
 
 // Session storage
