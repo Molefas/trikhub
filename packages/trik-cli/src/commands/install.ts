@@ -30,6 +30,8 @@ interface InstallOptions {
 
 interface NpmTriksConfig {
   triks: string[];
+  /** Packages installed from TrikHub registry (not npm) - need reinstall on sync */
+  trikhub?: Record<string, string>; // packageName -> version
 }
 
 interface PackageJson {
@@ -112,6 +114,7 @@ async function readNpmConfig(baseDir: string): Promise<NpmTriksConfig> {
     const config = JSON.parse(content) as NpmTriksConfig;
     return {
       triks: Array.isArray(config.triks) ? config.triks : [],
+      trikhub: config.trikhub ?? {},
     };
   } catch {
     return { triks: [] };
@@ -154,14 +157,28 @@ async function isTrikPackage(packagePath: string): Promise<boolean> {
 
 /**
  * Add a trik to the config
+ * @param trikhubVersion - If provided, marks this as a TrikHub-only package (not on npm)
  */
-async function addTrikToConfig(packageName: string, baseDir: string): Promise<void> {
+async function addTrikToConfig(
+  packageName: string,
+  baseDir: string,
+  trikhubVersion?: string
+): Promise<void> {
   const config = await readNpmConfig(baseDir);
 
   if (!config.triks.includes(packageName)) {
     config.triks = [...config.triks, packageName].sort();
-    await writeNpmConfig(config, baseDir);
   }
+
+  // Track TrikHub source for reinstallation
+  if (trikhubVersion) {
+    if (!config.trikhub) {
+      config.trikhub = {};
+    }
+    config.trikhub[packageName] = trikhubVersion;
+  }
+
+  await writeNpmConfig(config, baseDir);
 }
 
 /**
@@ -189,10 +206,11 @@ async function downloadFile(url: string, destPath: string): Promise<void> {
 
 /**
  * Add a dependency to package.json
+ * @param tarballUrl - If provided, uses the tarball URL (npm-compatible format)
  */
 async function addToPackageJson(
   packageName: string,
-  version: string,
+  tarballUrl: string,
   baseDir: string
 ): Promise<void> {
   const packageJsonPath = join(baseDir, 'package.json');
@@ -203,8 +221,8 @@ async function addToPackageJson(
     pkg.dependencies = {};
   }
 
-  // Use a special prefix to indicate it's a TrikHub package
-  pkg.dependencies[packageName] = `trikhub:${version}`;
+  // Use tarball URL - npm understands this format natively
+  pkg.dependencies[packageName] = tarballUrl;
 
   await writeFile(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
 }
@@ -316,24 +334,17 @@ async function installFromTrikhub(
     mkdirSync(packagePath, { recursive: true });
 
     // Extract tarball to the package directory
+    // npm-compatible tarballs have files inside a 'package/' directory
+    // We strip that prefix when extracting
     await tar.extract({
       file: tarballPath,
       cwd: packagePath,
+      strip: 1, // Remove the 'package/' prefix
     });
 
-    // Create a minimal package.json if one doesn't exist
-    const pkgJsonPath = join(packagePath, 'package.json');
-    if (!existsSync(pkgJsonPath)) {
-      const minimalPkg = {
-        name: packageName,
-        version: versionToInstall,
-        description: trikInfo.description || `TrikHub package: ${packageName}`,
-      };
-      await writeFile(pkgJsonPath, JSON.stringify(minimalPkg, null, 2) + '\n', 'utf-8');
-    }
-
-    // Add to package.json dependencies
-    await addToPackageJson(packageName, versionToInstall, baseDir);
+    // Add to package.json dependencies using tarball URL
+    // This is npm-compatible and will work with npm install
+    await addToPackageJson(packageName, versionInfo.tarballUrl, baseDir);
 
     // Report download for analytics
     registry.reportDownload(packageName, versionToInstall);
@@ -428,7 +439,8 @@ export async function installCommand(
     const packagePath = join(baseDir, 'node_modules', ...packageName.split('/'));
 
     if (await isTrikPackage(packagePath)) {
-      await addTrikToConfig(packageName, baseDir);
+      // Pass version for TrikHub packages (for sync/upgrade tracking)
+      await addTrikToConfig(packageName, baseDir, installedVersion);
       spinner.succeed(`Registered ${chalk.green(packageName)} as a trik`);
 
       console.log();

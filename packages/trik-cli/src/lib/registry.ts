@@ -15,6 +15,29 @@ import {
 import { loadConfig } from './storage.js';
 
 /**
+ * Registry URLs by environment
+ */
+const REGISTRY_URLS = {
+  production: 'https://api.trikhub.com',
+  development: 'http://localhost:3001',
+} as const;
+
+/**
+ * Get the registry base URL based on environment
+ * Priority: TRIKHUB_REGISTRY env var > NODE_ENV-based selection
+ */
+function getRegistryUrl(): string {
+  // Allow explicit override via env var (useful for testing)
+  if (process.env.TRIKHUB_REGISTRY) {
+    return process.env.TRIKHUB_REGISTRY;
+  }
+
+  // Use NODE_ENV to determine environment
+  const isDev = process.env.NODE_ENV === 'development';
+  return isDev ? REGISTRY_URLS.development : REGISTRY_URLS.production;
+}
+
+/**
  * API response types (matches registry service)
  */
 interface ApiTrikInfo {
@@ -106,14 +129,31 @@ function trikPath(fullName: string): string {
  * Registry client class
  */
 export class RegistryClient {
-  private baseUrl: string;
-  private authToken?: string;
+  private _explicitBaseUrl?: string;
+  private _explicitAuthToken?: string;
 
   constructor(baseUrl?: string, authToken?: string) {
+    // Store explicit overrides if provided
+    this._explicitBaseUrl = baseUrl;
+    this._explicitAuthToken = authToken;
+  }
+
+  /**
+   * Get the base URL (evaluated fresh each time to support --dev flag)
+   */
+  private get baseUrl(): string {
+    return this._explicitBaseUrl ?? getRegistryUrl();
+  }
+
+  /**
+   * Get the auth token
+   */
+  private get authToken(): string | undefined {
+    if (this._explicitAuthToken) {
+      return this._explicitAuthToken;
+    }
     const config = loadConfig();
-    // Priority: explicit param > env var > config file
-    this.baseUrl = baseUrl ?? process.env.TRIKHUB_REGISTRY ?? config.registry;
-    this.authToken = authToken ?? config.authToken;
+    return config.authToken;
   }
 
   /**
@@ -130,7 +170,14 @@ export class RegistryClient {
       headers['Authorization'] = `Bearer ${this.authToken}`;
     }
 
-    const response = await fetch(url, { ...options, headers });
+    let response: Response;
+    try {
+      response = await fetch(url, { ...options, headers });
+    } catch (error) {
+      // Provide more helpful error message for connection failures
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to connect to registry at ${this.baseUrl}: ${errorMessage}`);
+    }
 
     if (!response.ok) {
       if (response.status === 401) {

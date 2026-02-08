@@ -137,6 +137,46 @@ export async function publishCommand(options: PublishOptions): Promise<void> {
     const trikName = manifest.id || manifest.name;
     const fullName = `@${owner}/${trikName}`;
 
+    // Step 3b: Verify git remote matches trikhub.json repository
+    spinner.start('Verifying git remote...');
+    try {
+      const gitRemote = execSync('git remote get-url origin', {
+        cwd: trikDir,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+
+      // Normalize URLs for comparison (handle SSH and HTTPS variants)
+      const normalizeGitUrl = (url: string): string => {
+        return url
+          .replace(/^git@github\.com:/, 'github.com/')
+          .replace(/^https?:\/\//, '')
+          .replace(/\.git$/, '')
+          .toLowerCase();
+      };
+
+      const normalizedRemote = normalizeGitUrl(gitRemote);
+      const normalizedExpected = normalizeGitUrl(repoUrl);
+
+      if (!normalizedRemote.includes(githubRepo.toLowerCase())) {
+        spinner.fail('Git remote does not match trikhub.json repository');
+        console.log(chalk.red('\nRepository mismatch detected:'));
+        console.log(chalk.dim(`  trikhub.json: ${repoUrl}`));
+        console.log(chalk.dim(`  git remote:   ${gitRemote}`));
+        console.log();
+        console.log(chalk.dim('Update trikhub.json to match your git remote, or push to the correct repository.'));
+        process.exit(1);
+      }
+      spinner.succeed('Git remote verified');
+    } catch (error) {
+      // Not a git repo or no remote configured
+      spinner.fail('Not a git repository or no remote configured');
+      console.log(chalk.dim('Initialize git and add a remote that matches trikhub.json:'));
+      console.log(chalk.dim(`  git init`));
+      console.log(chalk.dim(`  git remote add origin ${repoUrl}`));
+      process.exit(1);
+    }
+
     console.log(chalk.dim(`  Trik: ${fullName}`));
     console.log(chalk.dim(`  Repo: ${githubRepo}`));
 
@@ -149,7 +189,9 @@ export async function publishCommand(options: PublishOptions): Promise<void> {
     const tarballPath = join(tarballDir, tarballName);
 
     // Files to include in tarball
+    // Must include package.json for npm compatibility
     const filesToInclude = [
+      'package.json',
       'manifest.json',
       'trikhub.json',
       manifest.entry.module,
@@ -177,11 +219,14 @@ export async function publishCommand(options: PublishOptions): Promise<void> {
       }
     }
 
+    // Create npm-compatible tarball with 'package/' prefix
+    // This is the same structure npm pack creates
     await tar.create(
       {
         gzip: true,
         file: tarballPath,
         cwd: trikDir,
+        prefix: 'package',
       },
       filesToInclude.filter((f) => existsSync(join(trikDir, f)))
     );
@@ -224,6 +269,20 @@ export async function publishCommand(options: PublishOptions): Promise<void> {
       if (authCheck.status !== 0) {
         spinner.fail('GitHub CLI not authenticated');
         console.log(chalk.dim('Run: gh auth login'));
+        rmSync(tarballDir, { recursive: true, force: true });
+        process.exit(1);
+      }
+
+      // Check if the GitHub repository exists
+      const repoCheck = spawnSync('gh', ['repo', 'view', githubRepo, '--json', 'name'], {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      if (repoCheck.status !== 0) {
+        spinner.fail(`GitHub repository not found: ${githubRepo}`);
+        console.log(chalk.red('\nThe repository does not exist on GitHub.'));
+        console.log(chalk.dim('Create the repository first:'));
+        console.log(chalk.dim(`  gh repo create ${githubRepo} --public --source=. --push`));
         rmSync(tarballDir, { recursive: true, force: true });
         process.exit(1);
       }

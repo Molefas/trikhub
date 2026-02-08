@@ -163,9 +163,6 @@ export interface TrikLockfile {
  * CLI configuration (~/.trikhub/config.json)
  */
 export interface TrikConfig {
-  /** Registry URL (default: https://api.trikhub.com) */
-  registry: string;
-
   /** Directory where triks are installed */
   triksDirectory: string;
 
@@ -269,7 +266,6 @@ export function parseTrikName(input: string): {
  * Default configuration values
  */
 export const DEFAULT_CONFIG: TrikConfig = {
-  registry: 'https://api.trikhub.com',
   triksDirectory: '~/.trikhub/triks',
   analytics: true,
 };

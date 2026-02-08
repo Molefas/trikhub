@@ -22,7 +22,14 @@ const program = new Command();
 program
   .name('trik')
   .description('TrikHub CLI - Teaching AI new triks')
-  .version('0.1.0');
+  .version('0.1.0')
+  .option('--dev', 'Use development registry (localhost:3001)')
+  .hook('preAction', () => {
+    // Set NODE_ENV before any command runs if --dev flag is passed
+    if (program.opts().dev) {
+      process.env.NODE_ENV = 'development';
+    }
+  });
 
 // Install command
 program
