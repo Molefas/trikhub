@@ -2,6 +2,8 @@
 
 ## 0.2.0
 
+## 0.2.0
+
 ### Minor Changes
 
 - [#3](https://github.com/Muffles/saaas-sdk/pull/3) [`4f5ec53`](https://github.com/Muffles/saaas-sdk/commit/4f5ec53caea1175bb23a0bccdf7f6f2afe4f45f6) Thanks [@Muffles](https://github.com/Muffles)! - Release
