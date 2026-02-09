@@ -95,7 +95,6 @@ program
   .description('Publish a trik to the registry')
   .option('-d, --directory <path>', 'Trik directory to publish', '.')
   .option('-t, --tag <version>', 'Version tag (default: from manifest)')
-  .option('--skip-release', 'Skip creating GitHub release (for manual upload)')
   .action(publishCommand);
 
 // Upgrade command

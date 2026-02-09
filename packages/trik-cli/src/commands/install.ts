@@ -5,21 +5,20 @@
  *
  * Workflow:
  * 1. Try npm registry first
- * 2. If not found, fall back to TrikHub registry (GitHub releases)
- * 3. Download and install
- * 4. Update .trikhub/config.json with the trik
+ * 2. If not found, fall back to TrikHub registry (uses git URLs)
+ * 3. Verify commit SHA for security
+ * 4. Add to package.json as github:owner/repo#tag
+ * 5. Run package manager install
+ * 6. Update .trikhub/config.json with the trik
  */
 
-import { existsSync, createWriteStream, rmSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
-import { pipeline } from 'node:stream/promises';
-import { Readable } from 'node:stream';
 import chalk from 'chalk';
 import ora from 'ora';
 import * as semver from 'semver';
-import * as tar from 'tar';
 import { validateManifest } from '@trikhub/manifest';
 import { registry } from '../lib/registry.js';
 import { TrikVersion } from '../types.js';
@@ -182,35 +181,57 @@ async function addTrikToConfig(
 }
 
 /**
- * Download a file from a URL
+ * Verify that a GitHub tag points to the expected commit SHA
  */
-async function downloadFile(url: string, destPath: string): Promise<void> {
-  const response = await fetch(url);
+async function verifyGitHubTagSha(
+  githubRepo: string,
+  gitTag: string,
+  expectedSha: string
+): Promise<{ valid: boolean; currentSha?: string }> {
+  try {
+    // Use GitHub API to get the tag reference
+    const response = await fetch(
+      `https://api.github.com/repos/${githubRepo}/git/refs/tags/${gitTag}`
+    );
 
-  if (!response.ok) {
-    throw new Error(`Failed to download: ${response.status} ${response.statusText}`);
+    if (!response.ok) {
+      if (response.status === 404) {
+        return { valid: false };
+      }
+      throw new Error(`GitHub API error: ${response.status}`);
+    }
+
+    const data = await response.json() as { object: { sha: string; type: string } };
+    let currentSha = data.object.sha;
+
+    // If it's an annotated tag, we need to dereference it
+    if (data.object.type === 'tag') {
+      const tagResponse = await fetch(
+        `https://api.github.com/repos/${githubRepo}/git/tags/${currentSha}`
+      );
+      if (tagResponse.ok) {
+        const tagData = await tagResponse.json() as { object: { sha: string } };
+        currentSha = tagData.object.sha;
+      }
+    }
+
+    return {
+      valid: currentSha === expectedSha,
+      currentSha,
+    };
+  } catch {
+    // If we can't verify, proceed with caution
+    return { valid: true };
   }
-
-  if (!response.body) {
-    throw new Error('No response body');
-  }
-
-  const dir = dirname(destPath);
-  if (!existsSync(dir)) {
-    await mkdir(dir, { recursive: true });
-  }
-
-  const fileStream = createWriteStream(destPath);
-  await pipeline(Readable.fromWeb(response.body as any), fileStream);
 }
 
 /**
- * Add a dependency to package.json
- * @param tarballUrl - If provided, uses the tarball URL (npm-compatible format)
+ * Add a dependency to package.json using git URL format
  */
 async function addToPackageJson(
   packageName: string,
-  tarballUrl: string,
+  githubRepo: string,
+  gitTag: string,
   baseDir: string
 ): Promise<void> {
   const packageJsonPath = join(baseDir, 'package.json');
@@ -221,8 +242,8 @@ async function addToPackageJson(
     pkg.dependencies = {};
   }
 
-  // Use tarball URL - npm understands this format natively
-  pkg.dependencies[packageName] = tarballUrl;
+  // Use GitHub shorthand format - clean and npm/pnpm compatible
+  pkg.dependencies[packageName] = `github:${githubRepo}#${gitTag}`;
 
   await writeFile(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
 }
@@ -253,13 +274,13 @@ async function tryNpmInstall(
 }
 
 /**
- * Install from TrikHub registry (GitHub releases)
- * Extracts directly to node_modules since TrikHub tarballs may not be npm-compatible
+ * Install from TrikHub registry using git URLs
  */
 async function installFromTrikhub(
   packageName: string,
   requestedVersion: string | undefined,
   baseDir: string,
+  pm: PackageManager,
   spinner: ReturnType<typeof ora>
 ): Promise<{ success: boolean; version?: string }> {
   // Fetch trik info from TrikHub registry
@@ -302,68 +323,43 @@ async function installFromTrikhub(
     return { success: false };
   }
 
-  // Download the tarball
-  spinner.text = `Downloading ${chalk.cyan(packageName)}@${versionToInstall}...`;
-  const tempDir = join(baseDir, '.trikhub', '.tmp');
-  const tarballPath = join(tempDir, `${packageName.replace('/', '-')}-${versionToInstall}.tgz`);
+  // Verify the commit SHA hasn't changed (security check)
+  spinner.text = `Verifying ${chalk.cyan(packageName)}@${versionToInstall}...`;
+  const verification = await verifyGitHubTagSha(
+    trikInfo.githubRepo,
+    versionInfo.gitTag,
+    versionInfo.commitSha
+  );
 
-  try {
-    await downloadFile(versionInfo.tarballUrl, tarballPath);
-
-    // Extract directly to node_modules
-    spinner.text = `Installing ${chalk.cyan(packageName)}@${versionToInstall}...`;
-
-    // Create the target directory in node_modules
-    const nodeModulesPath = join(baseDir, 'node_modules');
-    const packagePath = join(nodeModulesPath, ...packageName.split('/'));
-
-    // Ensure parent directories exist (for scoped packages)
-    if (packageName.startsWith('@')) {
-      const scopeDir = join(nodeModulesPath, packageName.split('/')[0]);
-      if (!existsSync(scopeDir)) {
-        mkdirSync(scopeDir, { recursive: true });
-      }
+  if (!verification.valid) {
+    spinner.fail(`Security warning: Tag ${versionInfo.gitTag} has been modified!`);
+    console.log(chalk.red('\nThe git tag no longer points to the same commit as when it was published.'));
+    console.log(chalk.dim(`  Expected SHA: ${versionInfo.commitSha}`));
+    if (verification.currentSha) {
+      console.log(chalk.dim(`  Current SHA:  ${verification.currentSha}`));
     }
-
-    // Remove existing installation if present
-    if (existsSync(packagePath)) {
-      rmSync(packagePath, { recursive: true, force: true });
-    }
-
-    // Create target directory
-    mkdirSync(packagePath, { recursive: true });
-
-    // Extract tarball to the package directory
-    // npm-compatible tarballs have files inside a 'package/' directory
-    // We strip that prefix when extracting
-    await tar.extract({
-      file: tarballPath,
-      cwd: packagePath,
-      strip: 1, // Remove the 'package/' prefix
-    });
-
-    // Add to package.json dependencies using tarball URL
-    // This is npm-compatible and will work with npm install
-    await addToPackageJson(packageName, versionInfo.tarballUrl, baseDir);
-
-    // Report download for analytics
-    registry.reportDownload(packageName, versionToInstall);
-
-    return { success: true, version: versionToInstall };
-  } finally {
-    // Clean up tarball
-    if (existsSync(tarballPath)) {
-      rmSync(tarballPath, { force: true });
-    }
-    // Clean up temp dir if empty
-    if (existsSync(tempDir)) {
-      try {
-        rmSync(tempDir, { recursive: true, force: true });
-      } catch {
-        // Ignore cleanup errors
-      }
-    }
+    console.log(chalk.red('\nThis could indicate tampering. Aborting installation.'));
+    return { success: false };
   }
+
+  // Add to package.json using git URL format
+  spinner.text = `Adding ${chalk.cyan(packageName)}@${versionToInstall} to package.json...`;
+  await addToPackageJson(packageName, trikInfo.githubRepo, versionInfo.gitTag, baseDir);
+
+  // Run package manager install
+  spinner.text = `Installing ${chalk.cyan(packageName)}@${versionToInstall}...`;
+  const installResult = await runCommand(pm, ['install'], baseDir, { silent: true });
+
+  if (installResult.code !== 0) {
+    spinner.fail(`Failed to install ${packageName}`);
+    console.log(chalk.dim(installResult.stderr));
+    return { success: false };
+  }
+
+  // Report download for analytics
+  registry.reportDownload(packageName, versionToInstall);
+
+  return { success: true, version: versionToInstall };
 }
 
 export async function installCommand(
@@ -418,7 +414,7 @@ export async function installCommand(
     } else if (npmResult.notFound) {
       // Not on npm, try TrikHub registry
       spinner.text = `Not found on npm, checking TrikHub registry...`;
-      const trikhubResult = await installFromTrikhub(packageName, versionSpec, baseDir, spinner);
+      const trikhubResult = await installFromTrikhub(packageName, versionSpec, baseDir, pm, spinner);
 
       if (trikhubResult.success) {
         spinner.succeed(`Installed ${chalk.green(packageName)}@${trikhubResult.version} from TrikHub`);

@@ -490,6 +490,8 @@ Available categories:
 
 ### Publishing
 
+**Important:** Triks are distributed directly from GitHub repositories. You must commit your `dist/` directory and create a git tag before publishing.
+
 ```bash
 # Install the TrikHub CLI
 npm install -g @trikhub/cli
@@ -500,16 +502,24 @@ trik login
 # Build your trik
 npm run build
 
-# Publish to TrikHub
+# Commit dist/ to git (required for distribution)
+git add dist/ -f
+git commit -m "Build v1.0.0"
+
+# Create and push a git tag
+git tag v1.0.0
+git push origin main --tags
+
+# Register with TrikHub
 trik publish
 ```
 
 The CLI will:
 
 1. Validate your manifest and trikhub.json
-2. Create a tarball with required files
-3. Create a GitHub Release
-4. Register with the TrikHub registry
+2. Verify the git tag exists on the remote
+3. Capture the commit SHA for integrity verification
+4. Register the version with the TrikHub registry
 
 ### Installing Published Triks
 
@@ -519,9 +529,13 @@ trik search article
 
 # Install a trik
 trik install @your-username/your-trik
-
-# Triks are installed to ~/.trikhub/triks/
 ```
+
+The install command:
+1. Fetches version info from TrikHub registry
+2. Verifies the git tag still points to the original commit (security check)
+3. Adds `"github:owner/repo#tag"` to your package.json
+4. Runs your package manager to install
 
 ## Related Projects
 

@@ -59,8 +59,8 @@ interface ApiTrikInfo {
 interface ApiTrikVersion {
   version: string;
   manifest: unknown;
-  tarballUrl: string;
-  sha256: string | null;
+  gitTag: string;
+  commitSha: string;
   publishedAt: string;
   downloads: number;
 }
@@ -103,12 +103,11 @@ function apiToTrikInfo(api: ApiTrikInfo, versions: TrikVersion[] = []): TrikInfo
 /**
  * Convert API version to CLI TrikVersion type
  */
-function apiToTrikVersion(api: ApiTrikVersion, githubRepo: string): TrikVersion {
+function apiToTrikVersion(api: ApiTrikVersion): TrikVersion {
   return {
     version: api.version,
-    releaseUrl: `https://github.com/${githubRepo}/releases/tag/v${api.version}`,
-    tarballUrl: api.tarballUrl,
-    sha256: api.sha256,
+    gitTag: api.gitTag,
+    commitSha: api.commitSha,
     publishedAt: api.publishedAt,
     downloads: api.downloads,
   };
@@ -230,7 +229,7 @@ export class RegistryClient {
       // Use path directly - routes expect /api/v1/triks/:scope/:trikName
       const result = await this.fetch<ApiTrikDetails>(`/api/v1/triks/${trikPath(fullName)}`);
 
-      const versions = result.versions.map((v) => apiToTrikVersion(v, result.githubRepo));
+      const versions = result.versions.map((v) => apiToTrikVersion(v));
       return apiToTrikInfo(result, versions);
     } catch (error) {
       if (error instanceof Error && error.message.includes('Not found')) {
@@ -406,8 +405,8 @@ export class RegistryClient {
     fullName: string,
     data: {
       version: string;
-      tarballUrl: string;
-      sha256?: string;
+      gitTag: string;
+      commitSha: string;
       manifest: Record<string, unknown>;
     }
   ): Promise<TrikVersion> {
@@ -421,11 +420,7 @@ export class RegistryClient {
       body: JSON.stringify(data),
     });
 
-    // Get the github repo for the release URL
-    const trik = await this.getTrik(fullName);
-    const githubRepo = trik?.githubRepo ?? '';
-
-    return apiToTrikVersion(result, githubRepo);
+    return apiToTrikVersion(result);
   }
 }
 
