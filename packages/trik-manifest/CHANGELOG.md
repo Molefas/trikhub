@@ -1,5 +1,11 @@
 # @saaas-sdk/manifest
 
+## 0.3.0
+
+### Minor Changes
+
+- [`650b022`](https://github.com/Muffles/trikhub/commit/650b022e7428de19ee28676b11ec916b606b9385) - Simplified publishing; Fixes
+
 ## 0.2.0
 
 ## 0.2.0
