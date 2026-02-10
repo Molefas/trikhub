@@ -1,5 +1,13 @@
 # @saaas-sdk/example
 
+## 1.0.3
+
+### Patch Changes
+
+- Updated dependencies [[`ae4260d`](https://github.com/Muffles/trikhub/commit/ae4260deb3f65ce5113c3a69eee6f257821aae1f)]:
+  - @trikhub/gateway@0.4.0
+  - @trikhub/manifest@0.4.0
+
 ## 1.0.2
 
 ### Patch Changes
