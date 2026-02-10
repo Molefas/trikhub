@@ -1,5 +1,16 @@
 # @saaas-sdk/gateway
 
+## 0.4.0
+
+### Minor Changes
+
+- [#13](https://github.com/Muffles/trikhub/pull/13) [`ae4260d`](https://github.com/Muffles/trikhub/commit/ae4260deb3f65ce5113c3a69eee6f257821aae1f) Thanks [@Muffles](https://github.com/Muffles)! - Simplified boilerplate within langgraph adapter
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @trikhub/manifest@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes
