@@ -1,8 +1,11 @@
 import { tool, type DynamicStructuredTool } from '@langchain/core/tools';
 import { z, type ZodTypeAny } from 'zod';
-import type { TrikGateway, ToolDefinition } from '../gateway.js';
+import { TrikGateway, type ToolDefinition } from '../gateway.js';
 import type { PassthroughContent } from '@trikhub/manifest';
 import { jsonSchemaToZod } from './schema-converter.js';
+
+// Re-export for convenience
+export type { PassthroughContent } from '@trikhub/manifest';
 
 export interface LangChainAdapterOptions {
   /** Get session ID for a trik (for multi-turn conversations) */
@@ -13,6 +16,55 @@ export interface LangChainAdapterOptions {
   onPassthrough?: (content: PassthroughContent) => void;
   /** Enable debug logging */
   debug?: boolean;
+}
+
+/**
+ * Options for the simplified loadLangChainTriks function
+ */
+export interface LoadLangChainTriksOptions {
+  /**
+   * Callback when passthrough content is delivered.
+   * Passthrough content bypasses the agent and goes directly to the user.
+   */
+  onPassthrough?: (content: PassthroughContent) => void;
+
+  /**
+   * Enable debug logging
+   */
+  debug?: boolean;
+
+  /**
+   * Path to the .trikhub/config.json file.
+   * Defaults to .trikhub/config.json in the current working directory.
+   */
+  configPath?: string;
+
+  /**
+   * Base directory for resolving node_modules.
+   * Defaults to the directory containing the config file.
+   */
+  baseDir?: string;
+}
+
+/**
+ * Result from loadLangChainTriks
+ */
+export interface LangChainTriksResult {
+  /**
+   * LangChain tools ready to bind to a model
+   */
+  tools: DynamicStructuredTool[];
+
+  /**
+   * The gateway instance for advanced operations.
+   * Use this if you need direct access to gateway methods.
+   */
+  gateway: TrikGateway;
+
+  /**
+   * List of loaded trik IDs (for logging/display)
+   */
+  loadedTriks: string[];
 }
 
 function fillTemplate(template: string, data: Record<string, unknown>): string {
@@ -154,4 +206,64 @@ export function getToolNameMap(gateway: TrikGateway): Map<string, string> {
   }
 
   return map;
+}
+
+/**
+ * Load triks and create LangChain tools with minimal boilerplate.
+ *
+ * This is the recommended way to integrate Triks with LangChain.
+ * For more control, use createLangChainTools() directly.
+ *
+ * @example
+ * ```typescript
+ * const { tools, gateway, loadedTriks } = await loadLangChainTriks({
+ *   onPassthrough: (content) => console.log('Passthrough:', content.content),
+ *   debug: true,
+ * });
+ *
+ * const model = new ChatAnthropic().bindTools(tools);
+ * ```
+ */
+export async function loadLangChainTriks(
+  options: LoadLangChainTriksOptions = {}
+): Promise<LangChainTriksResult> {
+  const { onPassthrough, debug, configPath, baseDir } = options;
+
+  // Create gateway
+  const gateway = new TrikGateway();
+
+  // Load triks from config
+  const manifests = await gateway.loadTriksFromConfig({
+    configPath,
+    baseDir,
+  });
+
+  const loadedTriks = manifests.map((m) => m.id);
+
+  if (debug) {
+    console.log(
+      `[loadLangChainTriks] Loaded ${loadedTriks.length} triks: ${loadedTriks.join(', ')}`
+    );
+  }
+
+  // Internal session management
+  const sessions = new Map<string, string>();
+
+  // Create LangChain tools with internal session management
+  const tools = createLangChainTools(gateway, {
+    getSessionId: (trikId) => sessions.get(trikId),
+    setSessionId: (trikId, sessionId) => sessions.set(trikId, sessionId),
+    onPassthrough,
+    debug,
+  });
+
+  if (debug) {
+    console.log(`[loadLangChainTriks] Created ${tools.length} tools`);
+  }
+
+  return {
+    tools,
+    gateway,
+    loadedTriks,
+  };
 }
