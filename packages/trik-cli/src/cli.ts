@@ -7,6 +7,7 @@
  */
 
 import { Command } from 'commander';
+import { createRequire } from 'module';
 import { installCommand } from './commands/install.js';
 import { listCommand } from './commands/list.js';
 import { searchCommand } from './commands/search.js';
@@ -17,12 +18,23 @@ import { publishCommand } from './commands/publish.js';
 import { upgradeCommand, upgradeAllCommand } from './commands/upgrade.js';
 import { syncCommand } from './commands/sync.js';
 
+// Read version from package.json
+const require = createRequire(import.meta.url);
+const pkg = require('../package.json');
+
 const program = new Command();
 
 program
   .name('trik')
   .description('TrikHub CLI - Teaching AI new triks')
-  .version('0.1.0');
+  .version(pkg.version)
+  .option('--dev', 'Use development registry (localhost:3001)')
+  .hook('preAction', () => {
+    // Set NODE_ENV before any command runs if --dev flag is passed
+    if (program.opts().dev) {
+      process.env.NODE_ENV = 'development';
+    }
+  });
 
 // Install command
 program
@@ -88,7 +100,6 @@ program
   .description('Publish a trik to the registry')
   .option('-d, --directory <path>', 'Trik directory to publish', '.')
   .option('-t, --tag <version>', 'Version tag (default: from manifest)')
-  .option('--skip-release', 'Skip creating GitHub release (for manual upload)')
   .action(publishCommand);
 
 // Upgrade command

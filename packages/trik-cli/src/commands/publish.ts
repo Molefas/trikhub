@@ -2,16 +2,19 @@
  * trik publish command
  *
  * Publishes a trik to the TrikHub registry.
+ *
+ * New simplified flow:
+ * 1. Validate trik structure
+ * 2. Verify git tag exists on remote
+ * 3. Get commit SHA for the tag
+ * 4. Register with TrikHub registry (no tarball, no GitHub Release)
  */
 
-import { existsSync, readFileSync, mkdirSync, rmSync } from 'node:fs';
-import { join, basename, resolve } from 'node:path';
-import { createHash } from 'node:crypto';
-import { execSync, spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { execSync } from 'node:child_process';
 import chalk from 'chalk';
 import ora from 'ora';
-import * as tar from 'tar';
 import { TrikHubMetadata } from '../types.js';
 import { RegistryClient } from '../lib/registry.js';
 import { loadConfig } from '../lib/storage.js';
@@ -20,7 +23,6 @@ import { validateTrik, formatValidationResult } from '../lib/validator.js';
 interface PublishOptions {
   directory?: string;
   tag?: string;
-  skipRelease?: boolean;
 }
 
 interface TrikManifest {
@@ -35,6 +37,62 @@ interface TrikManifest {
   actions: Record<string, unknown>;
   capabilities?: unknown;
   limits?: unknown;
+}
+
+/**
+ * Get the commit SHA that a tag points to on the remote
+ */
+function getRemoteTagCommitSha(trikDir: string, tag: string): string | null {
+  try {
+    // First try to get the tag's commit from the remote
+    const result = execSync(`git ls-remote --tags origin refs/tags/${tag}`, {
+      cwd: trikDir,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    if (!result) {
+      return null;
+    }
+
+    // Format is: "sha\trefs/tags/tagname"
+    const sha = result.split('\t')[0];
+
+    // If it's an annotated tag, we need to dereference it to get the commit SHA
+    const derefResult = execSync(`git ls-remote --tags origin refs/tags/${tag}^{}`, {
+      cwd: trikDir,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    if (derefResult) {
+      // Annotated tag - use dereferenced commit
+      return derefResult.split('\t')[0];
+    }
+
+    // Lightweight tag - use the SHA directly
+    return sha;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if the dist/ directory is committed (not ignored)
+ */
+function isDistCommitted(trikDir: string): boolean {
+  try {
+    // Check if dist/ is tracked in git
+    const result = execSync('git ls-files dist/', {
+      cwd: trikDir,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    return result.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 export async function publishCommand(options: PublishOptions): Promise<void> {
@@ -120,8 +178,9 @@ export async function publishCommand(options: PublishOptions): Promise<void> {
       spinner.succeed('Validation passed');
     }
 
-    // Step 2: Determine version
+    // Step 2: Determine version and git tag
     const version = options.tag?.replace(/^v/, '') || manifest.version;
+    const gitTag = `v${version}`;
     console.log(chalk.dim(`  Version: ${version}`));
 
     // Step 3: Get GitHub repo from trikhub.json
@@ -137,155 +196,76 @@ export async function publishCommand(options: PublishOptions): Promise<void> {
     const trikName = manifest.id || manifest.name;
     const fullName = `@${owner}/${trikName}`;
 
+    // Step 4: Verify git remote matches trikhub.json repository
+    spinner.start('Verifying git remote...');
+    try {
+      const gitRemote = execSync('git remote get-url origin', {
+        cwd: trikDir,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+
+      // Normalize URLs for comparison (handle SSH and HTTPS variants)
+      const normalizeGitUrl = (url: string): string => {
+        return url
+          .replace(/^git@github\.com:/, 'github.com/')
+          .replace(/^https?:\/\//, '')
+          .replace(/\.git$/, '')
+          .toLowerCase();
+      };
+
+      const normalizedRemote = normalizeGitUrl(gitRemote);
+
+      if (!normalizedRemote.includes(githubRepo.toLowerCase())) {
+        spinner.fail('Git remote does not match trikhub.json repository');
+        console.log(chalk.red('\nRepository mismatch detected:'));
+        console.log(chalk.dim(`  trikhub.json: ${repoUrl}`));
+        console.log(chalk.dim(`  git remote:   ${gitRemote}`));
+        console.log();
+        console.log(chalk.dim('Update trikhub.json to match your git remote, or push to the correct repository.'));
+        process.exit(1);
+      }
+      spinner.succeed('Git remote verified');
+    } catch {
+      // Not a git repo or no remote configured
+      spinner.fail('Not a git repository or no remote configured');
+      console.log(chalk.dim('Initialize git and add a remote that matches trikhub.json:'));
+      console.log(chalk.dim(`  git init`));
+      console.log(chalk.dim(`  git remote add origin ${repoUrl}`));
+      process.exit(1);
+    }
+
     console.log(chalk.dim(`  Trik: ${fullName}`));
     console.log(chalk.dim(`  Repo: ${githubRepo}`));
 
-    // Step 4: Create tarball
-    spinner.start('Creating tarball...');
-
-    const tarballName = `${trikName}-${version}.tar.gz`;
-    const tarballDir = join(tmpdir(), `trikhub-publish-${Date.now()}`);
-    mkdirSync(tarballDir, { recursive: true });
-    const tarballPath = join(tarballDir, tarballName);
-
-    // Files to include in tarball
-    const filesToInclude = [
-      'manifest.json',
-      'trikhub.json',
-      manifest.entry.module,
-    ];
-
-    // Add dist directory if it exists
-    const distDir = join(trikDir, 'dist');
-    if (existsSync(distDir)) {
-      filesToInclude.push('dist');
+    // Step 5: Check that dist/ is committed
+    spinner.start('Checking dist/ is committed...');
+    if (!isDistCommitted(trikDir)) {
+      spinner.fail('dist/ directory is not committed to git');
+      console.log(chalk.red('\nTriks require dist/ to be committed for direct GitHub installation.'));
+      console.log(chalk.dim('Add dist/ to your repository:'));
+      console.log(chalk.dim(`  git add dist/ -f`));
+      console.log(chalk.dim(`  git commit -m "Add dist for publishing"`));
+      console.log(chalk.dim(`  git push`));
+      process.exit(1);
     }
+    spinner.succeed('dist/ is committed');
 
-    // Add README if it exists
-    for (const readme of ['README.md', 'README.txt', 'README']) {
-      if (existsSync(join(trikDir, readme))) {
-        filesToInclude.push(readme);
-        break;
-      }
+    // Step 6: Verify git tag exists on remote
+    spinner.start(`Verifying tag ${gitTag} exists on remote...`);
+    const commitSha = getRemoteTagCommitSha(trikDir, gitTag);
+
+    if (!commitSha) {
+      spinner.fail(`Tag ${gitTag} not found on remote`);
+      console.log(chalk.red('\nThe git tag must exist on the remote before publishing.'));
+      console.log(chalk.dim('Create and push the tag:'));
+      console.log(chalk.dim(`  git tag ${gitTag}`));
+      console.log(chalk.dim(`  git push origin ${gitTag}`));
+      process.exit(1);
     }
+    spinner.succeed(`Tag ${gitTag} verified (${commitSha.slice(0, 8)}...)`);
 
-    // Add LICENSE if it exists
-    for (const license of ['LICENSE', 'LICENSE.md', 'LICENSE.txt']) {
-      if (existsSync(join(trikDir, license))) {
-        filesToInclude.push(license);
-        break;
-      }
-    }
-
-    await tar.create(
-      {
-        gzip: true,
-        file: tarballPath,
-        cwd: trikDir,
-      },
-      filesToInclude.filter((f) => existsSync(join(trikDir, f)))
-    );
-
-    // Compute SHA-256
-    const tarballBuffer = readFileSync(tarballPath);
-    const sha256 = createHash('sha256').update(tarballBuffer).digest('hex');
-
-    spinner.succeed(`Tarball created (${(tarballBuffer.length / 1024).toFixed(1)} KB)`);
-    console.log(chalk.dim(`  SHA-256: ${sha256.slice(0, 16)}...`));
-
-    // Step 5: Create GitHub Release (unless skipped)
-    let tarballUrl: string;
-
-    if (options.skipRelease) {
-      // User must provide tarball URL manually
-      console.log(chalk.yellow('\nSkipping GitHub release creation.'));
-      console.log('Please create a release manually and provide the tarball URL.');
-      console.log(chalk.dim(`Tarball saved at: ${tarballPath}`));
-
-      // For now, construct expected URL
-      tarballUrl = `https://github.com/${githubRepo}/releases/download/v${version}/${tarballName}`;
-      console.log(chalk.dim(`Expected tarball URL: ${tarballUrl}`));
-    } else {
-      spinner.start('Creating GitHub release...');
-
-      // Check if gh CLI is available
-      const ghCheck = spawnSync('gh', ['--version'], { encoding: 'utf-8' });
-      if (ghCheck.status !== 0) {
-        spinner.fail('GitHub CLI (gh) not found');
-        console.log(chalk.dim('Install: https://cli.github.com/'));
-        console.log(chalk.dim('Or use --skip-release to create the release manually'));
-        // Cleanup
-        rmSync(tarballDir, { recursive: true, force: true });
-        process.exit(1);
-      }
-
-      // Check gh auth status
-      const authCheck = spawnSync('gh', ['auth', 'status'], { encoding: 'utf-8' });
-      if (authCheck.status !== 0) {
-        spinner.fail('GitHub CLI not authenticated');
-        console.log(chalk.dim('Run: gh auth login'));
-        rmSync(tarballDir, { recursive: true, force: true });
-        process.exit(1);
-      }
-
-      // Create release
-      try {
-        const releaseResult = spawnSync(
-          'gh',
-          [
-            'release',
-            'create',
-            `v${version}`,
-            tarballPath,
-            '--repo',
-            githubRepo,
-            '--title',
-            `v${version}`,
-            '--notes',
-            `Release v${version}\n\nPublished via TrikHub CLI`,
-          ],
-          { encoding: 'utf-8', cwd: trikDir }
-        );
-
-        if (releaseResult.status !== 0) {
-          // Check if release already exists
-          if (releaseResult.stderr?.includes('already exists')) {
-            spinner.info('Release already exists, uploading asset...');
-
-            // Upload asset to existing release
-            const uploadResult = spawnSync(
-              'gh',
-              [
-                'release',
-                'upload',
-                `v${version}`,
-                tarballPath,
-                '--repo',
-                githubRepo,
-                '--clobber',
-              ],
-              { encoding: 'utf-8', cwd: trikDir }
-            );
-
-            if (uploadResult.status !== 0) {
-              throw new Error(uploadResult.stderr || 'Failed to upload asset');
-            }
-          } else {
-            throw new Error(releaseResult.stderr || 'Failed to create release');
-          }
-        }
-
-        tarballUrl = `https://github.com/${githubRepo}/releases/download/v${version}/${tarballName}`;
-        spinner.succeed('GitHub release created');
-      } catch (error) {
-        spinner.fail('Failed to create GitHub release');
-        console.log(chalk.red(error instanceof Error ? error.message : String(error)));
-        rmSync(tarballDir, { recursive: true, force: true });
-        process.exit(1);
-      }
-    }
-
-    // Step 6: Register with registry
+    // Step 7: Register with registry
     spinner.start('Publishing to TrikHub registry...');
 
     const registry = new RegistryClient();
@@ -318,8 +298,8 @@ export async function publishCommand(options: PublishOptions): Promise<void> {
       // Publish version
       await registry.publishVersion(fullName, {
         version,
-        tarballUrl,
-        sha256,
+        gitTag,
+        commitSha,
         manifest: manifest as unknown as Record<string, unknown>,
       });
 
@@ -327,12 +307,8 @@ export async function publishCommand(options: PublishOptions): Promise<void> {
     } catch (error) {
       spinner.fail('Failed to publish to registry');
       console.log(chalk.red(error instanceof Error ? error.message : String(error)));
-      rmSync(tarballDir, { recursive: true, force: true });
       process.exit(1);
     }
-
-    // Cleanup
-    rmSync(tarballDir, { recursive: true, force: true });
 
     // Success message
     console.log();

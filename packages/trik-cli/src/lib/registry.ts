@@ -15,6 +15,29 @@ import {
 import { loadConfig } from './storage.js';
 
 /**
+ * Registry URLs by environment
+ */
+const REGISTRY_URLS = {
+  production: 'https://api.trikhub.com',
+  development: 'http://localhost:3001',
+} as const;
+
+/**
+ * Get the registry base URL based on environment
+ * Priority: TRIKHUB_REGISTRY env var > NODE_ENV-based selection
+ */
+function getRegistryUrl(): string {
+  // Allow explicit override via env var (useful for testing)
+  if (process.env.TRIKHUB_REGISTRY) {
+    return process.env.TRIKHUB_REGISTRY;
+  }
+
+  // Use NODE_ENV to determine environment
+  const isDev = process.env.NODE_ENV === 'development';
+  return isDev ? REGISTRY_URLS.development : REGISTRY_URLS.production;
+}
+
+/**
  * API response types (matches registry service)
  */
 interface ApiTrikInfo {
@@ -36,8 +59,8 @@ interface ApiTrikInfo {
 interface ApiTrikVersion {
   version: string;
   manifest: unknown;
-  tarballUrl: string;
-  sha256: string | null;
+  gitTag: string;
+  commitSha: string;
   publishedAt: string;
   downloads: number;
 }
@@ -80,12 +103,11 @@ function apiToTrikInfo(api: ApiTrikInfo, versions: TrikVersion[] = []): TrikInfo
 /**
  * Convert API version to CLI TrikVersion type
  */
-function apiToTrikVersion(api: ApiTrikVersion, githubRepo: string): TrikVersion {
+function apiToTrikVersion(api: ApiTrikVersion): TrikVersion {
   return {
     version: api.version,
-    releaseUrl: `https://github.com/${githubRepo}/releases/tag/v${api.version}`,
-    tarballUrl: api.tarballUrl,
-    sha256: api.sha256,
+    gitTag: api.gitTag,
+    commitSha: api.commitSha,
     publishedAt: api.publishedAt,
     downloads: api.downloads,
   };
@@ -106,14 +128,31 @@ function trikPath(fullName: string): string {
  * Registry client class
  */
 export class RegistryClient {
-  private baseUrl: string;
-  private authToken?: string;
+  private _explicitBaseUrl?: string;
+  private _explicitAuthToken?: string;
 
   constructor(baseUrl?: string, authToken?: string) {
+    // Store explicit overrides if provided
+    this._explicitBaseUrl = baseUrl;
+    this._explicitAuthToken = authToken;
+  }
+
+  /**
+   * Get the base URL (evaluated fresh each time to support --dev flag)
+   */
+  private get baseUrl(): string {
+    return this._explicitBaseUrl ?? getRegistryUrl();
+  }
+
+  /**
+   * Get the auth token
+   */
+  private get authToken(): string | undefined {
+    if (this._explicitAuthToken) {
+      return this._explicitAuthToken;
+    }
     const config = loadConfig();
-    // Priority: explicit param > env var > config file
-    this.baseUrl = baseUrl ?? process.env.TRIKHUB_REGISTRY ?? config.registry;
-    this.authToken = authToken ?? config.authToken;
+    return config.authToken;
   }
 
   /**
@@ -130,7 +169,14 @@ export class RegistryClient {
       headers['Authorization'] = `Bearer ${this.authToken}`;
     }
 
-    const response = await fetch(url, { ...options, headers });
+    let response: Response;
+    try {
+      response = await fetch(url, { ...options, headers });
+    } catch (error) {
+      // Provide more helpful error message for connection failures
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to connect to registry at ${this.baseUrl}: ${errorMessage}`);
+    }
 
     if (!response.ok) {
       if (response.status === 401) {
@@ -183,7 +229,7 @@ export class RegistryClient {
       // Use path directly - routes expect /api/v1/triks/:scope/:trikName
       const result = await this.fetch<ApiTrikDetails>(`/api/v1/triks/${trikPath(fullName)}`);
 
-      const versions = result.versions.map((v) => apiToTrikVersion(v, result.githubRepo));
+      const versions = result.versions.map((v) => apiToTrikVersion(v));
       return apiToTrikInfo(result, versions);
     } catch (error) {
       if (error instanceof Error && error.message.includes('Not found')) {
@@ -359,8 +405,8 @@ export class RegistryClient {
     fullName: string,
     data: {
       version: string;
-      tarballUrl: string;
-      sha256?: string;
+      gitTag: string;
+      commitSha: string;
       manifest: Record<string, unknown>;
     }
   ): Promise<TrikVersion> {
@@ -374,11 +420,7 @@ export class RegistryClient {
       body: JSON.stringify(data),
     });
 
-    // Get the github repo for the release URL
-    const trik = await this.getTrik(fullName);
-    const githubRepo = trik?.githubRepo ?? '';
-
-    return apiToTrikVersion(result, githubRepo);
+    return apiToTrikVersion(result);
   }
 }
 

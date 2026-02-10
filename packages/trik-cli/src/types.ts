@@ -112,14 +112,11 @@ export interface TrikVersion {
   /** Semantic version (e.g., "1.2.3") */
   version: string;
 
-  /** GitHub release URL */
-  releaseUrl: string;
+  /** Git tag (e.g., "v1.2.3") */
+  gitTag: string;
 
-  /** Direct tarball download URL */
-  tarballUrl: string;
-
-  /** SHA-256 hash of the tarball for integrity verification */
-  sha256: string | null;
+  /** Git commit SHA for immutability verification */
+  commitSha: string;
 
   /** When this version was published */
   publishedAt: string;
@@ -141,11 +138,14 @@ export interface InstalledTrik {
   /** GitHub repo it was installed from */
   githubRepo: string;
 
+  /** Git tag used */
+  gitTag: string;
+
   /** When it was installed */
   installedAt: string;
 
-  /** SHA of the tarball (for integrity) */
-  integrity?: string;
+  /** Commit SHA for integrity verification */
+  commitSha: string;
 }
 
 /**
@@ -163,9 +163,6 @@ export interface TrikLockfile {
  * CLI configuration (~/.trikhub/config.json)
  */
 export interface TrikConfig {
-  /** Registry URL (default: https://api.trikhub.com) */
-  registry: string;
-
   /** Directory where triks are installed */
   triksDirectory: string;
 
@@ -269,7 +266,6 @@ export function parseTrikName(input: string): {
  * Default configuration values
  */
 export const DEFAULT_CONFIG: TrikConfig = {
-  registry: 'https://api.trikhub.com',
   triksDirectory: '~/.trikhub/triks',
   analytics: true,
 };
