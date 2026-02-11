@@ -29,17 +29,17 @@
     "typescript",
     "trikhub"
   ],
-  "author": "Muffles",
+  "author": "Molefas",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Muffles/trikhub.git",
+    "url": "git+https://github.com/Molefas/trikhub.git",
     "directory": "packages/trik-linter"
   },
   "bugs": {
-    "url": "https://github.com/Muffles/trikhub/issues"
+    "url": "https://github.com/Molefas/trikhub/issues"
   },
-  "homepage": "https://github.com/Muffles/trikhub/tree/main/packages/trik-linter#readme",
+  "homepage": "https://github.com/Molefas/trikhub/tree/main/packages/trik-linter#readme",
   "publishConfig": {
     "access": "public"
   },

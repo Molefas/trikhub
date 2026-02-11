@@ -6,13 +6,13 @@
   "description": "TrikHub SDK - Secure trik execution for AI agents",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Muffles/trikhub.git"
+    "url": "git+https://github.com/Molefas/trikhub.git"
   },
   "bugs": {
-    "url": "https://github.com/Muffles/trikhub/issues"
+    "url": "https://github.com/Molefas/trikhub/issues"
   },
-  "homepage": "https://github.com/Muffles/trikhub#readme",
-  "author": "Muffles",
+  "homepage": "https://github.com/Molefas/trikhub#readme",
+  "author": "Molefas",
   "license": "MIT",
   "scripts": {
     "build": "tsc -b",

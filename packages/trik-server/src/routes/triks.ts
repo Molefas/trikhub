@@ -42,7 +42,7 @@ const installRequestSchema = {
   type: 'object',
   required: ['package'],
   properties: {
-    package: { type: 'string', description: 'Package name to install (e.g., @muffles/article-search)' },
+    package: { type: 'string', description: 'Package name to install (e.g., @molefas/article-search)' },
   },
 } as const;
 

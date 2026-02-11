@@ -269,7 +269,7 @@ export class TrikGateway {
    * Config file format:
    * ```json
    * {
-   *   "triks": ["@muffles/article-search", "some-other-trik"]
+   *   "triks": ["@molefas/article-search", "some-other-trik"]
    * }
    * ```
    *
