@@ -1,5 +1,13 @@
 # @saaas-sdk/example
 
+## 1.0.4
+
+### Patch Changes
+
+- Updated dependencies [[`7165027`](https://github.com/Molefas/trikhub/commit/716502756fe49d8177c71bae46195d41fc53dab5)]:
+  - @trikhub/gateway@0.5.0
+  - @trikhub/manifest@0.5.0
+
 ## 1.0.3
 
 ### Patch Changes

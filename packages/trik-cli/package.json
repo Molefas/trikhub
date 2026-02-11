@@ -1,6 +1,6 @@
 {
   "name": "@trikhub/cli",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "CLI for TrikHub - Teaching AI new triks",
   "type": "module",
   "main": "./dist/index.js",
