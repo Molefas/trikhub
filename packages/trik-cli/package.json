@@ -44,13 +44,13 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Muffles/trikhub.git",
+    "url": "git+https://github.com/Molefas/trikhub.git",
     "directory": "packages/trik-cli"
   },
   "bugs": {
-    "url": "https://github.com/Muffles/trikhub/issues"
+    "url": "https://github.com/Molefas/trikhub/issues"
   },
-  "homepage": "https://github.com/Muffles/trikhub/tree/main/packages/trik-cli#readme",
+  "homepage": "https://github.com/Molefas/trikhub/tree/main/packages/trik-cli#readme",
   "publishConfig": {
     "access": "public"
   },
@@ -61,6 +61,6 @@
     "skills",
     "cli"
   ],
-  "author": "Muffles",
+  "author": "Molefas",
   "license": "MIT"
 }

@@ -114,7 +114,7 @@ function apiToTrikVersion(api: ApiTrikVersion): TrikVersion {
 }
 
 /**
- * Build a trik path from full name (e.g., "@Muffles/article-search" -> "@Muffles/article-search")
+ * Build a trik path from full name (e.g., "@Molefas/article-search" -> "@Molefas/article-search")
  * Used to construct API paths with scope and name as separate segments
  */
 function trikPath(fullName: string): string {

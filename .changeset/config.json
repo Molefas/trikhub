@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
-  "changelog": ["@changesets/changelog-github", { "repo": "Muffles/trikhub" }],
+  "changelog": ["@changesets/changelog-github", { "repo": "Molefas/trikhub" }],
   "commit": false,
   "fixed": [["@trikhub/manifest", "@trikhub/gateway", "@trikhub/linter", "@trikhub/server"]],
   "linked": [],
