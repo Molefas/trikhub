@@ -5,7 +5,6 @@
     { "path": "packages/trik-gateway" },
     { "path": "packages/trik-linter" },
     { "path": "packages/trik-server" },
-    { "path": "packages/trik-cli" },
-    { "path": "example" }
+    { "path": "packages/trik-cli" }
   ]
 }

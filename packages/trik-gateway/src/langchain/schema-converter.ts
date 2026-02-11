@@ -71,7 +71,8 @@ export function jsonSchemaToZod(schema: JSONSchema, path: string = 'root'): ZodT
         const propZod = jsonSchemaToZod(propSchema as JSONSchema, `${path}.${key}`);
 
         if (!schema.required?.includes(key)) {
-          shape[key] = propZod.optional();
+          // OpenAI structured outputs require optional fields to also be nullable
+          shape[key] = propZod.nullable().optional();
         } else {
           shape[key] = propZod;
         }
