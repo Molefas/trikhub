@@ -1,0 +1,46 @@
+# Git
+.git
+.gitignore
+
+# Node modules (will be installed in container)
+node_modules
+**/node_modules
+
+# Development files
+.changeset
+.github
+.vscode
+
+# Test files
+**/*.test.ts
+**/*.spec.ts
+**/test
+**/tests
+**/__tests__
+
+# Build artifacts that shouldn't be copied (will be built in container)
+**/dist
+**/.tsbuildinfo
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed for build)
+*.md
+!packages/*/README.md
+
+# Example/playground folders
+trikhub-playground
+trikhub-server-playground
+example/triks

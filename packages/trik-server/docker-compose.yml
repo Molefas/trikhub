@@ -1,0 +1,25 @@
+services:
+  trik-server:
+    build:
+      context: ../..
+      dockerfile: packages/trik-server/Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persist data directory for runtime trik installation
+      - trik-data:/data
+      # Optional: mount local skills (read-only)
+      # - ./example/local/skills:/data/skills:ro
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      - SKILLS_DIR=/data/skills
+      - CONFIG_PATH=/data/.trikhub/config.json
+      - LINT_ON_LOAD=true
+      - LOG_LEVEL=info
+      # Uncomment to enable authentication
+      # - AUTH_TOKEN=your-secret-token
+    restart: unless-stopped
+
+volumes:
+  trik-data:
