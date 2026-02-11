@@ -5,7 +5,7 @@
 Requires Node.js >= 18 and pnpm >= 8.
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/trikhub.git
+git clone https://github.com/Molefas/trikhub.git
 cd trikhub
 pnpm install
 pnpm build
@@ -19,7 +19,9 @@ packages/
 ├── trik-manifest/   # @trikhub/manifest - Types and validation
 ├── trik-gateway/    # @trikhub/gateway - Core runtime
 └── trik-linter/     # @trikhub/linter - Static analysis CLI
-example/              # Demo triks and agent
+└── trik-cli         # @trikhub/cli - CLI for installing and publishing triks
+└── trik-server      # @trikhub/server - HTTP server for language-agnostic integration
+examples/            # Demo for local and server setups
 ```
 
 ## Making Changes
