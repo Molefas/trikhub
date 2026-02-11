@@ -119,7 +119,7 @@ See [packages/trik-server](packages/trik-server) for the HTTP server and [Python
 To run the example locally:
 
 ```bash
-git clone https://github.com/Muffles/trikhub.git
+git clone https://github.com/Molefas/trikhub.git
 cd trikhub
 pnpm install
 pnpm build
