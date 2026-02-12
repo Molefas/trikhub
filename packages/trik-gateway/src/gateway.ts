@@ -20,10 +20,14 @@ import {
   type PassthroughDeliveryReceipt,
   type UserContentReference,
   type SessionHistoryEntry,
+  type TrikConfigContext,
+  type TrikStorageContext,
   validateManifest,
   SchemaValidator,
 } from '@trikhub/manifest';
 import { type SessionStorage, InMemorySessionStorage } from './session-storage.js';
+import { type ConfigStore, FileConfigStore } from './config-store.js';
+import { type StorageProvider, JsonFileStorageProvider } from './storage-provider.js';
 
 interface TrikInput {
   action: string;
@@ -32,6 +36,8 @@ interface TrikInput {
     sessionId: string;
     history: SessionHistoryEntry[];
   };
+  config?: TrikConfigContext;
+  storage?: TrikStorageContext;
 }
 
 interface TrikOutput {
@@ -60,6 +66,22 @@ export interface TrikGatewayConfig {
    * Use '~' for home directory (e.g., '~/.trikhub/triks')
    */
   triksDirectory?: string;
+  /**
+   * Configuration store for trik secrets (API keys, tokens, etc.).
+   * Defaults to FileConfigStore which reads from ~/.trikhub/secrets.json
+   * and .trikhub/secrets.json (local overrides global).
+   */
+  configStore?: ConfigStore;
+  /**
+   * Storage provider for persistent trik data.
+   * Defaults to JsonFileStorageProvider which stores data in ~/.trikhub/storage/
+   */
+  storageProvider?: StorageProvider;
+  /**
+   * Whether to validate that all required config values are present when loading triks.
+   * Defaults to true. Set to false to skip validation (e.g., for listing triks).
+   */
+  validateConfig?: boolean;
 }
 
 export interface ExecuteTrikOptions {
@@ -115,6 +137,9 @@ export class TrikGateway {
   private validator = new SchemaValidator();
   private config: TrikGatewayConfig;
   private sessionStorage: SessionStorage;
+  private configStore: ConfigStore;
+  private storageProvider: StorageProvider;
+  private configLoaded = false;
 
   // Loaded triks (by trik ID)
   private triks = new Map<string, LoadedTrik>();
@@ -124,6 +149,33 @@ export class TrikGateway {
   constructor(config: TrikGatewayConfig = {}) {
     this.config = config;
     this.sessionStorage = config.sessionStorage ?? new InMemorySessionStorage();
+    this.configStore = config.configStore ?? new FileConfigStore();
+    this.storageProvider = config.storageProvider ?? new JsonFileStorageProvider();
+  }
+
+  /**
+   * Initialize the gateway by loading configuration.
+   * Should be called before loading any triks.
+   */
+  async initialize(): Promise<void> {
+    if (!this.configLoaded) {
+      await this.configStore.load();
+      this.configLoaded = true;
+    }
+  }
+
+  /**
+   * Get the config store (for CLI integration)
+   */
+  getConfigStore(): ConfigStore {
+    return this.configStore;
+  }
+
+  /**
+   * Get the storage provider (for CLI integration)
+   */
+  getStorageProvider(): StorageProvider {
+    return this.storageProvider;
   }
 
   async loadTrik(trikPath: string): Promise<TrikManifest> {
@@ -462,6 +514,14 @@ export class TrikGateway {
     }
 
     try {
+      // Get config context for this trik
+      const configContext = this.configStore.getForTrik(trikId);
+
+      // Get storage context if storage is enabled
+      const storageContext = manifest.capabilities?.storage?.enabled
+        ? this.storageProvider.forTrik(trikId, manifest.capabilities.storage)
+        : undefined;
+
       const trikInput: TrikInput = {
         action: actionName,
         input,
@@ -471,6 +531,8 @@ export class TrikGateway {
               history: session.history,
             }
           : undefined,
+        config: configContext,
+        storage: storageContext,
       };
 
       const result = await this.executeWithTimeout(

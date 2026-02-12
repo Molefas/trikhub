@@ -16,6 +16,22 @@ export {
 // Session storage
 export { type SessionStorage, InMemorySessionStorage } from './session-storage.js';
 
+// Config store
+export {
+  type ConfigStore,
+  type ConfigStoreOptions,
+  type SecretsFile,
+  FileConfigStore,
+  InMemoryConfigStore,
+} from './config-store.js';
+
+// Storage provider
+export {
+  type StorageProvider,
+  JsonFileStorageProvider,
+  InMemoryStorageProvider,
+} from './storage-provider.js';
+
 // Re-export types from trik-manifest for convenience
 export type {
   TrikManifest,
@@ -40,4 +56,11 @@ export type {
   PassthroughContent,
   PassthroughDeliveryReceipt,
   UserContentReference,
+  // Config types
+  ConfigRequirement,
+  TrikConfig,
+  TrikConfigContext,
+  // Storage types
+  StorageCapabilities,
+  TrikStorageContext,
 } from '@trikhub/manifest';
