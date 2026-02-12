@@ -153,8 +153,7 @@ function createToolFromDefinition(
 
         return JSON.stringify({
           success: true,
-          response: 'Content delivered.',
-          _directOutput: delivery.content.content,
+          response: 'Content delivered to user.',
         });
       }
 
