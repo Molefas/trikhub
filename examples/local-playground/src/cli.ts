@@ -18,19 +18,18 @@ function prompt(question: string): Promise<string> {
 
 async function main() {
   console.log("LangGraph Agent CLI with TrikHub Support");
-  console.log("Loading triks...\n");
+  console.log("Loading...\n");
 
   // Initialize agent with triks
-  const { graph, loadedTriks, tools } = await initializeAgentWithTriks();
+  const { graph, loadedTriks, tools, provider } = await initializeAgentWithTriks();
 
-  console.log(`\nBuilt-in tools: request_refund, find_order, get_project_details`);
+  console.log(`LLM: ${provider.provider} (${provider.model})`);
+  console.log(`Built-in tools: get_weather, calculate, search_web`);
   if (loadedTriks.length > 0) {
-    console.log(`Loaded triks: ${loadedTriks.join(", ")}`);
-  } else {
-    console.log("No triks installed. Use `trik install @scope/name` to add triks.");
+    console.log(`Triks: ${loadedTriks.join(', ')}`);
   }
-  console.log(`\nTotal tools available: ${tools.length}`);
-  console.log('Type "/tools" to list tools, "exit" or "quit" to end.\n');
+  console.log(`Total tools: ${tools.length}`);
+  console.log('Type "/tools" to list all, "exit" to quit.\n');
 
   const messages: BaseMessage[] = [];
   const threadId = `cli-${Date.now()}`;

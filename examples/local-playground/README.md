@@ -3,8 +3,7 @@
 Run a TypeScript AI agent with TrikHub triks **in a single process** - no server needed.
 
 ## What You'll Learn
-
-- How to load triks using `@trikhub/gateway`
+- How to load triks using `@trikhub/gateway` and exposing env variables to them
 - How template responses keep agents safe from prompt injection
 - How passthrough content is delivered directly to users
 - How session state enables natural language references ("the second one")
@@ -47,11 +46,17 @@ cd examples/local-playground
 pnpm install
 ```
 
-**2. Set up your API key**
+**2. Set up your API key for the main Agent and the Example Trik**
 
 ```bash
 cp .env.example .env
-# Edit .env and add your OPENAI_API_KEY
+# Edit .env and add your LLM API KEY
+```
+
+```bash
+cd .trikhub
+cp secrets.example.json secrets.json
+# Edit secrets.json and add your LLM API KEY
 ```
 
 **3. Run the agent**
@@ -63,10 +68,12 @@ pnpm dev
 You should see:
 
 ```
-TrikHub Local Playground
-Type your message (or 'quit' to exit)
-────────────────────────────────────
-
+[TrikGateway] Loaded 1 trik(s) from config
+[Triks] Loaded: trik-article-search
+LLM: anthropic (claude-sonnet-4-20250514)
+Built-in tools: get_weather, calculate, search_web
+Triks: trik-article-search
+Total tools: 6
 You:
 ```
 
@@ -100,11 +107,9 @@ Notice:
 ### Built-in Tools
 
 ```
-You: I want a refund for order 123
-Agent: I'll need a bit more detail. What's the reason for your refund request?
+You: Can you tell me the weather in Lisbon, Portugal?
+Agent: The weather in Lisbon is currently rainy with a temperature of 30°C (86 F). It's quite warm despite the rain!
 
-You: the product arrived damaged
-Agent: Refund approved for order 123. Reason: product arrived damaged.
 ```
 
 The agent validates refund reasons before processing - vague requests like "I just want my money back" are rejected.
@@ -142,8 +147,9 @@ local-playground/
 │   ├── cli.ts          # Interactive REPL
 │   ├── agent.ts        # LangGraph workflow with validation
 │   └── tools.ts        # Built-in tools + trik loader
+│   └── llm.ts          # Langgraph Model selection based on key provided
 ├── .trikhub/
-│   └── config.json     # Installed triks (like package.json for triks)
+│   └── config.json     # Installed triks
 ├── .env.example        # Environment template
 └── package.json
 ```
