@@ -1,5 +1,14 @@
 # @trikhub/server
 
+## 0.6.0
+
+### Patch Changes
+
+- Updated dependencies [[`8d62eba`](https://github.com/Molefas/trikhub/commit/8d62eba7d60677adf747c1d062fb5572f7aee749)]:
+  - @trikhub/manifest@0.6.0
+  - @trikhub/gateway@0.6.0
+  - @trikhub/linter@0.6.0
+
 ## 0.5.0
 
 ### Minor Changes
