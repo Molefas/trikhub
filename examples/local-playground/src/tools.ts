@@ -1,60 +1,64 @@
-import { tool, type DynamicStructuredTool } from "@langchain/core/tools";
-import { z } from "zod";
-import { TrikGateway, type PassthroughContent } from "@trikhub/gateway";
-import { loadLangChainTriks } from "@trikhub/gateway/langchain";
+import { tool, type DynamicStructuredTool } from '@langchain/core/tools';
+import { z } from 'zod';
+import { TrikGateway, type PassthroughContent } from '@trikhub/gateway';
+import { loadLangChainTriks } from '@trikhub/gateway/langchain';
 
 // ============================================================================
-// Built-in Tools
+// Built-in Demo Tools
 // ============================================================================
 
-const requestRefund = tool(
-  async ({ orderId, reason }) => {
-    console.log(`Processing refund for order: ${orderId}`);
-    console.log(`   Reason: ${reason}`);
-    return `Refund request submitted for order ${orderId}. Our team will process this within 3-5 business days.`;
+const getWeather = tool(
+  async ({ location }) => {
+    console.log(`[Tool] Getting weather for: ${location}`);
+    const conditions = ['sunny', 'cloudy', 'rainy', 'partly cloudy'];
+    const condition = conditions[Math.floor(Math.random() * conditions.length)];
+    const temp = Math.floor(Math.random() * 30) + 10;
+    return `Weather in ${location}: ${condition}, ${temp}°C`;
   },
   {
-    name: "request_refund",
-    description: "Process a refund request. Use when a user wants their money back.",
+    name: 'get_weather',
+    description: 'Get the current weather for a location',
     schema: z.object({
-      orderId: z.string().describe("The order ID to refund. It must start with 'ORD'"),
-      reason: z.string().describe("A specific reason for the refund. Something that answers the question: 'Why?'"),
+      location: z.string().describe('The city or location to get weather for'),
     }),
   }
 );
 
-const findOrder = tool(
-  async ({ description }) => {
-    console.log(`Finding order: ${description}`);
-    return `Found order with description: ${description}. Order ID is ORD123456.`;
+const calculate = tool(
+  async ({ expression }) => {
+    console.log(`[Tool] Calculating: ${expression}`);
+    try {
+      // Simple safe eval for basic math
+      const result = Function(`"use strict"; return (${expression})`)();
+      return `Result: ${result}`;
+    } catch {
+      return `Error: Could not evaluate "${expression}"`;
+    }
   },
   {
-    name: "find_order",
-    description: "Finds an order based on its description.",
+    name: 'calculate',
+    description: 'Evaluate a mathematical expression',
     schema: z.object({
-      description: z.string().describe("The description of the order"),
+      expression: z.string().describe('The math expression to evaluate (e.g., "2 + 2", "10 * 5")'),
     }),
   }
 );
 
-const getProjectDetails = tool(
-  async ({ question }) => {
-    console.log(`Looking up: ${question}`);
-    return `Project: LangsPlayground.
-Tech Stack: TypeScript, LangGraph, LangChain, OpenAI
-Status: Active development
-Features: Tool calling, LangSmith tracing, LangGraph Studio, TrikHub integration`;
+const searchWeb = tool(
+  async ({ query }) => {
+    console.log(`[Tool] Searching for: ${query}`);
+    return `Search results for "${query}":\n1. Example result about ${query}\n2. Another article on ${query}\n3. ${query} - Wikipedia`;
   },
   {
-    name: "get_project_details",
-    description: "Get project information. Use when user asks about the project.",
+    name: 'search_web',
+    description: 'Search the web for information',
     schema: z.object({
-      question: z.string().describe("The question about the project"),
+      query: z.string().describe('The search query'),
     }),
   }
 );
 
-export const builtInTools = [requestRefund, findOrder, getProjectDetails];
+export const builtInTools = [getWeather, calculate, searchWeb];
 
 // ============================================================================
 // Trik Loading
@@ -70,13 +74,6 @@ export interface AllToolsResult extends TrikLoaderResult {
   allTools: DynamicStructuredTool[];
 }
 
-/**
- * Load triks from .trikhub/config.json and convert to LangChain tools.
- * Uses the simplified loadLangChainTriks() API which handles:
- * - Gateway creation
- * - Config loading
- * - Session management
- */
 export async function loadTriks(
   onPassthrough?: (content: PassthroughContent) => void
 ): Promise<TrikLoaderResult> {
@@ -84,9 +81,9 @@ export async function loadTriks(
     const result = await loadLangChainTriks({ onPassthrough });
 
     if (result.loadedTriks.length === 0) {
-      console.log("[Triks] No triks configured. Use `trik install <package>` to add triks.");
+      console.log('[Triks] No triks configured');
     } else {
-      console.log(`[Triks] Loaded ${result.loadedTriks.length} triks: ${result.loadedTriks.join(", ")}`);
+      console.log(`[Triks] Loaded: ${result.loadedTriks.join(', ')}`);
     }
 
     return {
@@ -95,7 +92,7 @@ export async function loadTriks(
       loadedTriks: result.loadedTriks,
     };
   } catch (error) {
-    console.error("[Triks] Error loading triks:", error);
+    console.error('[Triks] Error loading:', error);
     return {
       tools: [],
       gateway: null,
@@ -104,9 +101,6 @@ export async function loadTriks(
   }
 }
 
-/**
- * Load all tools: built-in + triks
- */
 export async function loadAllTools(
   onPassthrough?: (content: PassthroughContent) => void
 ): Promise<AllToolsResult> {
