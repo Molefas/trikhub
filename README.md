@@ -74,7 +74,7 @@ The agent reasons over safe, structured data. Untrusted content bypasses the age
 
 ```bash
 npm install -g @trikhub/cli
-trik install @muffles/article-search
+trik install @Mmolefas/article-search
 ```
 
 **2. Use in your agent**
@@ -125,7 +125,7 @@ Full documentation available at **[trikhub.com/docs](https://trikhub.com/docs)**
 ## Development
 
 ```bash
-git clone https://github.com/Muffles/trikhub.git
+git clone https://github.com/Molefas/trikhub.git
 cd trikhub
 pnpm install
 pnpm build

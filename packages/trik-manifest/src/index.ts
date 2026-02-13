@@ -36,6 +36,13 @@ export type {
   PassthroughContent,
   PassthroughDeliveryReceipt,
   UserContentReference,
+  // Configuration types
+  ConfigRequirement,
+  TrikConfig,
+  TrikConfigContext,
+  // Storage types
+  StorageCapabilities,
+  TrikStorageContext,
 } from './types.js';
 
 // Validation

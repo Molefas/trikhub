@@ -35,6 +35,40 @@ export interface SessionCapabilities {
 }
 
 /**
+ * Storage capabilities for persistent data
+ */
+export interface StorageCapabilities {
+  /** Whether storage is enabled for this trik */
+  enabled: boolean;
+  /** Maximum storage size in bytes (default: 100MB) */
+  maxSizeBytes?: number;
+  /** Whether storage persists across sessions (default: true) */
+  persistent?: boolean;
+}
+
+/**
+ * Configuration requirement declared in manifest
+ */
+export interface ConfigRequirement {
+  /** The key name for this config value */
+  key: string;
+  /** Human-readable description of what this config is for */
+  description: string;
+  /** Default value if not provided (only for optional configs) */
+  default?: string;
+}
+
+/**
+ * Configuration requirements for a trik
+ */
+export interface TrikConfig {
+  /** Required configuration values - trik will fail to execute without these */
+  required?: ConfigRequirement[];
+  /** Optional configuration values - trik can work without these */
+  optional?: ConfigRequirement[];
+}
+
+/**
  * Trik capabilities declared in manifest
  */
 export interface TrikCapabilities {
@@ -44,6 +78,8 @@ export interface TrikCapabilities {
   canRequestClarification: boolean;
   /** Session capabilities for multi-turn conversations */
   session?: SessionCapabilities;
+  /** Storage capabilities for persistent data */
+  storage?: StorageCapabilities;
 }
 
 /**
@@ -271,6 +307,9 @@ export interface TrikManifest {
   /** Entry point */
   entry: TrikEntry;
 
+  /** Configuration requirements (API keys, tokens, etc.) */
+  config?: TrikConfig;
+
   /** Optional: author name */
   author?: string;
   /** Optional: repository URL */
@@ -424,6 +463,69 @@ export interface SessionContext {
   history: SessionHistoryEntry[];
 }
 
+/**
+ * Configuration context passed to triks in graph input.
+ * Provides access to user-configured values (API keys, tokens, etc.).
+ */
+export interface TrikConfigContext {
+  /**
+   * Get a configuration value by key.
+   * Returns undefined if the key is not configured.
+   */
+  get(key: string): string | undefined;
+
+  /**
+   * Check if a configuration key is set.
+   */
+  has(key: string): boolean;
+
+  /**
+   * Get all configured keys (without values, for debugging).
+   */
+  keys(): string[];
+}
+
+/**
+ * Storage context passed to triks in graph input.
+ * Provides persistent key-value storage scoped to the trik.
+ */
+export interface TrikStorageContext {
+  /**
+   * Get a value by key.
+   * Returns null if the key doesn't exist.
+   */
+  get(key: string): Promise<unknown | null>;
+
+  /**
+   * Set a value by key.
+   * @param key - The key to store
+   * @param value - The value to store (must be JSON-serializable)
+   * @param ttl - Optional time-to-live in milliseconds
+   */
+  set(key: string, value: unknown, ttl?: number): Promise<void>;
+
+  /**
+   * Delete a key.
+   * Returns true if the key existed and was deleted.
+   */
+  delete(key: string): Promise<boolean>;
+
+  /**
+   * List all keys, optionally filtered by prefix.
+   */
+  list(prefix?: string): Promise<string[]>;
+
+  /**
+   * Get multiple values at once.
+   */
+  getMany(keys: string[]): Promise<Map<string, unknown>>;
+
+  /**
+   * Set multiple values at once.
+   */
+  setMany(entries: Record<string, unknown>): Promise<void>;
+}
+
 // ============================================
 // Graph Input/Output Types (for local triks)
 // ============================================
@@ -440,6 +542,10 @@ export interface GraphInput {
   clarificationAnswers?: Record<string, string | boolean>;
   /** Session context for multi-turn conversations */
   session?: SessionContext;
+  /** Configuration context for accessing user-provided config values */
+  config?: TrikConfigContext;
+  /** Storage context for persistent data */
+  storage?: TrikStorageContext;
 }
 
 /**

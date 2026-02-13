@@ -104,7 +104,7 @@ class TrikClient:
         For passthrough mode: fetches content, calls callback, returns metadata
 
         Args:
-            tool_name: Full tool name (e.g., "article-search-3:search")
+            tool_name: Full tool name (e.g., "trik-article-search:search")
             **kwargs: Tool input parameters
 
         Returns:

@@ -1,5 +1,5 @@
 {
-  "id": "article-search-3",
+  "id": "trik-article-search",
   "name": "Article Search",
   "description": "Searches for articles on a given topic. Demonstrates type-directed privilege separation with session support.",
   "version": "1.0.1",
