@@ -150,10 +150,9 @@ function createToolFromDefinition(
         if (onPassthrough) {
           onPassthrough(delivery.content);
         }
-
         return JSON.stringify({
           success: true,
-          response: 'Content delivered to user.',
+          response: 'Delivered directly to the user',
         });
       }
 
@@ -228,8 +227,9 @@ export async function loadLangChainTriks(
 ): Promise<LangChainTriksResult> {
   const { onPassthrough, debug, configPath, baseDir } = options;
 
-  // Create gateway
+  // Create gateway and initialize (loads secrets from .trikhub/secrets.json)
   const gateway = new TrikGateway();
+  await gateway.initialize();
 
   // Load triks from config
   const manifests = await gateway.loadTriksFromConfig({

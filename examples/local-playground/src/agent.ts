@@ -1,7 +1,7 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { StateGraph, MessagesAnnotation, START, END } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
-import { AIMessage, ToolMessage } from "@langchain/core/messages";
+import { AIMessage, ToolMessage, SystemMessage } from "@langchain/core/messages";
 import type { DynamicStructuredTool } from "@langchain/core/tools";
 import type { PassthroughContent } from "@trikhub/gateway";
 import { z } from "zod";
@@ -32,6 +32,18 @@ function handlePassthrough(content: PassthroughContent) {
 }
 
 // ============================================================================
+// System Prompt
+// ============================================================================
+
+const SYSTEM_PROMPT = `You are a helpful assistant with access to various tools.
+
+IMPORTANT: Some tools deliver content directly to the user through a separate channel (passthrough). When a tool response says "delivered directly to the user" or similar, the user has already seen the content. In this case:
+- Do NOT repeat or summarize the content
+- Simply acknowledge briefly or ask if they need anything else
+- The user can see this content and may ask follow-up questions about it
+`;
+
+// ============================================================================
 // Graph Factory
 // ============================================================================
 
@@ -43,7 +55,11 @@ function createAgentGraph(tools: DynamicStructuredTool[]) {
 
   // Agent node - calls the LLM
   async function callModel(state: typeof MessagesAnnotation.State) {
-    const response = await model.invoke(state.messages);
+    const messagesWithSystem = [
+      new SystemMessage(SYSTEM_PROMPT),
+      ...state.messages,
+    ];
+    const response = await model.invoke(messagesWithSystem);
     return { messages: [response] };
   }
 
