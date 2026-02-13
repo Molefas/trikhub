@@ -78,7 +78,7 @@ describe('LangChain Adapter Security', () => {
       const parsed = JSON.parse(result);
 
       // Response should be generic acknowledgment
-      expect(parsed.response).toBe('Content delivered to user.');
+      expect(parsed.response).toBe('Delivered directly to the user');
 
       // Response should NOT contain article content
       expect(parsed.response).not.toContain('Article');
