@@ -1,5 +1,16 @@
 # @saaas-sdk/gateway
 
+## 0.6.0
+
+### Minor Changes
+
+- [#19](https://github.com/Molefas/trikhub/pull/19) [`8d62eba`](https://github.com/Molefas/trikhub/commit/8d62eba7d60677adf747c1d062fb5572f7aee749) Thanks [@Molefas](https://github.com/Molefas)! - Fixes
+
+### Patch Changes
+
+- Updated dependencies [[`8d62eba`](https://github.com/Molefas/trikhub/commit/8d62eba7d60677adf747c1d062fb5572f7aee749)]:
+  - @trikhub/manifest@0.6.0
+
 ## 0.5.0
 
 ### Minor Changes
