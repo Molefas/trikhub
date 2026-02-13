@@ -1,8 +1,8 @@
 {
   "triks": [
-    "@molefas/article-search-3"
+    "@molefas/trik-article-search"
   ],
   "trikhub": {
-    "@molefas/article-search-3": "1.0.1"
+    "@molefas/trik-article-search": "1.0.1"
   }
 }
