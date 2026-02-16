@@ -1,0 +1,32 @@
+Metadata-Version: 2.4
+Name: trikhub
+Version: 0.1.0
+Summary: Python SDK for TrikHub - AI skills marketplace
+Author-email: TrikHub Team <team@trikhub.com>
+License: MIT
+Project-URL: Homepage, https://trikhub.com
+Project-URL: Documentation, https://docs.trikhub.com
+Project-URL: Repository, https://github.com/trikhub/trikhub-python
+Keywords: ai,agents,skills,llm,tools
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: jsonschema>=4.0.0
+Requires-Dist: httpx>=0.25.0
+Requires-Dist: click>=8.0.0
+Provides-Extra: server
+Requires-Dist: fastapi>=0.100.0; extra == "server"
+Requires-Dist: uvicorn>=0.23.0; extra == "server"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
+Requires-Dist: mypy>=1.0.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"

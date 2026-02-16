@@ -5,6 +5,7 @@ export type {
   TrikCapabilities,
   TrikLimits,
   TrikEntry,
+  TrikRuntime,
   ExecuteRequest,
   ExecuteResponse,
   SuccessResponse,

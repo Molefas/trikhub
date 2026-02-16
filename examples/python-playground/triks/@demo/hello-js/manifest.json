@@ -1,0 +1,105 @@
+{
+  "id": "@demo/hello-js",
+  "name": "Hello JS Trik",
+  "description": "A simple JavaScript trik demonstrating cross-language execution from Python",
+  "version": "1.0.0",
+  "entry": {
+    "module": "./graph.js",
+    "export": "graph",
+    "runtime": "node"
+  },
+  "actions": {
+    "greet": {
+      "description": "Generate a greeting message",
+      "responseMode": "template",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name to greet"
+          }
+        },
+        "required": ["name"]
+      },
+      "agentDataSchema": {
+        "type": "object",
+        "properties": {
+          "template": {
+            "type": "string",
+            "enum": ["success", "error"]
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        }
+      },
+      "responseTemplates": {
+        "success": {
+          "text": "Generated greeting: {{message}} (at {{timestamp}})"
+        },
+        "error": {
+          "text": "Failed to generate greeting: {{message}}"
+        }
+      }
+    },
+    "calculate": {
+      "description": "Perform a simple calculation",
+      "responseMode": "template",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": ["add", "subtract", "multiply", "divide"]
+          },
+          "a": {
+            "type": "number"
+          },
+          "b": {
+            "type": "number"
+          }
+        },
+        "required": ["operation", "a", "b"]
+      },
+      "agentDataSchema": {
+        "type": "object",
+        "properties": {
+          "template": {
+            "type": "string",
+            "enum": ["result", "error"]
+          },
+          "result": {
+            "type": "number"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "responseTemplates": {
+        "result": {
+          "text": "The result of {{operation}} is: {{result}}"
+        },
+        "error": {
+          "text": "Calculation error: {{message}}"
+        }
+      }
+    }
+  },
+  "capabilities": {
+    "tools": [],
+    "canRequestClarification": false
+  },
+  "limits": {
+    "maxExecutionTimeMs": 30000,
+    "maxLlmCalls": 0,
+    "maxToolCalls": 0
+  }
+}
