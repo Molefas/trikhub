@@ -1,0 +1,53 @@
+{
+  "name": "@trikhub/manifest",
+  "version": "0.5.0",
+  "description": "Type definitions and validation for trik manifests",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "trik",
+    "manifest",
+    "validation",
+    "schema",
+    "typescript",
+    "trikhub"
+  ],
+  "author": "Molefas",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Molefas/trikhub.git",
+    "directory": "packages/js/manifest"
+  },
+  "bugs": {
+    "url": "https://github.com/Molefas/trikhub/issues"
+  },
+  "homepage": "https://github.com/Molefas/trikhub/tree/main/packages/js/manifest#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1"
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "name": "@trikhub/worker-js",
+  "version": "0.5.0",
+  "description": "JavaScript trik worker for cross-language execution via Python gateway",
+  "type": "module",
+  "main": "./dist/worker.js",
+  "types": "./dist/worker.d.ts",
+  "bin": {
+    "trikhub-worker-js": "./dist/worker.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/worker.js",
+      "types": "./dist/worker.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "trik",
+    "worker",
+    "trikhub",
+    "cross-language"
+  ],
+  "author": "Molefas",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Molefas/trikhub.git",
+    "directory": "packages/js/worker"
+  },
+  "bugs": {
+    "url": "https://github.com/Molefas/trikhub/issues"
+  },
+  "homepage": "https://github.com/Molefas/trikhub/tree/main/packages/js/worker#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "start": "node dist/worker.js"
+  },
+  "dependencies": {
+    "@trikhub/manifest": "workspace:*",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/uuid": "^9.0.0",
+    "typescript": "^5.5.0"
+  }
+}
