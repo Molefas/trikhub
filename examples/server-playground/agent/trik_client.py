@@ -15,7 +15,7 @@ class TrikClient:
 
     def __init__(
         self,
-        base_url: str = "http://localhost:3002",
+        base_url: str = "http://localhost:3000",
         auth_token: Optional[str] = None,
         on_passthrough: Optional[Callable[[str, dict], None]] = None,
     ):
@@ -220,7 +220,7 @@ class TrikClient:
 
 # Convenience function to load tools from server
 def load_trik_tools(
-    server_url: str = "http://localhost:3002",
+    server_url: str = "http://localhost:3000",
     on_passthrough: Optional[Callable[[str, dict], None]] = None,
 ) -> tuple[list[StructuredTool], TrikClient]:
     """

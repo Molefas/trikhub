@@ -13,30 +13,36 @@ Commands:
 
 import os
 import sys
+import time
 from dotenv import load_dotenv
 
 from langchain_core.messages import HumanMessage, BaseMessage
 
 from agent import initialize_agent_with_triks, get_last_passthrough_content
+from llm import get_provider_info, API_KEY_MAP
 
 
 def main():
     # Load environment variables from .env file
     load_dotenv()
 
-    # Check for OpenAI API key
-    if not os.environ.get("OPENAI_API_KEY"):
-        print("Error: OPENAI_API_KEY environment variable not set.")
-        print("Create a .env file with: OPENAI_API_KEY=your-key")
+    # Check for required API key based on detected provider
+    provider_info = get_provider_info()
+    if not provider_info["has_key"]:
+        provider = provider_info["provider"]
+        key_name = API_KEY_MAP.get(provider, "API_KEY")
+        print(f"Error: {key_name} environment variable not set.")
+        print(f"Create a .env file with: {key_name}=your-key")
+        print("\nOr set LLM_PROVIDER to use a different provider.")
         sys.exit(1)
 
-    print("LangGraph Agent CLI with TrikHub Support (Python)")
-    print("Loading triks from trik-server...\n")
+    print("LangGraph Agent CLI with TrikHub Support")
+    print("Loading...\n")
 
     # Initialize agent with triks from server
     try:
         result = initialize_agent_with_triks(
-            server_url=os.environ.get("TRIK_SERVER_URL", "http://localhost:3002"),
+            server_url=os.environ.get("TRIK_SERVER_URL", "http://localhost:3000"),
         )
     except Exception as e:
         print(f"Error connecting to trik-server: {e}")
@@ -46,18 +52,17 @@ def main():
     graph = result["graph"]
     tools = result["tools"]
     loaded_triks = result["loaded_triks"]
+    provider = result["provider"]
 
-    print(f"\nBuilt-in tools: request_refund, find_order, get_project_details")
+    print(f"LLM: {provider['provider']} ({provider['model']})")
+    print("Built-in tools: get_weather, calculate, search_web")
     if loaded_triks:
-        print(f"Loaded triks: {', '.join(loaded_triks)}")
-    else:
-        print("No triks loaded from server.")
-
-    print(f"\nTotal tools available: {len(tools)}")
-    print('Type "/tools" to list tools, "exit" or "quit" to end.\n')
+        print(f"Triks: {', '.join(loaded_triks)}")
+    print(f"Total tools: {len(tools)}")
+    print('Type "/tools" to list all, "exit" to quit.\n')
 
     messages: list[BaseMessage] = []
-    thread_id = f"cli-python-{int(__import__('time').time())}"
+    thread_id = f"cli-python-{int(time.time())}"
 
     while True:
         try:

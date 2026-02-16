@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+__pycache__
 
 # Build outputs
 dist/
@@ -31,4 +32,5 @@ coverage/
 
 # Local trik server for Home Assistant connection (not part of main repo)
 packages/trik-server-legacy/
-example/
+server-test/
+server/

@@ -1,9 +1,10 @@
 """
 Tool definitions for the agent.
 
-Includes both built-in tools and dynamically loaded trik tools from trik-server.
+Includes both built-in demo tools and dynamically loaded trik tools from trik-server.
 """
 
+import random
 from typing import Callable, Optional
 from langchain_core.tools import tool, StructuredTool
 
@@ -11,49 +12,55 @@ from trik_client import load_trik_tools, TrikClient
 
 
 # ============================================================================
-# Built-in Tools (same as original trikhub-playground)
+# Built-in Demo Tools
 # ============================================================================
 
 @tool
-def request_refund(order_id: str, reason: str) -> str:
-    """Process a refund request. Use when a user wants their money back.
+def get_weather(location: str) -> str:
+    """Get the current weather for a location.
 
     Args:
-        order_id: The order ID to refund. It must start with 'ORD'
-        reason: A specific reason for the refund. Something that answers the question: 'Why?'
+        location: The city or location to get weather for
     """
-    print(f"Processing refund for order: {order_id}")
-    print(f"   Reason: {reason}")
-    return f"Refund request submitted for order {order_id}. Our team will process this within 3-5 business days."
+    print(f"[Tool] Getting weather for: {location}")
+    conditions = ["sunny", "cloudy", "rainy", "partly cloudy"]
+    condition = random.choice(conditions)
+    temp = random.randint(10, 40)
+    return f"Weather in {location}: {condition}, {temp}°C"
 
 
 @tool
-def find_order(description: str) -> str:
-    """Finds an order based on its description.
+def calculate(expression: str) -> str:
+    """Evaluate a mathematical expression.
 
     Args:
-        description: The description of the order
+        expression: The math expression to evaluate (e.g., "2 + 2", "10 * 5")
     """
-    print(f"Finding order: {description}")
-    return f"Found order with description: {description}. Order ID is ORD123456."
+    print(f"[Tool] Calculating: {expression}")
+    # Simple safe eval for basic math
+    allowed = set("0123456789+-*/(). ")
+    if not all(c in allowed for c in expression):
+        return "Error: Invalid characters in expression"
+    try:
+        result = eval(expression)
+        return f"Result: {result}"
+    except Exception:
+        return f"Error: Could not evaluate '{expression}'"
 
 
 @tool
-def get_project_details(question: str) -> str:
-    """Get project information. Use when user asks about the project.
+def search_web(query: str) -> str:
+    """Search the web for information.
 
     Args:
-        question: The question about the project
+        query: The search query
     """
-    print(f"Looking up: {question}")
-    return """Project: TrikHub Server Playground
-Tech Stack: Python, LangGraph, LangChain, OpenAI, trik-server
-Status: Active development
-Features: Tool calling via HTTP API, Type-directed privilege separation, Passthrough content delivery"""
+    print(f"[Tool] Searching for: {query}")
+    return f'Search results for "{query}":\n1. Example result about {query}\n2. Another article on {query}\n3. {query} - Wikipedia'
 
 
 # List of built-in tools
-BUILT_IN_TOOLS = [request_refund, find_order, get_project_details]
+BUILT_IN_TOOLS = [get_weather, calculate, search_web]
 
 
 # ============================================================================
@@ -65,7 +72,7 @@ class ToolLoader:
 
     def __init__(
         self,
-        server_url: str = "http://localhost:3002",
+        server_url: str = "http://localhost:3000",
         on_passthrough: Optional[Callable[[str, dict], None]] = None,
     ):
         self.server_url = server_url
@@ -90,15 +97,15 @@ class ToolLoader:
             self.loaded_triks = [t["id"] for t in triks]
 
             if self.loaded_triks:
-                print(f"[Triks] Loaded {len(self.loaded_triks)} triks: {', '.join(self.loaded_triks)}")
+                print(f"[Triks] Loaded: {', '.join(self.loaded_triks)}")
             else:
-                print("[Triks] No triks configured on server.")
+                print("[Triks] No triks configured on server")
 
             return tools
 
         except Exception as e:
-            print(f"[Triks] Error loading triks from server: {e}")
-            print("[Triks] Make sure trik-server is running at", self.server_url)
+            print(f"[Triks] Error loading from server: {e}")
+            print(f"[Triks] Make sure trik-server is running at {self.server_url}")
             return []
 
     def get_all_tools(self) -> list:
@@ -112,7 +119,7 @@ class ToolLoader:
 
 
 def load_all_tools(
-    server_url: str = "http://localhost:3002",
+    server_url: str = "http://localhost:3000",
     on_passthrough: Optional[Callable[[str, dict], None]] = None,
 ) -> tuple[list, ToolLoader]:
     """
