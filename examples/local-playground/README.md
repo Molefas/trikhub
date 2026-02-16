@@ -34,29 +34,36 @@ Run a TypeScript AI agent with TrikHub triks **in a single process** - no server
 
 From the monorepo root:
 
+## Clone the repository
+
 ```bash
+git clone https://github.com/molefas/trikhub.git
+cd trikhub
+```
+
+## Setup
+
+```bash
+# Install dependencies and build packages
 pnpm install
 pnpm build
-```
 
-Then in this example:
-
-```bash
+# Navigate to the example
 cd examples/local-playground
-pnpm install
-```
 
-**2. Set up your API key for the main Agent and the Example Trik**
+# Install dependencies just for the demo
+npm install
 
-```bash
+# Provide an LLM key to the main Agent
 cp .env.example .env
-# Edit .env and add your LLM API KEY
+# Edit .env and add your LLM's API KEY
 ```
 
 ```bash
+# Provide an LLM key to the Trik Agent
 cd .trikhub
-cp secrets.example.json secrets.json
-# Edit secrets.json and add your LLM API KEY
+cp secrets.json.example secrets.json
+# Edit secrets.json with your LLM's API KEY
 ```
 
 **3. Run the agent**

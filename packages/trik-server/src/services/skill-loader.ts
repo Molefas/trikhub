@@ -1,12 +1,15 @@
 import { readdir, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
-import { TrikGateway } from '@trikhub/gateway';
+import { join, resolve, dirname } from 'node:path';
+import { TrikGateway, FileConfigStore } from '@trikhub/gateway';
 import { TrikValidator, type ValidationResult } from './skill-validator.js';
 
 export interface SkillLoaderConfig {
-  skillsDirectory: string;
+  /** Directory for local skill files. Optional if using configPath. */
+  skillsDirectory?: string;
   /** Path to .trikhub/config.json for loading npm-installed skills */
   configPath?: string;
+  /** Path to .trikhub/secrets.json. If not set, derives from configPath or uses cwd. */
+  secretsPath?: string;
   lintBeforeLoad: boolean;
   lintWarningsAsErrors: boolean;
   allowedSkills?: string[];
@@ -33,8 +36,24 @@ export class SkillLoader {
 
   constructor(config: SkillLoaderConfig) {
     this.config = config;
+
+    // Determine secrets path: explicit > derived from configPath > default (cwd)
+    let localSecretsPath: string | undefined;
+    if (config.secretsPath) {
+      localSecretsPath = config.secretsPath;
+    } else if (config.configPath) {
+      // Derive secrets path from config path (same directory)
+      localSecretsPath = join(dirname(config.configPath), 'secrets.json');
+    }
+
+    // Create ConfigStore with the correct local secrets path
+    const configStore = new FileConfigStore({
+      localSecretsPath,
+    });
+
     this.gateway = new TrikGateway({
       allowedTriks: config.allowedSkills,
+      configStore,
     });
     this.validator = new TrikValidator({
       warningsAsErrors: config.lintWarningsAsErrors,
@@ -46,6 +65,10 @@ export class SkillLoader {
   }
 
   async discoverSkills(): Promise<string[]> {
+    if (!this.config.skillsDirectory) {
+      return [];
+    }
+
     const baseDir = resolve(this.config.skillsDirectory);
     const skillPaths: string[] = [];
 
@@ -113,24 +136,26 @@ export class SkillLoader {
     let loaded = 0;
     let failed = 0;
 
-    // 1. Load from directory (existing behavior)
-    try {
-      const skillPaths = await this.discoverSkills();
-      for (const skillPath of skillPaths) {
-        const status = await this.loadSkill(skillPath);
-        skills.push(status);
+    // 1. Load from directory (only if skillsDirectory is configured)
+    if (this.config.skillsDirectory) {
+      try {
+        const skillPaths = await this.discoverSkills();
+        for (const skillPath of skillPaths) {
+          const status = await this.loadSkill(skillPath);
+          skills.push(status);
 
-        if (status.status === 'loaded') {
-          loaded++;
-        } else {
-          failed++;
+          if (status.status === 'loaded') {
+            loaded++;
+          } else {
+            failed++;
+          }
         }
-      }
-    } catch (error) {
-      // Directory might not exist, continue with config-based loading
-      // Only log if there's no config path either
-      if (!this.config.configPath) {
-        throw error;
+      } catch (error) {
+        // Directory might not exist, continue with config-based loading
+        // Only throw if there's no config path either
+        if (!this.config.configPath) {
+          throw error;
+        }
       }
     }
 

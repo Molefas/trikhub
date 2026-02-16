@@ -29,6 +29,7 @@ async function main() {
   // Initialize skill loader
   const skillLoader = new SkillLoader({
     skillsDirectory: config.skillsDirectory,
+    configPath: config.configPath,
     lintBeforeLoad: config.lintOnLoad,
     lintWarningsAsErrors: config.lintWarningsAsErrors,
     allowedSkills: config.allowedSkills,
@@ -36,12 +37,22 @@ async function main() {
 
   // Create server first so we can use its logger
   const gateway = skillLoader.getGateway();
+
+  // Load secrets from .trikhub/secrets.json
+  const configStore = gateway.getConfigStore();
+  await configStore.load();
+
+  // Log which triks have secrets configured
+  const configuredTriks = configStore.getConfiguredTriks();
+  console.log('[Secrets] Loaded secrets for triks:', configuredTriks.length > 0 ? configuredTriks : 'none');
+
   server = await createServer(config, gateway);
   const log = server.log;
 
   log.info(
     {
       skillsDirectory: config.skillsDirectory,
+      configPath: config.configPath,
       lintOnLoad: config.lintOnLoad,
       auth: config.authToken ? 'enabled' : 'disabled',
     },
