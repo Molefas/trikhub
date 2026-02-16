@@ -95,6 +95,11 @@ export interface TrikLimits {
 }
 
 /**
+ * Runtime environment for trik execution
+ */
+export type TrikRuntime = 'node' | 'python';
+
+/**
  * Entry point configuration
  */
 export interface TrikEntry {
@@ -102,6 +107,12 @@ export interface TrikEntry {
   module: string;
   /** Export name to use (usually "default") */
   export: string;
+  /**
+   * Runtime environment for this trik.
+   * - "node": JavaScript/TypeScript trik (default, executed in-process)
+   * - "python": Python trik (executed via subprocess worker)
+   */
+  runtime?: TrikRuntime;
 }
 
 // ============================================

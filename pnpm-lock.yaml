@@ -69,10 +69,16 @@ importers:
       ajv:
         specifier: ^8.17.1
         version: 8.17.1
+      uuid:
+        specifier: ^9.0.0
+        version: 9.0.1
     devDependencies:
       '@langchain/core':
         specifier: ^0.3.0
         version: 0.3.80
+      '@types/uuid':
+        specifier: ^9.0.0
+        version: 9.0.8
       zod:
         specifier: ^3.0.0
         version: 3.25.76
@@ -720,6 +726,9 @@ packages:
 
   '@types/uuid@10.0.0':
     resolution: {integrity: sha512-7gqG38EyHgyP1S+7+xomFtL+ZNHcKv6DwNaCZmJmo1vgMugyF3TCnXVg4t1uk89mLNwnLtnY3TpOpCOyp1/xHQ==}
+
+  '@types/uuid@9.0.8':
+    resolution: {integrity: sha512-jg+97EGIcY9AGHJJRaaPVgetKDsrTgbRjQ5Msgjh/DQKEFl0DtyRr/VCOyD1T2R1MNeWPK/u7JoGhlDZnKBAfA==}
 
   '@vitest/expect@3.2.4':
     resolution: {integrity: sha512-Io0yyORnB6sikFlt8QW5K7slY4OjqNX9jmJQ02QDda8lyM6B5oNgVWoSoKPac8/kgnCUzuHQKrSLtu/uOqqrig==}
@@ -1745,6 +1754,10 @@ packages:
     resolution: {integrity: sha512-8XkAphELsDnEGrDxUOHB3RGvXz6TeuYSGEZBOjtTtPm2lwhGBjLgOzLHB63IUWfBpNucQjND6d3AOudO+H3RWQ==}
     hasBin: true
 
+  uuid@9.0.1:
+    resolution: {integrity: sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==}
+    hasBin: true
+
   vite-node@3.2.4:
     resolution: {integrity: sha512-EbKSKh+bh1E1IFxeO0pg1n4dvoOTt0UDiXMd/qn++r98+jPO1xtJilvXldeuQ8giIB5IkpjCgMleHMNEsGH6pg==}
     engines: {node: ^18.0.0 || ^20.0.0 || >=22.0.0}
@@ -2490,6 +2503,8 @@ snapshots:
       minipass: 4.2.8
 
   '@types/uuid@10.0.0': {}
+
+  '@types/uuid@9.0.8': {}
 
   '@vitest/expect@3.2.4':
     dependencies:
@@ -3447,6 +3462,8 @@ snapshots:
   universalify@0.1.2: {}
 
   uuid@10.0.0: {}
+
+  uuid@9.0.1: {}
 
   vite-node@3.2.4(@types/node@22.19.8)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.2):
     dependencies:

@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import {
   type TrikManifest,
+  type TrikRuntime,
   type GatewayResult,
   type GatewaySuccessTemplate,
   type GatewaySuccessPassthrough,
@@ -25,6 +26,7 @@ import {
   validateManifest,
   SchemaValidator,
 } from '@trikhub/manifest';
+import { PythonWorker, type PythonWorkerConfig } from './python-worker.js';
 import { type SessionStorage, InMemorySessionStorage } from './session-storage.js';
 import { type ConfigStore, FileConfigStore } from './config-store.js';
 import { type StorageProvider, JsonFileStorageProvider } from './storage-provider.js';
@@ -82,6 +84,11 @@ export interface TrikGatewayConfig {
    * Defaults to true. Set to false to skip validation (e.g., for listing triks).
    */
   validateConfig?: boolean;
+  /**
+   * Configuration for Python worker (used for Python triks).
+   * If not provided, defaults will be used when a Python trik is loaded.
+   */
+  pythonWorkerConfig?: PythonWorkerConfig;
 }
 
 export interface ExecuteTrikOptions {
@@ -94,8 +101,9 @@ export type GatewayResultWithSession<TAgent = unknown> = GatewayResult<TAgent> &
 
 interface LoadedTrik {
   manifest: TrikManifest;
-  graph: TrikGraph;
+  graph: TrikGraph | null; // null for Python triks (executed via worker)
   path: string;
+  runtime: TrikRuntime;
 }
 
 export interface ToolDefinition {
@@ -140,6 +148,7 @@ export class TrikGateway {
   private configStore: ConfigStore;
   private storageProvider: StorageProvider;
   private configLoaded = false;
+  private pythonWorker: PythonWorker | null = null;
 
   // Loaded triks (by trik ID)
   private triks = new Map<string, LoadedTrik>();
@@ -194,20 +203,55 @@ export class TrikGateway {
       throw new Error(`Trik "${manifest.id}" is not in the allowlist`);
     }
 
-    const modulePath = join(trikPath, manifest.entry.module);
-    const moduleUrl = pathToFileURL(modulePath).href;
-    const module = await import(moduleUrl);
-    const graph = module[manifest.entry.export] as TrikGraph;
+    const runtime: TrikRuntime = manifest.entry.runtime ?? 'node';
 
-    if (!graph || typeof graph.invoke !== 'function') {
-      throw new Error(
-        `Invalid graph at ${modulePath}: export "${manifest.entry.export}" must have an invoke function`
-      );
+    if (runtime === 'python') {
+      // Python triks are executed via the Python worker
+      // We don't load the graph here, just register the manifest
+      this.triks.set(manifest.id, { manifest, graph: null, path: trikPath, runtime });
+
+      // Ensure Python worker is initialized
+      await this.ensurePythonWorker();
+    } else {
+      // Node.js triks are loaded and executed in-process
+      const modulePath = join(trikPath, manifest.entry.module);
+      const moduleUrl = pathToFileURL(modulePath).href;
+      const module = await import(moduleUrl);
+      const graph = module[manifest.entry.export] as TrikGraph;
+
+      if (!graph || typeof graph.invoke !== 'function') {
+        throw new Error(
+          `Invalid graph at ${modulePath}: export "${manifest.entry.export}" must have an invoke function`
+        );
+      }
+
+      this.triks.set(manifest.id, { manifest, graph, path: trikPath, runtime });
     }
 
-    this.triks.set(manifest.id, { manifest, graph, path: trikPath });
-
     return manifest;
+  }
+
+  /**
+   * Ensure Python worker is started.
+   */
+  private async ensurePythonWorker(): Promise<PythonWorker> {
+    if (!this.pythonWorker) {
+      this.pythonWorker = new PythonWorker(this.config.pythonWorkerConfig);
+    }
+    if (!this.pythonWorker.ready) {
+      await this.pythonWorker.start();
+    }
+    return this.pythonWorker;
+  }
+
+  /**
+   * Shutdown the Python worker if running.
+   */
+  async shutdown(): Promise<void> {
+    if (this.pythonWorker) {
+      await this.pythonWorker.shutdown();
+      this.pythonWorker = null;
+    }
   }
 
   /**
@@ -479,7 +523,7 @@ export class TrikGateway {
       };
     }
 
-    const { manifest, graph } = loaded;
+    const { manifest, graph, path: trikPath, runtime } = loaded;
 
     const action = manifest.actions[actionName];
     if (!action) {
@@ -522,24 +566,60 @@ export class TrikGateway {
         ? this.storageProvider.forTrik(trikId, manifest.capabilities.storage)
         : undefined;
 
-      const trikInput: TrikInput = {
-        action: actionName,
-        input,
-        session: session
-          ? {
-              sessionId: session.sessionId,
-              history: session.history,
-            }
-          : undefined,
-        config: configContext,
-        storage: storageContext,
-      };
+      let result: TrikOutput;
 
-      const result = await this.executeWithTimeout(
-        graph,
-        trikInput,
-        manifest.limits.maxExecutionTimeMs
-      );
+      if (runtime === 'python') {
+        // Execute via Python worker
+        const worker = await this.ensurePythonWorker();
+        const invokeResult = await worker.invoke(trikPath, actionName, input, {
+          session: session
+            ? {
+                sessionId: session.sessionId,
+                history: session.history,
+              }
+            : undefined,
+          config: configContext,
+          storage: storageContext,
+        });
+
+        // Convert InvokeResult to TrikOutput
+        result = {
+          responseMode: invokeResult.responseMode ?? action.responseMode,
+          agentData: invokeResult.agentData,
+          userContent: invokeResult.userContent,
+          endSession: invokeResult.endSession,
+          needsClarification: invokeResult.needsClarification,
+          clarificationQuestions: invokeResult.clarificationQuestions,
+        };
+      } else {
+        // Execute Node.js trik in-process
+        if (!graph) {
+          return {
+            success: false,
+            code: 'EXECUTION_ERROR',
+            error: 'Graph not loaded for Node.js trik',
+          };
+        }
+
+        const trikInput: TrikInput = {
+          action: actionName,
+          input,
+          session: session
+            ? {
+                sessionId: session.sessionId,
+                history: session.history,
+              }
+            : undefined,
+          config: configContext,
+          storage: storageContext,
+        };
+
+        result = await this.executeWithTimeout(
+          graph,
+          trikInput,
+          manifest.limits.maxExecutionTimeMs
+        );
+      }
 
       if (result.needsClarification && result.clarificationQuestions?.length) {
         if (this.config.onClarificationNeeded) {
