@@ -1,0 +1,66 @@
+{
+  "name": "@trikhub/server",
+  "version": "0.5.0",
+  "description": "HTTP server for TrikHub - secure skill execution gateway for AI agents",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "trik-server": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "keywords": [
+    "trikhub",
+    "trik",
+    "ai",
+    "agent",
+    "gateway",
+    "server",
+    "fastify",
+    "skills"
+  ],
+  "author": "Molefas",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Molefas/trikhub.git",
+    "directory": "packages/js/server"
+  },
+  "bugs": {
+    "url": "https://github.com/Molefas/trikhub/issues"
+  },
+  "homepage": "https://github.com/Molefas/trikhub/tree/main/packages/js/server#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@fastify/swagger": "^9.4.2",
+    "@fastify/swagger-ui": "^5.2.1",
+    "@trikhub/gateway": "workspace:*",
+    "@trikhub/linter": "workspace:*",
+    "@trikhub/manifest": "workspace:*",
+    "fastify": "^5.2.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}
