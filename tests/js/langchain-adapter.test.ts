@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { TrikGateway } from '../packages/js/trik-gateway/src/gateway.js';
-import { createLangChainTools } from '../packages/js/trik-gateway/src/langchain/adapter.js';
+import { TrikGateway } from '../../packages/js/gateway/src/gateway.js';
+import { createLangChainTools } from '../../packages/js/gateway/src/langchain/adapter.js';
 import type { PassthroughContent } from '@trikhub/manifest';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
