@@ -1,5 +1,22 @@
 # @saaas-sdk/gateway
 
+## 0.6.1
+
+### Patch Changes
+
+- [#22](https://github.com/Molefas/trikhub/pull/22) [`fc5ba42`](https://github.com/Molefas/trikhub/commit/fc5ba42872baebb5c3b9f8df724d93f19501885d) Thanks [@Molefas](https://github.com/Molefas)! - Added cross-language trik support for Python environments running Node.js triks via worker subprocess.
+
+  Python SDK (`trikhub`) updates:
+
+  - Version bump to 0.5.0 to align with JS packages
+  - Added automated PyPI publishing to release workflow
+  - Node.js worker subprocess for executing JS triks from Python
+  - NVM auto-detection for Node.js executable discovery
+  - Git clone approach for cross-language trik installation
+
+- Updated dependencies []:
+  - @trikhub/manifest@0.6.1
+
 ## 0.6.0
 
 ### Minor Changes

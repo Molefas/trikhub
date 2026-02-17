@@ -1,6 +1,6 @@
 {
   "name": "@trikhub/gateway",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Secure trik execution gateway for AI agents with prompt injection protection",
   "type": "module",
   "main": "./dist/index.js",
