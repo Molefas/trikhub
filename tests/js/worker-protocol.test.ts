@@ -22,7 +22,7 @@ import {
   type InvokeParams,
   type JsonRpcRequest,
   type JsonRpcResponse,
-} from '../packages/trik-gateway/src/worker-protocol.js';
+} from '../packages/js/trik-gateway/src/worker-protocol.js';
 
 describe('Worker Protocol', () => {
   describe('Message Creation', () => {

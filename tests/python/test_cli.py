@@ -309,8 +309,8 @@ class TestCLI:
         runner = CliRunner()
         with runner.isolated_filesystem():
             result = runner.invoke(cli, ["uninstall", "@acme/nonexistent"])
-            assert result.exit_code == 0
-            assert "was not in config" in result.output
+            assert result.exit_code == 1
+            assert "not found in config" in result.output
 
     def test_install_help(self) -> None:
         """Test install command help."""

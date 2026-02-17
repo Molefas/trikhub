@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { TrikGateway } from '../packages/trik-gateway/src/gateway.js';
+import { TrikGateway } from '../packages/js/trik-gateway/src/gateway.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
