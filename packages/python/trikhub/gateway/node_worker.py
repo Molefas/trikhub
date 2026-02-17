@@ -32,12 +32,60 @@ from trikhub.gateway.storage_provider import TrikStorageContext
 # ============================================================================
 
 
+def _find_node_executable() -> str:
+    """
+    Find the Node.js executable in common locations.
+
+    Searches:
+    1. PATH via shutil.which
+    2. NVM directories (~/.nvm/versions/node/*/bin/node)
+    3. Common install locations (/usr/local/bin/node, etc.)
+
+    Returns the first valid node executable found, or 'node' as fallback.
+    """
+    # Try PATH first
+    node_in_path = shutil.which("node")
+    if node_in_path:
+        return node_in_path
+
+    # Check NVM locations
+    home = os.path.expanduser("~")
+    nvm_versions_dir = os.path.join(home, ".nvm", "versions", "node")
+    if os.path.isdir(nvm_versions_dir):
+        # Find all installed versions and pick the latest
+        versions = []
+        try:
+            for version_dir in os.listdir(nvm_versions_dir):
+                node_path = os.path.join(nvm_versions_dir, version_dir, "bin", "node")
+                if os.path.isfile(node_path):
+                    versions.append((version_dir, node_path))
+            # Sort by version (simple string sort works for semver prefixed with 'v')
+            if versions:
+                versions.sort(key=lambda x: x[0], reverse=True)
+                return versions[0][1]
+        except Exception:
+            pass
+
+    # Check common locations
+    common_paths = [
+        "/usr/local/bin/node",
+        "/usr/bin/node",
+        "/opt/homebrew/bin/node",
+    ]
+    for path in common_paths:
+        if os.path.isfile(path):
+            return path
+
+    # Fallback to 'node' and hope for the best
+    return "node"
+
+
 @dataclass
 class NodeWorkerConfig:
     """Configuration for the Node.js worker."""
 
-    # Path to Node.js executable (defaults to 'node')
-    node_path: str = "node"
+    # Path to Node.js executable (auto-detected if not specified)
+    node_path: str | None = None
     # Timeout for worker startup in ms (default: 10000)
     startup_timeout_ms: int = 10000
     # Timeout for invoke requests in ms (default: 60000)
@@ -46,6 +94,11 @@ class NodeWorkerConfig:
     debug: bool = False
     # Path to the worker script (auto-detected if not specified)
     worker_script_path: str | None = None
+
+    def __post_init__(self) -> None:
+        """Auto-detect node path if not specified."""
+        if self.node_path is None:
+            self.node_path = _find_node_executable()
 
 
 @dataclass

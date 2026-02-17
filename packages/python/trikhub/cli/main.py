@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -85,6 +86,116 @@ def run_pip(args: list[str], capture: bool = False) -> subprocess.CompletedProce
     if capture:
         return subprocess.run(cmd, capture_output=True, text=True)
     return subprocess.run(cmd)
+
+
+def run_command(
+    cmd: list[str], cwd: Path | None = None, capture: bool = True
+) -> subprocess.CompletedProcess[str]:
+    """Run a shell command."""
+    return subprocess.run(cmd, cwd=cwd, capture_output=capture, text=True)
+
+
+def get_triks_directory() -> Path:
+    """Get the .trikhub/triks directory path."""
+    return Path.cwd() / ".trikhub" / "triks"
+
+
+def download_to_triks_directory(
+    package_name: str,
+    github_repo: str,
+    git_tag: str,
+    runtime: str = "node",
+) -> tuple[bool, Path]:
+    """
+    Download a trik to .trikhub/triks/ via git clone.
+
+    This mirrors the JS CLI approach for cross-language trik installation.
+
+    Args:
+        package_name: Full trik name (e.g., @scope/name)
+        github_repo: GitHub repo (e.g., owner/repo)
+        git_tag: Git tag to checkout (e.g., v1.0.0)
+        runtime: Trik runtime ('node' or 'python')
+
+    Returns:
+        Tuple of (success, trik_path)
+    """
+    triks_dir = get_triks_directory()
+
+    # Handle scoped packages: @scope/name -> .trikhub/triks/@scope/name
+    if package_name.startswith("@"):
+        # Split @scope/name into parts
+        parts = package_name.split("/")
+        trik_dir = triks_dir / parts[0] / parts[1] if len(parts) > 1 else triks_dir / package_name
+    else:
+        trik_dir = triks_dir / package_name
+
+    # Create parent directories
+    trik_dir.parent.mkdir(parents=True, exist_ok=True)
+
+    # Remove existing directory if it exists
+    if trik_dir.exists():
+        click.echo(f"Removing existing {click.style(package_name, fg='cyan')}...")
+        shutil.rmtree(trik_dir)
+
+    # Clone the repository at the specific tag
+    click.echo(f"Downloading {click.style(package_name, fg='cyan')}...")
+    git_path = shutil.which("git")
+    if not git_path:
+        click.echo(click.style("Error: git not found. Install git to continue.", fg="red"))
+        return False, trik_dir
+
+    clone_result = run_command([
+        git_path, "clone",
+        "--depth", "1",
+        "--branch", git_tag,
+        f"https://github.com/{github_repo}.git",
+        str(trik_dir),
+    ])
+
+    if clone_result.returncode != 0:
+        click.echo(click.style(f"Git clone failed: {clone_result.stderr}", fg="red"))
+        return False, trik_dir
+
+    # Remove .git directory to save space
+    git_dir = trik_dir / ".git"
+    if git_dir.exists():
+        shutil.rmtree(git_dir)
+
+    # Install dependencies for Node.js triks
+    if runtime == "node":
+        package_json = trik_dir / "package.json"
+        if package_json.exists():
+            click.echo("Installing npm dependencies...")
+            npm_path = shutil.which("npm")
+            if npm_path:
+                install_result = run_command(
+                    [npm_path, "install", "--production"],
+                    cwd=trik_dir,
+                )
+                if install_result.returncode != 0:
+                    click.echo(click.style(f"Warning: npm install failed: {install_result.stderr}", fg="yellow"))
+                    click.echo(click.style("You may need to run 'npm install' manually in the trik directory", dim=True))
+            else:
+                click.echo(click.style("Warning: npm not found, dependencies not installed", fg="yellow"))
+                click.echo(click.style("Run 'npm install' in the trik directory before using", dim=True))
+
+    return True, trik_dir
+
+
+def is_trik_in_triks_directory(package_name: str) -> tuple[bool, Path | None]:
+    """Check if a trik exists in .trikhub/triks/ directory."""
+    triks_dir = get_triks_directory()
+
+    if package_name.startswith("@"):
+        parts = package_name.split("/")
+        trik_dir = triks_dir / parts[0] / parts[1] if len(parts) > 1 else triks_dir / package_name
+    else:
+        trik_dir = triks_dir / package_name
+
+    if trik_dir.exists() and (trik_dir / "manifest.json").exists():
+        return True, trik_dir
+    return False, None
 
 
 def print_trik_info(trik: TrikInfo, installed: bool = False, show_runtime: bool = False) -> None:
@@ -241,14 +352,52 @@ async def _install_from_registry_or_pip(package_name: str, version_spec: str | N
                     click.echo(click.style(f"\u2713 Installed {trik_info.full_name}@{version_to_install}", fg="green"))
                     return
                 else:
+                    # Node.js trik - download to .trikhub/triks/ via git clone
+                    version_info = None
+                    for v in trik_info.versions:
+                        if v.version == version_to_install:
+                            version_info = v
+                            break
+
+                    if not version_info:
+                        click.echo(click.style(f"Version {version_to_install} not found", fg="red"))
+                        sys.exit(1)
+
                     click.echo(
                         click.style(
-                            f"Note: {package_name} is a Node.js trik. "
-                            "Use 'trik install' from the Node CLI instead.",
-                            fg="yellow",
+                            f"Cross-language trik: {trik_info.runtime} trik in Python project",
+                            dim=True,
                         )
                     )
-                    sys.exit(1)
+
+                    # Download to .trikhub/triks/
+                    success, trik_path = download_to_triks_directory(
+                        trik_info.full_name,
+                        trik_info.github_repo,
+                        version_info.git_tag,
+                        runtime=trik_info.runtime,
+                    )
+
+                    if not success:
+                        click.echo(click.style("Installation failed", fg="red"))
+                        sys.exit(1)
+
+                    # Register the trik
+                    add_trik_to_config(
+                        trik_info.full_name,
+                        trikhub_version=version_to_install,
+                        runtime="node",
+                    )
+
+                    # Report download
+                    await registry.report_download(package_name, version_to_install)
+
+                    click.echo(click.style(f"✓ Installed {trik_info.full_name}@{version_to_install}", fg="green"))
+                    click.echo(click.style(f"  Downloaded to: {trik_path.relative_to(Path.cwd())}", dim=True))
+                    click.echo(click.style("  Registered in: .trikhub/config.json", dim=True))
+                    click.echo()
+                    click.echo(click.style("The trik will run via the Node.js worker subprocess.", dim=True))
+                    return
 
         except FileNotFoundError:
             pass  # Not in registry, try pip
@@ -281,27 +430,46 @@ def uninstall(package: str) -> None:
     elif package.startswith("@") and package.count("@") > 1:
         package_name = package[: package.rfind("@")]
 
-    # Remove from config
+    # Get runtime before removing from config
+    config = read_config()
+    trik_runtime = config.runtimes.get(package_name, "python")
+
+    # Remove from config (requires exact match)
     click.echo(f"Removing {click.style(package_name, fg='cyan')} from config...")
     was_in_config = remove_trik_from_config(package_name)
 
-    if was_in_config:
-        click.echo(click.style(f"\u2713 Removed from .trikhub/config.json", fg="green"))
+    if not was_in_config:
+        click.echo(click.style(f"Error: {package_name} not found in config", fg="red"))
+        click.echo(click.style("Use 'trik list' to see installed triks with their full names", dim=True))
+        sys.exit(1)
+
+    click.echo(click.style("✓ Removed from .trikhub/config.json", fg="green"))
+
+    # Handle based on runtime
+    if trik_runtime == "node":
+        # Check .trikhub/triks/ directory
+        exists, trik_path = is_trik_in_triks_directory(package_name)
+        if exists and trik_path:
+            click.echo("Removing from .trikhub/triks/...")
+            shutil.rmtree(trik_path)
+            click.echo(click.style(f"✓ Removed {package_name}", fg="green"))
+        else:
+            click.echo(click.style("Note: Directory not found in .trikhub/triks/ (may have been manually removed)", fg="yellow"))
     else:
-        click.echo(click.style(f"Note: {package_name} was not in config", fg="yellow"))
+        # Uninstall from pip using the correct package name
+        pip_names = get_pip_package_names(package_name)
+        click.echo("Uninstalling package...")
 
-    # Try to uninstall from pip
-    # Convert scoped name to pip package name if needed
-    pip_name = package_name.replace("@", "").replace("/", "-")
-    click.echo(f"Uninstalling package...")
+        uninstalled = False
+        for pip_name in pip_names:
+            result = run_pip(["uninstall", "-y", pip_name], capture=True)
+            if result.returncode == 0:
+                click.echo(click.style(f"✓ Uninstalled {package_name}", fg="green"))
+                uninstalled = True
+                break
 
-    result = run_pip(["uninstall", "-y", pip_name], capture=True)
-
-    if result.returncode == 0:
-        click.echo(click.style(f"\u2713 Uninstalled {package_name}", fg="green"))
-    else:
-        # Package might not be installed via pip
-        click.echo(click.style(f"Note: Package not found in pip", fg="yellow"))
+        if not uninstalled:
+            click.echo(click.style("Note: Package not found in pip (may have been manually removed)", fg="yellow"))
 
 
 # ============================================================================
@@ -327,12 +495,20 @@ def list_triks(as_json: bool, runtime: str | None) -> None:
             trik_runtime = config.runtimes.get(trik_name, "python")
             if runtime and trik_runtime != runtime:
                 continue
-            pkg_info = find_package_info(trik_name)
+
+            if trik_runtime == "node":
+                exists, _ = is_trik_in_triks_directory(trik_name)
+                version = config.trikhub.get(trik_name, "unknown")
+            else:
+                pkg_info = find_package_info(trik_name)
+                exists = pkg_info is not None
+                version = pkg_info.get("version", "unknown") if pkg_info else "unknown"
+
             triks_data.append({
                 "name": trik_name,
-                "version": pkg_info.get("version", "unknown") if pkg_info else "unknown",
+                "version": version,
                 "runtime": trik_runtime,
-                "exists": pkg_info is not None,
+                "exists": exists,
             })
         click.echo(json.dumps({"triks": triks_data}, indent=2))
         return
@@ -355,24 +531,43 @@ def list_triks(as_json: bool, runtime: str | None) -> None:
     click.echo(click.style(f"\nInstalled triks ({len(filtered_triks)}):\n", bold=True))
 
     for trik_name, trik_runtime in filtered_triks:
-        # Get package info (try multiple pip name variations)
-        pkg_info = find_package_info(trik_name)
+        # Check existence based on runtime
+        if trik_runtime == "node":
+            # Check .trikhub/triks/ directory for Node.js triks
+            exists, trik_path = is_trik_in_triks_directory(trik_name)
+            version_str = config.trikhub.get(trik_name, "unknown")
+            description = None
+            if exists and trik_path:
+                # Try to read description from manifest
+                manifest_path = trik_path / "manifest.json"
+                if manifest_path.exists():
+                    try:
+                        import json as json_mod
+                        manifest = json_mod.loads(manifest_path.read_text())
+                        description = manifest.get("description")
+                    except Exception:
+                        pass
+        else:
+            # Check pip for Python triks
+            pkg_info = find_package_info(trik_name)
+            exists = pkg_info is not None
+            version_str = pkg_info.get("version", "unknown") if pkg_info else "unknown"
+            description = pkg_info.get("description") if pkg_info else None
 
-        exists = pkg_info is not None
-        status = click.style("\u25cf", fg="green") if exists else click.style("\u25cb", fg="red")
+        status = click.style("●", fg="green") if exists else click.style("○", fg="red")
         name = click.style(trik_name, fg="cyan")
-        version = click.style(f"v{pkg_info.get('version', 'unknown')}" if pkg_info else "v?", dim=True)
+        version = click.style(f"v{version_str}", dim=True)
         runtime_badge = click.style(f"[{trik_runtime}]", fg="yellow")
 
         click.echo(f"  {status} {name} {version} {runtime_badge}")
 
-        if pkg_info and pkg_info.get("description"):
-            click.echo(click.style(f"      {pkg_info['description']}", dim=True))
+        if description:
+            click.echo(click.style(f"      {description}", dim=True))
 
         if not exists:
             click.echo(
                 click.style(
-                    f"      \u26a0 Not installed! Run 'trik install {trik_name}'",
+                    f"      ⚠ Not installed! Run 'trik install {trik_name}'",
                     fg="red",
                 )
             )
