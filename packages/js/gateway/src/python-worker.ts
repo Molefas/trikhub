@@ -63,11 +63,16 @@ export class PythonWorker extends EventEmitter {
   private config: Required<PythonWorkerConfig>;
   private isReady = false;
   private startupPromise: Promise<void> | null = null;
+  private stderrBuffer: string[] = [];
 
   constructor(config: PythonWorkerConfig = {}) {
     super();
+    // Check environment variables for Python path:
+    // TRIKHUB_PYTHON or PYTHON_PATH, fallback to 'python3'
+    const defaultPythonPath =
+      process.env.TRIKHUB_PYTHON ?? process.env.PYTHON_PATH ?? 'python3';
     this.config = {
-      pythonPath: config.pythonPath ?? 'python3',
+      pythonPath: config.pythonPath ?? defaultPythonPath,
       startupTimeoutMs: config.startupTimeoutMs ?? 10000,
       invokeTimeoutMs: config.invokeTimeoutMs ?? 60000,
       debug: config.debug ?? false,
@@ -93,8 +98,10 @@ export class PythonWorker extends EventEmitter {
   private async doStart(): Promise<void> {
     return new Promise((resolve, reject) => {
       const startupTimeout = setTimeout(() => {
+        const stderrOutput = this.stderrBuffer.join('\n');
         this.kill();
-        reject(new Error(`Worker startup timed out after ${this.config.startupTimeoutMs}ms`));
+        const errorSuffix = stderrOutput ? `\nStderr: ${stderrOutput}` : '';
+        reject(new Error(`Worker startup timed out after ${this.config.startupTimeoutMs}ms${errorSuffix}`));
       }, this.config.startupTimeoutMs);
 
       // Spawn the Python worker process
@@ -107,11 +114,15 @@ export class PythonWorker extends EventEmitter {
         },
       });
 
-      // Handle stderr (for debugging)
+      // Handle stderr - always collect for error reporting
+      this.stderrBuffer = [];
       this.process.stderr?.on('data', (data: Buffer) => {
         const message = data.toString().trim();
-        if (this.config.debug) {
-          console.error(`[PythonWorker:stderr] ${message}`);
+        if (message) {
+          this.stderrBuffer.push(message);
+          if (this.config.debug) {
+            console.error(`[PythonWorker:stderr] ${message}`);
+          }
         }
         this.emit('stderr', message);
       });
@@ -120,7 +131,11 @@ export class PythonWorker extends EventEmitter {
       this.process.on('error', (error) => {
         clearTimeout(startupTimeout);
         this.emit('error', error);
-        reject(new Error(`Failed to start Python worker: ${error.message}`));
+        const stderrOutput = this.stderrBuffer.join('\n');
+        const errorMsg = stderrOutput
+          ? `Failed to start Python worker: ${error.message}\nStderr: ${stderrOutput}`
+          : `Failed to start Python worker: ${error.message}`;
+        reject(new Error(errorMsg));
       });
 
       // Handle process exit
@@ -129,10 +144,14 @@ export class PythonWorker extends EventEmitter {
         this.process = null;
         this.readline = null;
 
-        // Reject all pending requests
+        // Get stderr output for error messages
+        const stderrOutput = this.stderrBuffer.join('\n');
+        const errorSuffix = stderrOutput ? `\nStderr: ${stderrOutput}` : '';
+
+        // Reject all pending requests with stderr included
         for (const [id, pending] of this.pendingRequests) {
           clearTimeout(pending.timeout);
-          pending.reject(new Error(`Worker process exited (code: ${code}, signal: ${signal})`));
+          pending.reject(new Error(`Worker process exited (code: ${code}, signal: ${signal})${errorSuffix}`));
           this.pendingRequests.delete(id);
         }
 
@@ -250,6 +269,7 @@ export class PythonWorker extends EventEmitter {
       this.readline = null;
       this.isReady = false;
     }
+    this.stderrBuffer = [];
   }
 
   /**

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "trik-article-search-py"
+version = "1.0.0"
+description = "Article Search Trik - Python implementation demonstrating type-directed privilege separation"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    { name = "Molefas" }
+]
+dependencies = [
+    "anthropic>=0.40.0",
+    "httpx>=0.27.0",
+]
+
+[project.urls]
+Repository = "https://github.com/Molefas/trik-article-search-py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["trik_article_search_py"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "trik_article_search_py/**",
+    "README.md",
+    "requirements.txt",
+]
