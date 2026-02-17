@@ -12,8 +12,8 @@ import {
   checkTemplateFieldsExist,
   checkHasResponseTemplates,
   extractTemplatePlaceholders,
-} from '../packages/trik-linter/src/rules.js';
-import type { TrikManifest, ActionDefinition } from '../packages/trik-manifest/src/types.js';
+} from '../packages/js/trik-linter/src/rules.js';
+import type { TrikManifest, ActionDefinition } from '../packages/js/trik-manifest/src/types.js';
 
 function createSourceFile(code: string): ts.SourceFile {
   return ts.createSourceFile('test.ts', code, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS);

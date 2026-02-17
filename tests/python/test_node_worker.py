@@ -27,7 +27,9 @@ class TestNodeWorkerConfig:
     def test_default_config(self):
         """Test default configuration values."""
         config = NodeWorkerConfig()
-        assert config.node_path == "node"
+        # node_path is auto-detected - verify it's set and contains "node"
+        assert config.node_path is not None
+        assert "node" in config.node_path
         assert config.startup_timeout_ms == 10000
         assert config.invoke_timeout_ms == 60000
         assert config.debug is False
