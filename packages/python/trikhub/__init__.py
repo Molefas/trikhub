@@ -8,7 +8,7 @@ Provides Python support for the TrikHub ecosystem:
 - Optional HTTP server
 """
 
-__version__ = "0.1.0"
+__version__ = "0.5.0"
 
 from trikhub.gateway.gateway import TrikGateway
 from trikhub.gateway.worker_protocol import (

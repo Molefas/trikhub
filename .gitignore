@@ -6,6 +6,8 @@ venv
 # Build outputs
 dist/
 *.tsbuildinfo
+*.egg-info/
+build/
 
 # Environment
 .env

@@ -1,3 +1,0 @@
-[console_scripts]
-trik = trikhub.cli.main:cli
-trikhub-worker = trikhub.worker.main:run_worker
