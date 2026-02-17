@@ -161,6 +161,22 @@ class RegistryClient:
 
         return response.json()
 
+    def _extract_runtime(self, api: dict[str, Any]) -> str:
+        """Extract runtime from API response, checking manifest if needed."""
+        # Check top-level runtime first
+        if runtime := api.get("runtime"):
+            return runtime
+
+        # Check manifest.entry.runtime in versions (latest version first)
+        versions = api.get("versions", [])
+        if versions:
+            manifest = versions[0].get("manifest", {})
+            entry = manifest.get("entry", {})
+            if runtime := entry.get("runtime"):
+                return runtime
+
+        return "node"  # Default fallback
+
     def _api_to_trik_info(
         self,
         api: dict[str, Any],
@@ -183,7 +199,7 @@ class RegistryClient:
             versions=versions or [],
             created_at=api.get("createdAt", ""),
             updated_at=api.get("updatedAt", ""),
-            runtime=api.get("runtime", "node"),
+            runtime=self._extract_runtime(api),
         )
 
     def _api_to_version(self, api: dict[str, Any]) -> TrikVersion:

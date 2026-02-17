@@ -2,12 +2,12 @@
 TrikHub CLI - Command-line interface for managing Python triks.
 
 Usage:
-    trikhub install @scope/name   Install a trik from the registry or pip
-    trikhub uninstall @scope/name Uninstall a trik
-    trikhub list                  List installed triks
-    trikhub sync                  Discover triks in site-packages
-    trikhub search query          Search for triks in the registry
-    trikhub info @scope/name      Show trik details
+    trik install @scope/name   Install a trik from the registry or pip
+    trik uninstall @scope/name Uninstall a trik
+    trik list                  List installed triks
+    trik sync                  Discover triks in site-packages
+    trik search query          Search for triks in the registry
+    trik info @scope/name      Show trik details
 """
 
 from __future__ import annotations
@@ -48,6 +48,37 @@ def format_number(num: int) -> str:
     return str(num)
 
 
+def get_pip_package_names(trik_name: str) -> list[str]:
+    """
+    Get possible pip package names for a trik.
+
+    Python packages don't use npm-style scopes, so we try multiple variations:
+    - @scope/name -> name (most common)
+    - @scope/name -> scope-name (fallback)
+    - name -> name (no scope)
+    """
+    if trik_name.startswith("@"):
+        # Scoped: @scope/name
+        parts = trik_name[1:].split("/", 1)
+        if len(parts) == 2:
+            scope, name = parts
+            # Normalize underscores to hyphens for pip
+            name = name.replace("_", "-")
+            scope = scope.replace("_", "-")
+            return [name, f"{scope}-{name}"]
+    # Unscoped: just normalize
+    return [trik_name.replace("_", "-")]
+
+
+def find_package_info(trik_name: str) -> dict[str, Any] | None:
+    """Find package info by trying multiple pip name variations."""
+    for pip_name in get_pip_package_names(trik_name):
+        info = get_package_info(pip_name)
+        if info:
+            return info
+    return None
+
+
 def run_pip(args: list[str], capture: bool = False) -> subprocess.CompletedProcess[str]:
     """Run a pip command."""
     cmd = [sys.executable, "-m", "pip"] + args
@@ -56,11 +87,12 @@ def run_pip(args: list[str], capture: bool = False) -> subprocess.CompletedProce
     return subprocess.run(cmd)
 
 
-def print_trik_info(trik: TrikInfo, installed: bool = False) -> None:
+def print_trik_info(trik: TrikInfo, installed: bool = False, show_runtime: bool = False) -> None:
     """Print formatted trik information."""
     installed_badge = click.style(" [installed]", fg="green") if installed else ""
-    verified_badge = click.style(" \u2713", fg="blue") if trik.verified else ""
-    runtime_badge = click.style(f" [{trik.runtime}]", fg="yellow")
+    verified_badge = click.style(" ✓", fg="blue") if trik.verified else ""
+    # Only show runtime badge when we have reliable data (e.g., from info command)
+    runtime_badge = click.style(f" [{trik.runtime}]", fg="yellow") if show_runtime else ""
 
     click.echo(f"  {click.style(trik.full_name, fg='cyan')}{verified_badge}{runtime_badge}{installed_badge}")
     click.echo(f"  {click.style(trik.description, dim=True)}")
@@ -105,9 +137,9 @@ def install(ctx: click.Context, package: str, pkg_version: str | None, use_pip: 
     """Install a trik from the registry or pip.
 
     Examples:
-        trikhub install @acme/article-search
-        trikhub install @acme/article-search --version 1.0.0
-        trikhub install my-trik-package --pip
+        trik install @acme/article-search
+        trik install @acme/article-search --version 1.0.0
+        trik install my-trik-package --pip
     """
     # Parse package name and version
     package_name = package
@@ -239,8 +271,8 @@ def uninstall(package: str) -> None:
     """Uninstall a trik.
 
     Examples:
-        trikhub uninstall @acme/article-search
-        trikhub uninstall my-trik-package
+        trik uninstall @acme/article-search
+        trik uninstall my-trik-package
     """
     # Parse package name (remove version if present)
     package_name = package
@@ -295,7 +327,7 @@ def list_triks(as_json: bool, runtime: str | None) -> None:
             trik_runtime = config.runtimes.get(trik_name, "python")
             if runtime and trik_runtime != runtime:
                 continue
-            pkg_info = get_package_info(trik_name.replace("@", "").replace("/", "-"))
+            pkg_info = find_package_info(trik_name)
             triks_data.append({
                 "name": trik_name,
                 "version": pkg_info.get("version", "unknown") if pkg_info else "unknown",
@@ -308,8 +340,8 @@ def list_triks(as_json: bool, runtime: str | None) -> None:
     if not config.triks:
         click.echo(click.style("No triks installed.", fg="yellow"))
         click.echo()
-        click.echo(click.style("Use 'trikhub install @scope/name' to install a trik", dim=True))
-        click.echo(click.style("Use 'trikhub sync' to discover triks in site-packages", dim=True))
+        click.echo(click.style("Use 'trik install @scope/name' to install a trik", dim=True))
+        click.echo(click.style("Use 'trik sync' to discover triks in site-packages", dim=True))
         return
 
     # Filter by runtime if specified
@@ -323,9 +355,8 @@ def list_triks(as_json: bool, runtime: str | None) -> None:
     click.echo(click.style(f"\nInstalled triks ({len(filtered_triks)}):\n", bold=True))
 
     for trik_name, trik_runtime in filtered_triks:
-        # Get package info
-        pip_name = trik_name.replace("@", "").replace("/", "-")
-        pkg_info = get_package_info(pip_name)
+        # Get package info (try multiple pip name variations)
+        pkg_info = find_package_info(trik_name)
 
         exists = pkg_info is not None
         status = click.style("\u25cf", fg="green") if exists else click.style("\u25cb", fg="red")
@@ -341,7 +372,7 @@ def list_triks(as_json: bool, runtime: str | None) -> None:
         if not exists:
             click.echo(
                 click.style(
-                    f"      \u26a0 Not installed! Run 'trikhub install {trik_name}'",
+                    f"      \u26a0 Not installed! Run 'trik install {trik_name}'",
                     fg="red",
                 )
             )
@@ -365,9 +396,9 @@ def sync(dry_run: bool, as_json: bool, directory: str | None) -> None:
     a manifest.json) and registers them in .trikhub/config.json.
 
     Examples:
-        trikhub sync                    # Scan site-packages
-        trikhub sync --directory ./triks  # Scan specific directory
-        trikhub sync --dry-run          # Preview changes
+        trik sync                    # Scan site-packages
+        trik sync --directory ./triks  # Scan specific directory
+        trik sync --dry-run          # Preview changes
     """
     import json
 
@@ -449,9 +480,9 @@ def search(query: str, as_json: bool, limit: int, runtime: str | None) -> None:
     """Search for triks in the registry.
 
     Examples:
-        trikhub search article
-        trikhub search "web scraping" --runtime python
-        trikhub search ai --limit 20
+        trik search article
+        trik search "web scraping" --runtime python
+        trik search ai --limit 20
     """
     asyncio.run(_search_async(query, as_json, limit, runtime))
 
@@ -512,7 +543,7 @@ async def _search_async(query: str, as_json: bool, limit: int, runtime: str | No
             )
         )
 
-    click.echo(click.style("\nInstall with: trikhub install @scope/name", dim=True))
+    click.echo(click.style("\nInstall with: trik install @scope/name", dim=True))
 
 
 # ============================================================================
@@ -527,7 +558,7 @@ def info(package: str, as_json: bool) -> None:
     """Show detailed information about a trik.
 
     Examples:
-        trikhub info @acme/article-search
+        trik info @acme/article-search
     """
     asyncio.run(_info_async(package, as_json))
 
@@ -613,7 +644,7 @@ async def _info_async(package: str, as_json: bool) -> None:
     if installed:
         click.echo(click.style("\u2713 Installed", fg="green"))
     else:
-        click.echo(click.style(f"Install with: trikhub install {trik_info.full_name}", dim=True))
+        click.echo(click.style(f"Install with: trik install {trik_info.full_name}", dim=True))
 
 
 # ============================================================================
