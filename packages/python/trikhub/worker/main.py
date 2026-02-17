@@ -149,14 +149,43 @@ class TrikLoader:
         if not module_file.exists():
             raise FileNotFoundError(f"Module not found at {module_file}")
 
-        # Load the module dynamically
-        spec = importlib.util.spec_from_file_location("trik_module", module_file)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Could not load module from {module_file}")
+        # Determine if this is a package (trik_dir is a Python package with __init__.py)
+        # or just a standalone module
+        init_file = trik_dir / "__init__.py"
+        is_package = init_file.exists()
 
-        module = importlib.util.module_from_spec(spec)
-        sys.modules["trik_module"] = module
-        spec.loader.exec_module(module)
+        if is_package:
+            # For Python packages with relative imports:
+            # 1. Add parent directory to sys.path
+            # 2. Import the package properly so relative imports work
+            parent_dir = str(trik_dir.parent)
+            package_name = trik_dir.name
+
+            if parent_dir not in sys.path:
+                sys.path.insert(0, parent_dir)
+
+            # Import the package first to set up the package context
+            package = importlib.import_module(package_name)
+
+            # Now import the specific module within the package
+            module_name_without_ext = module_path.replace(".py", "").replace("/", ".")
+            full_module_name = f"{package_name}.{module_name_without_ext}"
+
+            # Reload in case it was cached with wrong context
+            if full_module_name in sys.modules:
+                module = importlib.reload(sys.modules[full_module_name])
+            else:
+                module = importlib.import_module(full_module_name)
+        else:
+            # For standalone modules without relative imports:
+            # Use the original approach
+            spec = importlib.util.spec_from_file_location("trik_module", module_file)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"Could not load module from {module_file}")
+
+            module = importlib.util.module_from_spec(spec)
+            sys.modules["trik_module"] = module
+            spec.loader.exec_module(module)
 
         # Get the exported graph
         if not hasattr(module, export_name):
