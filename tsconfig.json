@@ -1,10 +1,11 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/trik-manifest" },
-    { "path": "packages/trik-gateway" },
-    { "path": "packages/trik-linter" },
-    { "path": "packages/trik-server" },
-    { "path": "packages/trik-cli" }
+    { "path": "packages/js/manifest" },
+    { "path": "packages/js/gateway" },
+    { "path": "packages/js/linter" },
+    { "path": "packages/js/server" },
+    { "path": "packages/js/cli" },
+    { "path": "packages/js/worker" }
   ]
 }
