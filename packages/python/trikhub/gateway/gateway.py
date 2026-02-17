@@ -483,17 +483,35 @@ class TrikGateway:
                     continue
 
                 # 3. Try to import as Python package
-                try:
-                    # For scoped packages like @scope/name, convert to Python convention
-                    package_name = trik_name.lstrip("@").replace("/", "_").replace("-", "_")
-                    spec = importlib.util.find_spec(package_name)
-                    if spec and spec.origin:
-                        trik_path = os.path.dirname(spec.origin)
-                        manifest = await self.load_trik(trik_path)
-                        manifests.append(manifest)
+                # Try multiple package name variations since Python doesn't use npm-style scopes
+                package_names_to_try = []
+                if trik_name.startswith("@"):
+                    # Scoped: @scope/name -> try both "name" and "scope_name"
+                    parts = trik_name[1:].split("/", 1)
+                    if len(parts) == 2:
+                        scope, name = parts
+                        # Try name only first (most common for Python packages)
+                        package_names_to_try.append(name.replace("-", "_"))
+                        # Then try with scope
+                        package_names_to_try.append(f"{scope}_{name}".replace("-", "_"))
+                else:
+                    package_names_to_try.append(trik_name.replace("-", "_"))
+
+                found = False
+                for package_name in package_names_to_try:
+                    try:
+                        spec = importlib.util.find_spec(package_name)
+                        if spec and spec.origin:
+                            trik_path = os.path.dirname(spec.origin)
+                            manifest = await self.load_trik(trik_path)
+                            manifests.append(manifest)
+                            found = True
+                            break
+                    except (ImportError, ModuleNotFoundError):
                         continue
-                except (ImportError, ModuleNotFoundError):
-                    pass
+
+                if found:
+                    continue
 
                 errors.append({"trik": trik_name, "error": f"Could not find trik {trik_name}"})
 

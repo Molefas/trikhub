@@ -1,5 +1,11 @@
 {
   "triks": [
-    "trik-article-search-py"
-  ]
+    "@molefas/trik-article-search-py"
+  ],
+  "trikhub": {
+    "@molefas/trik-article-search-py": "1.0.0"
+  },
+  "runtimes": {
+    "@molefas/trik-article-search-py": "python"
+  }
 }
