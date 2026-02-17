@@ -3,9 +3,11 @@ import { StateGraph, MessagesAnnotation, START, END } from "@langchain/langgraph
 import { ToolNode } from "@langchain/langgraph/prebuilt";
 import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import type { DynamicStructuredTool } from "@langchain/core/tools";
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { PassthroughContent } from "@trikhub/gateway";
 import { z } from "zod";
 import { builtInTools, loadAllTools } from "./tools.js";
+import { createLLM, getProviderInfo } from "./llm.js";
 
 // Validator model with structured output for reason evaluation
 const reasonValidatorSchema = z.object({
@@ -35,15 +37,12 @@ function handlePassthrough(content: PassthroughContent) {
 // Graph Factory
 // ============================================================================
 
-function createAgentGraph(tools: DynamicStructuredTool[]) {
-  const model = new ChatOpenAI({
-    model: "gpt-4o-mini",
-    temperature: 0,
-  }).bindTools(tools);
+function createAgentGraph(tools: DynamicStructuredTool[], model: BaseChatModel) {
+  const boundModel = model.bindTools(tools);
 
   // Agent node - calls the LLM
   async function callModel(state: typeof MessagesAnnotation.State) {
-    const response = await model.invoke(state.messages);
+    const response = await boundModel.invoke(state.messages);
     return { messages: [response] };
   }
 
@@ -140,17 +139,21 @@ Be reasonable - if there's a clear problem stated, it's valid.`,
 // Exports
 // ============================================================================
 
-// Static export for LangGraph Studio (uses built-in tools only)
-export const graph = createAgentGraph(builtInTools);
+// Static export for LangGraph Studio (uses built-in tools only with default OpenAI)
+const defaultModel = new ChatOpenAI({ model: "gpt-4o-mini", temperature: 0 });
+export const graph = createAgentGraph(builtInTools, defaultModel);
 
-// Dynamic initialization for CLI (loads triks)
+// Dynamic initialization for CLI (loads triks with flexible LLM selection)
 export async function initializeAgentWithTriks() {
   const result = await loadAllTools(handlePassthrough);
+  const model = await createLLM();
+  const providerInfo = getProviderInfo();
 
   return {
-    graph: createAgentGraph(result.allTools),
+    graph: createAgentGraph(result.allTools, model),
     loadedTriks: result.loadedTriks,
     gateway: result.gateway,
     tools: result.allTools,
+    provider: providerInfo,
   };
 }
