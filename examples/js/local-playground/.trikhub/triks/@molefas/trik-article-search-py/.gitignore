@@ -1,9 +1,0 @@
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-.env
-.venv
-venv/
-.trikhub/secrets.json
