@@ -4,7 +4,7 @@ import {
   validateData,
   SchemaValidator,
   type TrikManifest,
-} from '../packages/js/trik-manifest/src/index.js';
+} from '../../packages/js/manifest/src/index.js';
 
 describe('trik-manifest', () => {
   describe('validateManifest', () => {
