@@ -1,5 +1,10 @@
 {
-  "registryUrl": "https://trikhub.dev",
-  "triksDirectory": "~/.trikhub/triks",
-  "triks": ["@demo/notes"]
+  "triks": [
+    "@molefas/trik-article-search-py",
+    "@molefas/trik-demo-notes"
+  ],
+  "trikhub": {
+    "@molefas/trik-demo-notes": "1.0.2",
+    "@molefas/trik-article-search-py": "1.0.0"
+  }
 }

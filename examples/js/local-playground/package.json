@@ -18,7 +18,7 @@
     "@trikhub/manifest": "file:../../../packages/js/manifest",
     "dotenv": "^16.4.7",
     "zod": "^3.25.76",
-    "@molefas/trik-article-search": "github:Molefas/trik-article-search#v2.0.1"
+    "@molefas/trik-article-search": "github:Molefas/trik-article-search#v2.0.1",
   },
   "devDependencies": {
     "@langchain/langgraph-cli": "^0.0.23",

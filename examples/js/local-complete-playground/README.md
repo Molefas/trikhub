@@ -7,7 +7,7 @@ Explore **storage** and **configuration** capabilities with a working demo trik.
 - How triks use **persistent storage** to save data across sessions
 - How triks access **configuration values** (API keys, settings)
 - How to visualize storage usage and config status via CLI commands
-- The complete trik development workflow (manifest → implement → test)
+- Flexible LLM provider selection (OpenAI, Anthropic, Google)
 
 ## Architecture
 
@@ -34,7 +34,7 @@ The gateway injects both **storage** and **config** contexts into the trik, allo
 
 - Node.js 18+
 - pnpm (or npm)
-- OpenAI API key
+- API key for one of: OpenAI, Anthropic, or Google
 
 ## Quick Start
 
@@ -47,45 +47,37 @@ pnpm install
 pnpm build
 ```
 
-**2. Install dependencies and set up symlinks**
+**2. Install dependencies**
 
 ```bash
-cd examples/local-complete-playground
+cd examples/js/local-complete-playground
 
-# Install npm dependencies
+# Install npm dependencies (includes @molefas/trik-demo-notes)
 npm install
-
-# Create symlinks for @trikhub packages
-mkdir -p node_modules/@trikhub node_modules/@demo
-ln -sf "$(cd ../../packages/trik-manifest && pwd)" node_modules/@trikhub/manifest
-ln -sf "$(cd ../../packages/trik-gateway && pwd)" node_modules/@trikhub/gateway
-ln -sf "$(pwd)/triks/demo-notes" node_modules/@demo/notes
-
-# Symlink manifest types for the demo trik
-mkdir -p triks/demo-notes/node_modules/@trikhub
-ln -sf "$(cd ../../packages/trik-manifest && pwd)" triks/demo-notes/node_modules/@trikhub/manifest
 ```
 
-**3. Build the demo trik**
-
-```bash
-cd triks/demo-notes
-npx tsc
-cd ../..
-```
-
-**4. Set up your API key**
+**3. Set up your API key**
 
 ```bash
 cp .env.example .env
-# Edit .env and add your OPENAI_API_KEY
+# Edit .env and add your API key (OpenAI, Anthropic, or Google)
+```
+
+**4. Configure the demo trik**
+
+The demo-notes trik requires an API_KEY configuration. This is already set up in `.trikhub/secrets.json`:
+
+```json
+{
+  "@molefas/trik-demo-notes": {
+    "API_KEY": "demo-api-key"
+  }
+}
 ```
 
 **5. Run the agent**
 
 ```bash
-npx tsx src/cli.ts
-# or
 npm run dev
 ```
 
@@ -95,17 +87,38 @@ You should see:
 LangGraph Agent CLI with TrikHub Support
 Loading triks...
 
-[Triks] Loaded 1 triks: @demo/notes
-[Config] @demo/notes: API_KEY ✓
+LLM: anthropic (claude-sonnet-4-20250514)
+[Triks] Loaded 1 triks: @molefas/trik-demo-notes
+[Config] @molefas/trik-demo-notes: API_KEY ✓
 
 Built-in tools: request_refund, find_order, get_project_details
-Loaded triks: @demo/notes
+Loaded triks: @molefas/trik-demo-notes
 Total tools available: 8
 
 Type "/tools" to list tools, "/storage" for storage info, "/config" for config status.
 Type "exit" or "quit" to end.
 
 You:
+```
+
+## Installing the Demo Notes Trik
+
+The demo-notes trik is a standalone published package. It's automatically installed via npm dependencies.
+
+To manually install it in another project:
+
+```bash
+trik install @molefas/trik-demo-notes
+```
+
+Or add to your `package.json`:
+
+```json
+{
+  "dependencies": {
+    "@molefas/trik-demo-notes": "github:Molefas/trik-demo-notes#v1.0.0"
+  }
+}
 ```
 
 ## Try It Out
@@ -151,9 +164,9 @@ You: /storage
 
 Storage Usage:
 
-  @demo/notes
+  @molefas/trik-demo-notes
     [████████████░░░░░░░░] 256.00 B (0.0%)
-    Path: ~/.trikhub/storage/@demo/notes
+    Path: ~/.trikhub/storage/@molefas/trik-demo-notes
 ```
 
 **Delete a note:**
@@ -169,7 +182,7 @@ Agent: Deleted note "Shopping List" (note_m5k3y)
 You: quit
 
 # Restart the CLI
-pnpm dev
+npm run dev
 
 You: list my notes
 Agent: Found 1 note(s)   # Meeting Notes persisted!
@@ -191,7 +204,7 @@ You: /config
 
 Configuration Status:
 
-  @demo/notes
+  @molefas/trik-demo-notes
     API_KEY: ✓ configured
     WEBHOOK_URL: ✗ not set (optional)
 
@@ -205,7 +218,7 @@ Edit `.trikhub/secrets.json` and remove the API_KEY:
 
 ```json
 {
-  "@demo/notes": {}
+  "@molefas/trik-demo-notes": {}
 }
 ```
 
@@ -216,12 +229,34 @@ You: /config
 
 Configuration Status:
 
-  @demo/notes
+  @molefas/trik-demo-notes
     API_KEY: ✗ MISSING (required)
     WEBHOOK_URL: ✗ not set (optional)
 ```
 
 The trik will still run (for demo purposes), but real triks can use `config.has('API_KEY')` to require configuration.
+
+## LLM Provider Selection
+
+This example supports multiple LLM providers with auto-detection:
+
+| Provider | API Key Environment Variable | Default Model |
+|----------|------------------------------|---------------|
+| Anthropic | `ANTHROPIC_API_KEY` | claude-sonnet-4-20250514 |
+| Google | `GOOGLE_API_KEY` | gemini-1.5-flash |
+| OpenAI | `OPENAI_API_KEY` | gpt-4o-mini |
+
+**Auto-detection priority:** Anthropic > Google > OpenAI
+
+**Override with environment variables:**
+
+```bash
+# Force a specific provider
+LLM_PROVIDER=openai
+
+# Override the model
+LLM_MODEL=gpt-4o
+```
 
 ## CLI Commands
 
@@ -230,7 +265,7 @@ The trik will still run (for demo purposes), but real triks can use `config.has(
 | `/tools` | List all available tools |
 | `/storage` | Show storage usage for all triks |
 | `/config` | Show configuration status for all triks |
-| `/clear @demo/notes` | Clear all storage for a trik |
+| `/clear @molefas/trik-demo-notes` | Clear all storage for a trik |
 | `exit` or `quit` | Exit the CLI |
 
 ## How It Works
@@ -244,7 +279,7 @@ Triks receive a `storage` context with these methods:
 async function addNote(input, storage) {
   const noteId = generateId();
 
-  // Store data - persists to ~/.trikhub/storage/@demo/notes/data.json
+  // Store data - persists to ~/.trikhub/storage/@molefas/trik-demo-notes/data.json
   await storage.set(`notes:${noteId}`, {
     id: noteId,
     title: input.title,
@@ -299,14 +334,10 @@ local-complete-playground/
 ├── src/
 │   ├── cli.ts              # Interactive REPL with /storage, /config commands
 │   ├── agent.ts            # LangGraph workflow
-│   └── tools.ts            # Built-in tools + trik loader
-├── triks/
-│   └── demo-notes/         # Local demo trik
-│       ├── src/index.ts    # Trik implementation
-│       ├── manifest.json   # Declares storage + config capabilities
-│       └── package.json
+│   ├── tools.ts            # Built-in tools + trik loader
+│   └── llm.ts              # Flexible LLM provider selection
 ├── .trikhub/
-│   ├── config.json         # Points to local trik
+│   ├── config.json         # Points to @molefas/trik-demo-notes
 │   └── secrets.json        # Demo API key
 ├── .env.example            # Environment template
 └── package.json
@@ -318,24 +349,26 @@ local-complete-playground/
 
 → Run `pnpm build` from the monorepo root first
 
-**"Cannot find module '../triks/demo-notes/dist/index.js'"**
+**Trik not loading**
 
-→ Run `pnpm build` in the `triks/demo-notes` directory
+→ Check `.trikhub/config.json` has the trik listed
+→ Run `npm install` to fetch the external trik package
+→ Check `node_modules/@molefas/trik-demo-notes` exists
 
-**"OPENAI_API_KEY is not set"**
+**"API key is not set"**
 
-→ Copy `.env.example` to `.env` and add your key
+→ Copy `.env.example` to `.env` and add your key for any supported provider
 
 **Storage not persisting**
 
-→ Check `~/.trikhub/storage/@demo/notes/data.json` exists and has write permissions
+→ Check `~/.trikhub/storage/@molefas/trik-demo-notes/data.json` exists and has write permissions
 
 **Config not loading**
 
 → Ensure `.trikhub/secrets.json` has valid JSON with the trik ID as key:
 ```json
 {
-  "@demo/notes": {
+  "@molefas/trik-demo-notes": {
     "API_KEY": "your-value"
   }
 }
@@ -343,7 +376,6 @@ local-complete-playground/
 
 ## Next Steps
 
-- Modify the demo trik to add new actions
-- Add TTL (time-to-live) to stored notes
+- Check out the [demo-notes trik source code](https://github.com/Molefas/trik-demo-notes)
 - Try the [local-playground](../local-playground) example for session state
 - [Build your own trik](../../README.md#building-a-trik) with storage + config
