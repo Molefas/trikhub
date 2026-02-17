@@ -1,6 +1,6 @@
 {
   "name": "@trikhub/worker-js",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "JavaScript trik worker for cross-language execution via Python gateway",
   "type": "module",
   "main": "./dist/worker.js",

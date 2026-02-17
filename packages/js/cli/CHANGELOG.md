@@ -1,5 +1,12 @@
 # @trikhub/cli
 
+## 0.3.4
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @trikhub/manifest@0.6.1
+
 ## 0.3.3
 
 ### Patch Changes
