@@ -1,21 +1,7 @@
-# LangGraph and LangChain core
 langgraph>=0.2.0
 langchain-core>=0.3.0
-
-# LLM providers (install at least one)
 langchain-anthropic>=0.2.0
 langchain-openai>=0.2.0
 langchain-google-genai>=2.0.0
-
-# Environment management
 python-dotenv>=1.0.0
-
-# Dependencies for article-search-py trik
-# (Python triks run in-process, so their deps are needed here)
-anthropic>=0.40.0
-httpx>=0.27.0
-
-# TrikHub SDK (install from local packages)
-# pip install -e ../../../packages/python
-# Or from PyPI when published:
-# trikhub>=0.1.0
+trik-article-search-py @ git+https://github.com/Molefas/trik-article-search-py

@@ -7,6 +7,7 @@
 import {
   TrikInfo,
   TrikVersion,
+  TrikRuntime,
   SearchResult,
   DeviceAuthResponse,
   AuthResult,
@@ -101,6 +102,27 @@ function apiToTrikInfo(api: ApiTrikInfo, versions: TrikVersion[] = []): TrikInfo
 }
 
 /**
+ * Extract runtime from manifest entry
+ */
+function extractRuntime(manifest: unknown): TrikRuntime | undefined {
+  if (
+    manifest &&
+    typeof manifest === 'object' &&
+    'entry' in manifest &&
+    manifest.entry &&
+    typeof manifest.entry === 'object' &&
+    'runtime' in manifest.entry
+  ) {
+    const runtime = (manifest.entry as { runtime?: string }).runtime;
+    if (runtime === 'node' || runtime === 'python') {
+      return runtime;
+    }
+  }
+  // Default to 'node' if not specified (matches gateway behavior)
+  return 'node';
+}
+
+/**
  * Convert API version to CLI TrikVersion type
  */
 function apiToTrikVersion(api: ApiTrikVersion): TrikVersion {
@@ -110,6 +132,7 @@ function apiToTrikVersion(api: ApiTrikVersion): TrikVersion {
     commitSha: api.commitSha,
     publishedAt: api.publishedAt,
     downloads: api.downloads,
+    runtime: extractRuntime(api.manifest),
   };
 }
 
