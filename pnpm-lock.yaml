@@ -24,14 +24,14 @@ importers:
         specifier: ^3.2.0
         version: 3.2.4(@types/node@22.19.8)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.2)
 
-  packages/trik-cli:
+  packages/js/cli:
     dependencies:
       '@inquirer/prompts':
         specifier: ^7.2.1
         version: 7.10.1(@types/node@20.19.33)
       '@trikhub/manifest':
         specifier: workspace:*
-        version: link:../trik-manifest
+        version: link:../manifest
       chalk:
         specifier: ^5.3.0
         version: 5.6.2
@@ -61,38 +61,44 @@ importers:
         specifier: ^6.1.13
         version: 6.1.13
 
-  packages/trik-gateway:
+  packages/js/gateway:
     dependencies:
       '@trikhub/manifest':
         specifier: workspace:*
-        version: link:../trik-manifest
+        version: link:../manifest
       ajv:
         specifier: ^8.17.1
         version: 8.17.1
+      uuid:
+        specifier: ^9.0.0
+        version: 9.0.1
     devDependencies:
       '@langchain/core':
         specifier: ^0.3.0
         version: 0.3.80
+      '@types/uuid':
+        specifier: ^9.0.0
+        version: 9.0.8
       zod:
         specifier: ^3.0.0
         version: 3.25.76
 
-  packages/trik-linter:
+  packages/js/linter:
     dependencies:
       '@trikhub/manifest':
         specifier: workspace:*
-        version: link:../trik-manifest
+        version: link:../manifest
       typescript:
         specifier: ^5.5.0
         version: 5.9.3
 
-  packages/trik-manifest:
+  packages/js/manifest:
     dependencies:
       ajv:
         specifier: ^8.17.1
         version: 8.17.1
 
-  packages/trik-server:
+  packages/js/server:
     dependencies:
       '@anthropic-ai/sdk':
         specifier: ^0.39.0
@@ -105,13 +111,13 @@ importers:
         version: 5.2.5
       '@trikhub/gateway':
         specifier: workspace:*
-        version: link:../trik-gateway
+        version: link:../gateway
       '@trikhub/linter':
         specifier: workspace:*
-        version: link:../trik-linter
+        version: link:../linter
       '@trikhub/manifest':
         specifier: workspace:*
-        version: link:../trik-manifest
+        version: link:../manifest
       fastify:
         specifier: ^5.2.1
         version: 5.7.4
@@ -119,6 +125,25 @@ importers:
       tsx:
         specifier: ^4.19.2
         version: 4.21.0
+
+  packages/js/worker:
+    dependencies:
+      '@trikhub/manifest':
+        specifier: workspace:*
+        version: link:../manifest
+      uuid:
+        specifier: ^9.0.0
+        version: 9.0.1
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.33
+      '@types/uuid':
+        specifier: ^9.0.0
+        version: 9.0.8
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
 
 packages:
 
@@ -720,6 +745,9 @@ packages:
 
   '@types/uuid@10.0.0':
     resolution: {integrity: sha512-7gqG38EyHgyP1S+7+xomFtL+ZNHcKv6DwNaCZmJmo1vgMugyF3TCnXVg4t1uk89mLNwnLtnY3TpOpCOyp1/xHQ==}
+
+  '@types/uuid@9.0.8':
+    resolution: {integrity: sha512-jg+97EGIcY9AGHJJRaaPVgetKDsrTgbRjQ5Msgjh/DQKEFl0DtyRr/VCOyD1T2R1MNeWPK/u7JoGhlDZnKBAfA==}
 
   '@vitest/expect@3.2.4':
     resolution: {integrity: sha512-Io0yyORnB6sikFlt8QW5K7slY4OjqNX9jmJQ02QDda8lyM6B5oNgVWoSoKPac8/kgnCUzuHQKrSLtu/uOqqrig==}
@@ -1667,6 +1695,7 @@ packages:
   tar@7.5.7:
     resolution: {integrity: sha512-fov56fJiRuThVFXD6o6/Q354S7pnWMJIVlDBYijsTNx6jKSE4pvrDTs6lUnmGvNyfJwFQQwWy3owKz1ucIhveQ==}
     engines: {node: '>=18'}
+    deprecated: Old versions of tar are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
 
   term-size@2.2.1:
     resolution: {integrity: sha512-wK0Ri4fOGjv/XPy8SBHZChl8CM7uMc5VML7SqiQ0zG7+J5Vr+RMQDoHa2CNT6KHUnTGIXH34UDMkPzAUyapBZg==}
@@ -1743,6 +1772,10 @@ packages:
 
   uuid@10.0.0:
     resolution: {integrity: sha512-8XkAphELsDnEGrDxUOHB3RGvXz6TeuYSGEZBOjtTtPm2lwhGBjLgOzLHB63IUWfBpNucQjND6d3AOudO+H3RWQ==}
+    hasBin: true
+
+  uuid@9.0.1:
+    resolution: {integrity: sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==}
     hasBin: true
 
   vite-node@3.2.4:
@@ -2463,7 +2496,7 @@ snapshots:
 
   '@types/node-fetch@2.6.13':
     dependencies:
-      '@types/node': 22.19.8
+      '@types/node': 20.19.33
       form-data: 4.0.5
 
   '@types/node@12.20.55': {}
@@ -2490,6 +2523,8 @@ snapshots:
       minipass: 4.2.8
 
   '@types/uuid@10.0.0': {}
+
+  '@types/uuid@9.0.8': {}
 
   '@vitest/expect@3.2.4':
     dependencies:
@@ -3447,6 +3482,8 @@ snapshots:
   universalify@0.1.2: {}
 
   uuid@10.0.0: {}
+
+  uuid@9.0.1: {}
 
   vite-node@3.2.4(@types/node@22.19.8)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.2):
     dependencies:
