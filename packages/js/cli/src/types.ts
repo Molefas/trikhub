@@ -42,6 +42,11 @@ export interface TrikHubMetadata {
 }
 
 /**
+ * Trik runtime environment
+ */
+export type TrikRuntime = 'node' | 'python';
+
+/**
  * Predefined categories for triks
  */
 export type TrikCategory =
@@ -123,6 +128,9 @@ export interface TrikVersion {
 
   /** Download count for this version */
   downloads: number;
+
+  /** Runtime environment (node or python) - extracted from manifest.entry.runtime */
+  runtime?: TrikRuntime;
 }
 
 /**

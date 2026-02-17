@@ -172,8 +172,8 @@ GOOGLE_API_KEY=...
 
 Check that:
 
-1. The `.trikhub/config.json` file exists and has valid trik paths
-2. The trik paths point to valid trik directories with `manifest.json`
+1. The `.trikhub/config.json` file exists and lists the trik package name
+2. The trik is installed via pip (`pip install -r requirements.txt`)
 
 ### Import errors
 
@@ -183,6 +183,27 @@ Make sure you've installed the TrikHub SDK:
 pip install -e ../../../packages/python
 ```
 
+## Installing Triks
+
+Triks are installed as Python packages from GitHub or PyPI:
+
+```bash
+# In requirements.txt
+trik-article-search-py @ git+https://github.com/Molefas/trik-article-search-py
+```
+
+Then reference the package name in `.trikhub/config.json`:
+
+```json
+{
+  "triks": [
+    "trik-article-search-py"
+  ]
+}
+```
+
+The gateway resolves the package from your Python environment and loads the manifest.
+
 ## Using JavaScript Triks
 
 The Python gateway can execute JavaScript triks through a Node.js worker subprocess. This allows you to use triks written in either language from a single agent.
@@ -190,32 +211,33 @@ The Python gateway can execute JavaScript triks through a Node.js worker subproc
 ### Adding a JavaScript Trik
 
 1. Ensure Node.js 18+ is installed
-1. Add the JS trik to your `.trikhub/config.json`:
+2. Install the JS trik as a pip package (triks are published to both npm and pip):
 
-```json
-{
-  "triks": [
-    {
-      "id": "@molefas/article-search-py",
-      "path": "/Users/ruimolefas/Code/trikhub-skills/article-search-py"
-    },
-    {
-      "id": "@molefas/article-search",
-      "path": "/Users/ruimolefas/Code/trikhub-skills/article-search"
-    }
-  ]
-}
-```
+   ```bash
+   # In requirements.txt
+   trik-article-search @ git+https://github.com/Molefas/trik-article-search
+   ```
 
-1. The gateway automatically detects JS triks by their `runtime: "node"` manifest entry and uses the Node.js worker
+3. Add to your `.trikhub/config.json`:
+
+   ```json
+   {
+     "triks": [
+       "trik-article-search-py",
+       "@molefas/trik-article-search"
+     ]
+   }
+   ```
+
+4. The gateway automatically detects JS triks by their `runtime: "node"` manifest entry and uses the Node.js worker
 
 ### Node.js Worker
 
 When the gateway loads a JavaScript trik, it:
 
 1. Spawns a Node.js subprocess with the TrikHub worker (`@trikhub/worker-js`)
-1. Communicates via JSON-RPC over stdin/stdout
-1. Manages the subprocess lifecycle automatically
+2. Communicates via JSON-RPC over stdin/stdout
+3. Manages the subprocess lifecycle automatically
 
 This means you can mix Python and JavaScript triks in the same agent seamlessly.
 

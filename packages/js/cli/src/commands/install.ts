@@ -1,15 +1,14 @@
 /**
  * trik install command
  *
- * Installs a trik as an npm dependency and registers it in .trikhub/config.json.
+ * Installs a trik and registers it in .trikhub/config.json.
  *
  * Workflow:
- * 1. Try npm registry first
- * 2. If not found, fall back to TrikHub registry (uses git URLs)
- * 3. Verify commit SHA for security
- * 4. Add to package.json as github:owner/repo#tag
- * 5. Run package manager install
- * 6. Update .trikhub/config.json with the trik
+ * 1. Detect project type (node or python)
+ * 2. Fetch trik info from TrikHub registry to get runtime
+ * 3. If same runtime: use native package manager (npm/pip)
+ * 4. If cross-language: download to .trikhub/triks/ directory
+ * 5. Update .trikhub/config.json with the trik
  */
 
 import { existsSync, mkdirSync } from 'node:fs';
@@ -21,7 +20,27 @@ import ora from 'ora';
 import * as semver from 'semver';
 import { validateManifest } from '@trikhub/manifest';
 import { registry } from '../lib/registry.js';
-import { TrikVersion } from '../types.js';
+import { TrikVersion, TrikRuntime } from '../types.js';
+
+type ProjectType = 'node' | 'python';
+
+/**
+ * Detect whether this is a Node.js or Python project
+ */
+function detectProjectType(baseDir: string): ProjectType {
+  // Check for Python project indicators first (more specific)
+  if (existsSync(join(baseDir, 'pyproject.toml'))) {
+    return 'python';
+  }
+  if (existsSync(join(baseDir, 'setup.py'))) {
+    return 'python';
+  }
+  if (existsSync(join(baseDir, 'requirements.txt')) && !existsSync(join(baseDir, 'package.json'))) {
+    return 'python';
+  }
+  // Default to node (package.json is checked later)
+  return 'node';
+}
 
 interface InstallOptions {
   version?: string;
@@ -274,6 +293,50 @@ async function tryNpmInstall(
 }
 
 /**
+ * Download a trik to .trikhub/triks/ for cross-language installation
+ * This is used when the trik runtime doesn't match the project type.
+ */
+async function downloadToTriksDirectory(
+  packageName: string,
+  githubRepo: string,
+  gitTag: string,
+  baseDir: string,
+  spinner: ReturnType<typeof ora>
+): Promise<{ success: boolean; trikPath: string }> {
+  const triksDir = join(baseDir, '.trikhub', 'triks');
+
+  // Handle scoped packages: @scope/name -> .trikhub/triks/@scope/name
+  const trikDir = join(triksDir, ...packageName.split('/'));
+
+  // Create parent directories
+  await mkdir(dirname(trikDir), { recursive: true });
+
+  // Remove existing directory if it exists
+  if (existsSync(trikDir)) {
+    spinner.text = `Removing existing ${chalk.cyan(packageName)}...`;
+    await runCommand('rm', ['-rf', trikDir], baseDir, { silent: true });
+  }
+
+  // Clone the repository at the specific tag
+  spinner.text = `Downloading ${chalk.cyan(packageName)}...`;
+  const cloneResult = await runCommand(
+    'git',
+    ['clone', '--depth', '1', '--branch', gitTag, `https://github.com/${githubRepo}.git`, trikDir],
+    baseDir,
+    { silent: true }
+  );
+
+  if (cloneResult.code !== 0) {
+    return { success: false, trikPath: trikDir };
+  }
+
+  // Remove .git directory to save space
+  await runCommand('rm', ['-rf', join(trikDir, '.git')], baseDir, { silent: true });
+
+  return { success: true, trikPath: trikDir };
+}
+
+/**
  * Install from TrikHub registry using git URLs
  */
 async function installFromTrikhub(
@@ -362,6 +425,132 @@ async function installFromTrikhub(
   return { success: true, version: versionToInstall };
 }
 
+/**
+ * Install a cross-language trik from TrikHub registry.
+ * Downloads to .trikhub/triks/ instead of using npm.
+ */
+async function installCrossLanguageFromTrikhub(
+  packageName: string,
+  requestedVersion: string | undefined,
+  baseDir: string,
+  spinner: ReturnType<typeof ora>
+): Promise<{ success: boolean; version?: string; runtime?: TrikRuntime }> {
+  // Fetch trik info from TrikHub registry
+  spinner.text = `Fetching ${chalk.cyan(packageName)} from TrikHub registry...`;
+  const trikInfo = await registry.getTrik(packageName);
+
+  if (!trikInfo) {
+    return { success: false };
+  }
+
+  // Determine version to install
+  let versionToInstall: string;
+  let versionInfo: TrikVersion | undefined;
+
+  if (!requestedVersion) {
+    versionToInstall = trikInfo.latestVersion;
+    versionInfo = trikInfo.versions.find((v) => v.version === versionToInstall);
+  } else if (semver.valid(requestedVersion)) {
+    versionToInstall = requestedVersion;
+    versionInfo = trikInfo.versions.find((v) => v.version === versionToInstall);
+  } else if (semver.validRange(requestedVersion)) {
+    const availableVersions = trikInfo.versions.map((v) => v.version);
+    const resolvedVersion = semver.maxSatisfying(availableVersions, requestedVersion);
+
+    if (!resolvedVersion) {
+      spinner.fail(`No version matching ${chalk.red(requestedVersion)} found for ${packageName}`);
+      console.log(chalk.dim(`Available versions: ${availableVersions.join(', ')}`));
+      return { success: false };
+    }
+
+    versionToInstall = resolvedVersion;
+    versionInfo = trikInfo.versions.find((v) => v.version === resolvedVersion);
+  } else {
+    spinner.fail(`Invalid version: ${chalk.red(requestedVersion)}`);
+    return { success: false };
+  }
+
+  if (!versionInfo) {
+    spinner.fail(`Version ${chalk.red(versionToInstall)} not found for ${packageName}`);
+    return { success: false };
+  }
+
+  // Verify the commit SHA hasn't changed (security check)
+  spinner.text = `Verifying ${chalk.cyan(packageName)}@${versionToInstall}...`;
+  const verification = await verifyGitHubTagSha(
+    trikInfo.githubRepo,
+    versionInfo.gitTag,
+    versionInfo.commitSha
+  );
+
+  if (!verification.valid) {
+    spinner.fail(`Security warning: Tag ${versionInfo.gitTag} has been modified!`);
+    console.log(chalk.red('\nThe git tag no longer points to the same commit as when it was published.'));
+    console.log(chalk.dim(`  Expected SHA: ${versionInfo.commitSha}`));
+    if (verification.currentSha) {
+      console.log(chalk.dim(`  Current SHA:  ${verification.currentSha}`));
+    }
+    console.log(chalk.red('\nThis could indicate tampering. Aborting installation.'));
+    return { success: false };
+  }
+
+  // Download to .trikhub/triks/
+  const downloadResult = await downloadToTriksDirectory(
+    packageName,
+    trikInfo.githubRepo,
+    versionInfo.gitTag,
+    baseDir,
+    spinner
+  );
+
+  if (!downloadResult.success) {
+    spinner.fail(`Failed to download ${packageName}`);
+    return { success: false };
+  }
+
+  // Report download for analytics
+  registry.reportDownload(packageName, versionToInstall);
+
+  return { success: true, version: versionToInstall, runtime: versionInfo.runtime };
+}
+
+/**
+ * Check if a trik in .trikhub/triks/ is valid
+ */
+async function isTrikInTriksDir(trikPath: string): Promise<boolean> {
+  const manifestPath = join(trikPath, 'manifest.json');
+  if (!existsSync(manifestPath)) {
+    // Check for Python trik structure: package_name/manifest.json
+    const entries = existsSync(trikPath) ? await readFile(trikPath, 'utf-8').catch(() => null) : null;
+    if (!entries) {
+      // Try to find manifest in subdirectory (Python package structure)
+      try {
+        const dirEntries = await import('node:fs/promises').then(fs => fs.readdir(trikPath, { withFileTypes: true }));
+        for (const entry of dirEntries) {
+          if (entry.isDirectory() && !entry.name.startsWith('.')) {
+            const subManifest = join(trikPath, entry.name, 'manifest.json');
+            if (existsSync(subManifest)) {
+              return true;
+            }
+          }
+        }
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  try {
+    const content = await readFile(manifestPath, 'utf-8');
+    const manifest = JSON.parse(content);
+    const validation = validateManifest(manifest);
+    return validation.valid;
+  } catch {
+    return false;
+  }
+}
+
 export async function installCommand(
   trikInput: string,
   options: InstallOptions
@@ -370,18 +559,15 @@ export async function installCommand(
   const baseDir = process.cwd();
 
   try {
-    // Check for package.json
+    // Detect project type
+    const projectType = detectProjectType(baseDir);
+
+    // Check for package.json (required for Node projects)
     const packageJsonPath = join(baseDir, 'package.json');
-    if (!existsSync(packageJsonPath)) {
+    if (projectType === 'node' && !existsSync(packageJsonPath)) {
       console.log(chalk.red('No package.json found in current directory.'));
       console.log(chalk.dim('Run `npm init` or `pnpm init` first.'));
       process.exit(1);
-    }
-
-    // Ensure node_modules exists
-    const nodeModulesPath = join(baseDir, 'node_modules');
-    if (!existsSync(nodeModulesPath)) {
-      mkdirSync(nodeModulesPath, { recursive: true });
     }
 
     // Parse package name and version
@@ -395,58 +581,111 @@ export async function installCommand(
       versionSpec = versionSpec ?? trikInput.substring(atIndex + 1);
     }
 
-    // Detect package manager
-    const pm = detectPackageManager(baseDir);
-    spinner.info(`Using ${chalk.cyan(pm)} as package manager`);
+    // First, check TrikHub registry to get runtime info
+    spinner.start(`Checking ${chalk.cyan(packageName)} on TrikHub registry...`);
+    const trikInfo = await registry.getTrik(packageName);
 
-    const packageSpec = versionSpec ? `${packageName}@${versionSpec}` : packageName;
+    // Get runtime from latest version if available
+    let trikRuntime: TrikRuntime = 'node'; // default
+    if (trikInfo && trikInfo.versions.length > 0) {
+      const latestVersion = trikInfo.versions.find(v => v.version === trikInfo.latestVersion);
+      if (latestVersion?.runtime) {
+        trikRuntime = latestVersion.runtime;
+      }
+    }
 
-    // First, try npm registry
-    spinner.start(`Looking for ${chalk.cyan(packageSpec)} on npm...`);
-    const npmResult = await tryNpmInstall(pm, packageSpec, baseDir);
+    const isCrossLanguage = projectType !== trikRuntime;
 
-    let installed = false;
-    let installedVersion: string | undefined;
+    if (isCrossLanguage && trikInfo) {
+      // Cross-language installation: download to .trikhub/triks/
+      spinner.info(`Cross-language trik detected: ${chalk.cyan(trikRuntime)} trik in ${chalk.cyan(projectType)} project`);
+      spinner.start(`Installing ${chalk.cyan(packageName)} to .trikhub/triks/...`);
 
-    if (npmResult.success) {
-      spinner.succeed(`Installed ${chalk.green(packageName)} from npm`);
-      installed = true;
-    } else if (npmResult.notFound) {
-      // Not on npm, try TrikHub registry
-      spinner.text = `Not found on npm, checking TrikHub registry...`;
-      const trikhubResult = await installFromTrikhub(packageName, versionSpec, baseDir, pm, spinner);
+      const crossResult = await installCrossLanguageFromTrikhub(packageName, versionSpec, baseDir, spinner);
 
-      if (trikhubResult.success) {
-        spinner.succeed(`Installed ${chalk.green(packageName)}@${trikhubResult.version} from TrikHub`);
-        installed = true;
-        installedVersion = trikhubResult.version;
+      if (crossResult.success) {
+        // Add to config
+        await addTrikToConfig(packageName, baseDir, crossResult.version);
+        spinner.succeed(`Installed ${chalk.green(packageName)}@${crossResult.version} (${trikRuntime} runtime)`);
+
+        console.log();
+        console.log(chalk.dim(`  Downloaded to: .trikhub/triks/${packageName}`));
+        console.log(chalk.dim(`  Registered in: .trikhub/config.json`));
+        console.log();
+        console.log(chalk.dim('The trik will be available via the cross-language worker.'));
       } else {
-        spinner.fail(`${chalk.red(packageName)} not found on npm or TrikHub registry`);
+        spinner.fail(`Failed to install ${chalk.red(packageName)}`);
         process.exit(1);
       }
     } else {
-      // npm failed for other reasons
-      spinner.fail(`Failed to install ${chalk.red(packageName)}`);
-      process.exit(1);
-    }
+      // Same-language installation: use native package manager
+      if (projectType === 'node') {
+        // Ensure node_modules exists
+        const nodeModulesPath = join(baseDir, 'node_modules');
+        if (!existsSync(nodeModulesPath)) {
+          mkdirSync(nodeModulesPath, { recursive: true });
+        }
 
-    // Check if the installed package is a trik and register it
-    spinner.start('Checking if package is a trik...');
-    const packagePath = join(baseDir, 'node_modules', ...packageName.split('/'));
+        // Detect package manager
+        const pm = detectPackageManager(baseDir);
+        spinner.info(`Using ${chalk.cyan(pm)} as package manager`);
 
-    if (await isTrikPackage(packagePath)) {
-      // Pass version for TrikHub packages (for sync/upgrade tracking)
-      await addTrikToConfig(packageName, baseDir, installedVersion);
-      spinner.succeed(`Registered ${chalk.green(packageName)} as a trik`);
+        const packageSpec = versionSpec ? `${packageName}@${versionSpec}` : packageName;
 
-      console.log();
-      console.log(chalk.dim(`  Added to: package.json`));
-      console.log(chalk.dim(`  Registered in: .trikhub/config.json`));
-      console.log();
-      console.log(chalk.dim('The trik will be available to your AI agent.'));
-    } else {
-      spinner.info(`${chalk.yellow(packageName)} installed but is not a trik (no manifest.json)`);
-      console.log(chalk.dim('\nThe package was added to your dependencies.'));
+        // First, try npm registry
+        spinner.start(`Looking for ${chalk.cyan(packageSpec)} on npm...`);
+        const npmResult = await tryNpmInstall(pm, packageSpec, baseDir);
+
+        let installed = false;
+        let installedVersion: string | undefined;
+
+        if (npmResult.success) {
+          spinner.succeed(`Installed ${chalk.green(packageName)} from npm`);
+          installed = true;
+        } else if (npmResult.notFound) {
+          // Not on npm, try TrikHub registry
+          spinner.text = `Not found on npm, checking TrikHub registry...`;
+          const trikhubResult = await installFromTrikhub(packageName, versionSpec, baseDir, pm, spinner);
+
+          if (trikhubResult.success) {
+            spinner.succeed(`Installed ${chalk.green(packageName)}@${trikhubResult.version} from TrikHub`);
+            installed = true;
+            installedVersion = trikhubResult.version;
+          } else {
+            spinner.fail(`${chalk.red(packageName)} not found on npm or TrikHub registry`);
+            process.exit(1);
+          }
+        } else {
+          // npm failed for other reasons
+          spinner.fail(`Failed to install ${chalk.red(packageName)}`);
+          process.exit(1);
+        }
+
+        // Check if the installed package is a trik and register it
+        spinner.start('Checking if package is a trik...');
+        const packagePath = join(baseDir, 'node_modules', ...packageName.split('/'));
+
+        if (await isTrikPackage(packagePath)) {
+          // Pass version for TrikHub packages (for sync/upgrade tracking)
+          await addTrikToConfig(packageName, baseDir, installedVersion);
+          spinner.succeed(`Registered ${chalk.green(packageName)} as a trik`);
+
+          console.log();
+          console.log(chalk.dim(`  Added to: package.json`));
+          console.log(chalk.dim(`  Registered in: .trikhub/config.json`));
+          console.log();
+          console.log(chalk.dim('The trik will be available to your AI agent.'));
+        } else {
+          spinner.info(`${chalk.yellow(packageName)} installed but is not a trik (no manifest.json)`);
+          console.log(chalk.dim('\nThe package was added to your dependencies.'));
+        }
+      } else {
+        // Python project - not yet implemented
+        spinner.fail('Python project installation not yet implemented in this CLI');
+        console.log(chalk.dim('\nUse pip to install Python triks directly:'));
+        console.log(chalk.dim(`  pip install ${packageName}`));
+        process.exit(1);
+      }
     }
 
   } catch (error) {

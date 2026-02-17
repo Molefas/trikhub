@@ -296,20 +296,40 @@ class TrikGateway:
     ) -> TrikGraph:
         """Load a Python graph from the trik directory."""
         module_path = os.path.join(trik_path, manifest.entry.module)
-
-        # Add trik directory to sys.path so relative imports work
         abs_trik_path = os.path.abspath(trik_path)
-        if abs_trik_path not in sys.path:
-            sys.path.insert(0, abs_trik_path)
 
-        # Load the module dynamically
-        spec = importlib.util.spec_from_file_location("trik_module", module_path)
-        if spec is None or spec.loader is None:
-            raise ValueError(f"Cannot load module from {module_path}")
+        # Check if this is a pip-installed package (in site-packages)
+        # by looking for __init__.py and checking if it's importable
+        package_name = None
+        if os.path.exists(os.path.join(trik_path, "__init__.py")):
+            # Try to detect package name from directory name
+            potential_package = os.path.basename(abs_trik_path)
+            try:
+                spec = importlib.util.find_spec(potential_package)
+                if spec and spec.origin and os.path.dirname(spec.origin) == abs_trik_path:
+                    package_name = potential_package
+            except (ImportError, ModuleNotFoundError):
+                pass
 
-        module = importlib.util.module_from_spec(spec)
-        sys.modules["trik_module"] = module
-        spec.loader.exec_module(module)
+        if package_name:
+            # For pip-installed packages, import the module directly
+            # This preserves the package context for relative imports
+            module_name = manifest.entry.module.replace("./", "").replace(".py", "")
+            full_module_name = f"{package_name}.{module_name}"
+            module = importlib.import_module(full_module_name)
+        else:
+            # For local path triks, add to sys.path and load dynamically
+            if abs_trik_path not in sys.path:
+                sys.path.insert(0, abs_trik_path)
+
+            # Load the module dynamically
+            spec = importlib.util.spec_from_file_location("trik_module", module_path)
+            if spec is None or spec.loader is None:
+                raise ValueError(f"Cannot load module from {module_path}")
+
+            module = importlib.util.module_from_spec(spec)
+            sys.modules["trik_module"] = module
+            spec.loader.exec_module(module)
 
         # Get the exported graph
         graph = getattr(module, manifest.entry.export, None)

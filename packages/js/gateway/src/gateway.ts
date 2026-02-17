@@ -407,28 +407,76 @@ export class TrikGateway {
     // This allows us to resolve packages from the project's node_modules
     const require = createRequire(join(baseDir, 'package.json'));
 
+    // Get the .trikhub/triks directory for cross-language fallback
+    const triksDir = join(dirname(configPath), 'triks');
+
     for (const trikName of config.triks) {
       try {
         // Resolve the package path from node_modules
         // First, try to find the manifest.json in the package
         let trikPath: string;
+        let foundInNodeModules = false;
+
         try {
           const manifestPath = require.resolve(`${trikName}/manifest.json`);
           trikPath = dirname(manifestPath);
+          foundInNodeModules = true;
         } catch {
-          // Fall back to resolving the package main and getting its directory
-          const packageMain = require.resolve(trikName);
-          trikPath = dirname(packageMain);
+          try {
+            // Fall back to resolving the package main and getting its directory
+            const packageMain = require.resolve(trikName);
+            trikPath = dirname(packageMain);
 
-          // Check if manifest.json exists in the package root
-          const manifestPath = join(trikPath, 'manifest.json');
-          if (!existsSync(manifestPath)) {
-            // Try going up one level (for packages with dist/ structure)
-            const parentManifest = join(dirname(trikPath), 'manifest.json');
-            if (existsSync(parentManifest)) {
-              trikPath = dirname(trikPath);
-            } else {
-              throw new Error(`Package "${trikName}" does not have a manifest.json`);
+            // Check if manifest.json exists in the package root
+            const manifestPath = join(trikPath, 'manifest.json');
+            if (!existsSync(manifestPath)) {
+              // Try going up one level (for packages with dist/ structure)
+              const parentManifest = join(dirname(trikPath), 'manifest.json');
+              if (existsSync(parentManifest)) {
+                trikPath = dirname(trikPath);
+              } else {
+                throw new Error(`Package "${trikName}" does not have a manifest.json`);
+              }
+            }
+            foundInNodeModules = true;
+          } catch {
+            // Not found in node_modules - will try .trikhub/triks/ below
+            foundInNodeModules = false;
+            trikPath = '';
+          }
+        }
+
+        // If not found in node_modules, try .trikhub/triks/ (cross-language triks)
+        if (!foundInNodeModules) {
+          const crossLangPath = join(triksDir, ...trikName.split('/'));
+
+          // Check for manifest.json directly in the trik directory
+          const directManifest = join(crossLangPath, 'manifest.json');
+          if (existsSync(directManifest)) {
+            trikPath = crossLangPath;
+          } else {
+            // Check for Python package structure: package_dir/package_name/manifest.json
+            // Python packages often have their code in a subdirectory named after the package
+            const entries = existsSync(crossLangPath)
+              ? await readdir(crossLangPath, { withFileTypes: true })
+              : [];
+
+            let foundInSubdir = false;
+            for (const entry of entries) {
+              if (entry.isDirectory() && !entry.name.startsWith('.') && !entry.name.startsWith('_')) {
+                const subManifest = join(crossLangPath, entry.name, 'manifest.json');
+                if (existsSync(subManifest)) {
+                  trikPath = join(crossLangPath, entry.name);
+                  foundInSubdir = true;
+                  break;
+                }
+              }
+            }
+
+            if (!foundInSubdir) {
+              throw new Error(
+                `Package "${trikName}" not found in node_modules or .trikhub/triks/`
+              );
             }
           }
         }

@@ -8,10 +8,14 @@
  * 2. Verify git tag exists on remote
  * 3. Get commit SHA for the tag
  * 4. Register with TrikHub registry (no tarball, no GitHub Release)
+ *
+ * Supports both Node.js and Python package structures:
+ * - Node.js: manifest.json at repository root, dist/ must be committed
+ * - Python: manifest.json inside package subdirectory (e.g., package_name/manifest.json)
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join, resolve, relative } from 'node:path';
 import { execSync } from 'node:child_process';
 import chalk from 'chalk';
 import ora from 'ora';
@@ -33,10 +37,67 @@ interface TrikManifest {
   entry: {
     module: string;
     export: string;
+    runtime?: 'node' | 'python';
   };
   actions: Record<string, unknown>;
   capabilities?: unknown;
   limits?: unknown;
+}
+
+type PackageType = 'node' | 'python';
+
+interface ManifestLocation {
+  /** Full path to manifest.json */
+  manifestPath: string;
+  /** Directory containing manifest.json (for resolving entry points) */
+  manifestDir: string;
+  /** Package type (node or python) */
+  packageType: PackageType;
+}
+
+/**
+ * Find the manifest.json file in a trik repository
+ *
+ * Node.js packages: manifest.json at root
+ * Python packages: manifest.json inside package subdirectory
+ */
+function findManifestPath(repoDir: string): ManifestLocation | null {
+  // First, check for manifest.json at root (Node.js pattern)
+  const rootManifest = join(repoDir, 'manifest.json');
+  if (existsSync(rootManifest)) {
+    return {
+      manifestPath: rootManifest,
+      manifestDir: repoDir,
+      packageType: 'node',
+    };
+  }
+
+  // Check if this is a Python package (has pyproject.toml)
+  const hasPyproject = existsSync(join(repoDir, 'pyproject.toml'));
+  const hasSetupPy = existsSync(join(repoDir, 'setup.py'));
+
+  if (hasPyproject || hasSetupPy) {
+    // Python package: search subdirectories for manifest.json
+    try {
+      const entries = readdirSync(repoDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory() && !entry.name.startsWith('.') && !entry.name.startsWith('_')) {
+          const subManifest = join(repoDir, entry.name, 'manifest.json');
+          if (existsSync(subManifest)) {
+            return {
+              manifestPath: subManifest,
+              manifestDir: join(repoDir, entry.name),
+              packageType: 'python',
+            };
+          }
+        }
+      }
+    } catch {
+      // Directory read failed
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -80,11 +141,28 @@ function getRemoteTagCommitSha(trikDir: string, tag: string): string | null {
 /**
  * Check if the dist/ directory is committed (not ignored)
  */
-function isDistCommitted(trikDir: string): boolean {
+function isDistCommitted(repoDir: string): boolean {
   try {
     // Check if dist/ is tracked in git
     const result = execSync('git ls-files dist/', {
-      cwd: trikDir,
+      cwd: repoDir,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    return result.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if a file/directory is committed (not ignored)
+ */
+function isPathCommitted(repoDir: string, relativePath: string): boolean {
+  try {
+    const result = execSync(`git ls-files "${relativePath}"`, {
+      cwd: repoDir,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
@@ -113,22 +191,33 @@ export async function publishCommand(options: PublishOptions): Promise<void> {
     process.exit(1);
   }
 
-  const trikDir = resolve(options.directory || '.');
+  const repoDir = resolve(options.directory || '.');
 
   try {
     // Step 1: Validate trik structure
     spinner.start('Validating trik structure...');
 
-    // Check required files exist
-    const manifestPath = join(trikDir, 'manifest.json');
-    const trikhubPath = join(trikDir, 'trikhub.json');
+    // Find manifest.json (supports both Node.js and Python package structures)
+    const manifestLocation = findManifestPath(repoDir);
 
-    if (!existsSync(manifestPath)) {
+    if (!manifestLocation) {
       spinner.fail('Missing manifest.json');
       console.log(chalk.dim('Create a manifest.json file with your trik definition'));
+      console.log(chalk.dim('\nFor Node.js triks: place manifest.json at repository root'));
+      console.log(chalk.dim('For Python triks: place manifest.json inside your package directory'));
       process.exit(1);
     }
 
+    const { manifestPath, manifestDir, packageType } = manifestLocation;
+
+    // Log detected package type
+    if (packageType === 'python') {
+      const relPath = relative(repoDir, manifestDir);
+      console.log(chalk.dim(`  Detected Python package: ${relPath}/`));
+    }
+
+    // Check trikhub.json exists (always at repo root)
+    const trikhubPath = join(repoDir, 'trikhub.json');
     if (!existsSync(trikhubPath)) {
       spinner.fail('Missing trikhub.json');
       console.log(chalk.dim('Create a trikhub.json file with registry metadata'));
@@ -155,16 +244,20 @@ export async function publishCommand(options: PublishOptions): Promise<void> {
       process.exit(1);
     }
 
-    // Check entry point exists
-    const entryPath = join(trikDir, manifest.entry.module);
+    // Check entry point exists (relative to manifest directory)
+    const entryPath = join(manifestDir, manifest.entry.module);
     if (!existsSync(entryPath)) {
       spinner.fail(`Missing entry point: ${manifest.entry.module}`);
-      console.log(chalk.dim('Build your trik first (e.g., npm run build)'));
+      if (packageType === 'node') {
+        console.log(chalk.dim('Build your trik first (e.g., npm run build)'));
+      } else {
+        console.log(chalk.dim('Ensure your entry module exists'));
+      }
       process.exit(1);
     }
 
-    // Run validation
-    const validation = validateTrik(trikDir);
+    // Run validation (pass the manifest directory, not repo root)
+    const validation = validateTrik(manifestDir);
     if (!validation.valid) {
       spinner.fail('Validation failed');
       console.log(formatValidationResult(validation));
@@ -200,7 +293,7 @@ export async function publishCommand(options: PublishOptions): Promise<void> {
     spinner.start('Verifying git remote...');
     try {
       const gitRemote = execSync('git remote get-url origin', {
-        cwd: trikDir,
+        cwd: repoDir,
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
       }).trim();
@@ -238,22 +331,39 @@ export async function publishCommand(options: PublishOptions): Promise<void> {
     console.log(chalk.dim(`  Trik: ${fullName}`));
     console.log(chalk.dim(`  Repo: ${githubRepo}`));
 
-    // Step 5: Check that dist/ is committed
-    spinner.start('Checking dist/ is committed...');
-    if (!isDistCommitted(trikDir)) {
-      spinner.fail('dist/ directory is not committed to git');
-      console.log(chalk.red('\nTriks require dist/ to be committed for direct GitHub installation.'));
-      console.log(chalk.dim('Add dist/ to your repository:'));
-      console.log(chalk.dim(`  git add dist/ -f`));
-      console.log(chalk.dim(`  git commit -m "Add dist for publishing"`));
-      console.log(chalk.dim(`  git push`));
-      process.exit(1);
+    // Step 5: Check that entry module is committed
+    if (packageType === 'node') {
+      // Node.js: check dist/ is committed
+      spinner.start('Checking dist/ is committed...');
+      if (!isDistCommitted(repoDir)) {
+        spinner.fail('dist/ directory is not committed to git');
+        console.log(chalk.red('\nTriks require dist/ to be committed for direct GitHub installation.'));
+        console.log(chalk.dim('Add dist/ to your repository:'));
+        console.log(chalk.dim(`  git add dist/ -f`));
+        console.log(chalk.dim(`  git commit -m "Add dist for publishing"`));
+        console.log(chalk.dim(`  git push`));
+        process.exit(1);
+      }
+      spinner.succeed('dist/ is committed');
+    } else {
+      // Python: check entry module is committed
+      const entryRelPath = relative(repoDir, entryPath);
+      spinner.start(`Checking ${entryRelPath} is committed...`);
+      if (!isPathCommitted(repoDir, entryRelPath)) {
+        spinner.fail(`Entry module is not committed to git`);
+        console.log(chalk.red(`\n${entryRelPath} must be committed for direct GitHub installation.`));
+        console.log(chalk.dim('Add it to your repository:'));
+        console.log(chalk.dim(`  git add "${entryRelPath}"`));
+        console.log(chalk.dim(`  git commit -m "Add entry module for publishing"`));
+        console.log(chalk.dim(`  git push`));
+        process.exit(1);
+      }
+      spinner.succeed(`${entryRelPath} is committed`);
     }
-    spinner.succeed('dist/ is committed');
 
     // Step 6: Verify git tag exists on remote
     spinner.start(`Verifying tag ${gitTag} exists on remote...`);
-    const commitSha = getRemoteTagCommitSha(trikDir, gitTag);
+    const commitSha = getRemoteTagCommitSha(repoDir, gitTag);
 
     if (!commitSha) {
       spinner.fail(`Tag ${gitTag} not found on remote`);

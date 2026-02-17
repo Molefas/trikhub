@@ -179,27 +179,45 @@ local-playground/
 
 The JavaScript gateway can execute Python triks through a worker subprocess. This allows you to use triks written in either language from a single agent.
 
-### Adding a Python Trik
+### Installing a Python Trik
 
 1. Ensure Python 3.10+ is installed
-1. Add the Python trik to your `.trikhub/config.json`:
+2. Install the Python trik using the CLI:
 
-```json
-{
-  "triks": [
-    {
-      "id": "@molefas/article-search",
-      "path": "../../../trikhub-skills/article-search"
-    },
-    {
-      "id": "@molefas/article-search-py",
-      "path": "../../../trikhub-skills/article-search-py"
-    }
-  ]
-}
-```
+   ```bash
+   trik install @molefas/trik-article-search-py
+   ```
 
-1. The gateway automatically detects Python triks by their `runtime: "python"` manifest entry and uses the Python worker
+   Or manually add it to your `package.json` and `.trikhub/config.json`:
+
+   **package.json:**
+
+   ```json
+   {
+     "dependencies": {
+       "@molefas/trik-article-search": "github:Molefas/trik-article-search#v1.0.1",
+       "@molefas/trik-article-search-py": "github:Molefas/trik-article-search-py#v1.0.0"
+     }
+   }
+   ```
+
+   **.trikhub/config.json:**
+
+   ```json
+   {
+     "triks": [
+       "@molefas/trik-article-search",
+       "@molefas/trik-article-search-py"
+     ],
+     "trikhub": {
+       "@molefas/trik-article-search": "1.0.1",
+       "@molefas/trik-article-search-py": "1.0.0"
+     }
+   }
+   ```
+
+3. Run `npm install` or `pnpm install` to fetch the packages
+4. The gateway automatically detects Python triks by their `runtime: "python"` manifest entry and uses the Python worker
 
 ### Python Worker
 
