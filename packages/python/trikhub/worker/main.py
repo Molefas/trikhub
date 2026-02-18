@@ -226,7 +226,9 @@ class PythonWorker:
                 if not line_str:
                     continue
 
-                await self._handle_message(line_str)
+                # Don't await - let the readline loop continue so we can receive
+                # storage proxy responses while an invoke is in progress
+                asyncio.create_task(self._handle_message_safe(line_str))
 
             except Exception as e:
                 # Log error but keep running
@@ -236,6 +238,18 @@ class PythonWorker:
                     f"Worker error: {e}",
                 )
                 await self._write_response(error_response)
+
+    async def _handle_message_safe(self, line: str) -> None:
+        """Handle message with error handling."""
+        try:
+            await self._handle_message(line)
+        except Exception as e:
+            error_response = WorkerProtocol.create_error_response(
+                "unknown",
+                WorkerErrorCodes.INTERNAL_ERROR,
+                f"Worker error: {e}",
+            )
+            await self._write_response(error_response)
 
     async def _handle_message(self, line: str) -> None:
         """Handle an incoming message."""
