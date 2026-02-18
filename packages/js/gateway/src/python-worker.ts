@@ -64,6 +64,7 @@ export class PythonWorker extends EventEmitter {
   private isReady = false;
   private startupPromise: Promise<void> | null = null;
   private stderrBuffer: string[] = [];
+  private currentStorageContext: TrikStorageContext | null = null;
 
   constructor(config: PythonWorkerConfig = {}) {
     super();
@@ -205,6 +206,9 @@ export class PythonWorker extends EventEmitter {
       await this.start();
     }
 
+    // Store storage context for proxy calls during execution
+    this.currentStorageContext = options.storage ?? null;
+
     const params: InvokeParams = {
       trikPath,
       action,
@@ -214,13 +218,18 @@ export class PythonWorker extends EventEmitter {
     };
 
     const request = createInvokeRequest(params);
-    const response = await this.sendRequest(request, this.config.invokeTimeoutMs);
 
-    if (response.error) {
-      throw new Error(`Invoke failed: ${response.error.message} (code: ${response.error.code})`);
+    try {
+      const response = await this.sendRequest(request, this.config.invokeTimeoutMs);
+
+      if (response.error) {
+        throw new Error(`Invoke failed: ${response.error.message} (code: ${response.error.code})`);
+      }
+
+      return response.result as InvokeResult;
+    } finally {
+      this.currentStorageContext = null;
     }
-
-    return response.result as InvokeResult;
   }
 
   /**
@@ -309,20 +318,108 @@ export class PythonWorker extends EventEmitter {
   }
 
   private async handleWorkerRequest(request: JsonRpcRequest): Promise<void> {
-    // Handle storage proxy requests from the worker
     const method = request.method as StorageMethod;
 
     if (method.startsWith('storage.')) {
-      // For now, emit an event for storage requests
-      // The gateway will handle these by proxying to its storage provider
-      this.emit('storage-request', request);
+      await this.handleStorageRequest(request);
+    } else {
+      // Unknown method
+      const response = createErrorResponse(
+        request.id,
+        WorkerErrorCodes.METHOD_NOT_FOUND,
+        `Unknown method: ${method}`
+      );
+      this.sendLine(serializeMessage(response));
+    }
+  }
 
-      // TODO: Implement actual storage proxy
-      // For now, send an error response
+  private async handleStorageRequest(request: JsonRpcRequest): Promise<void> {
+    // Check if storage context is available
+    if (!this.currentStorageContext) {
       const response = createErrorResponse(
         request.id,
         WorkerErrorCodes.STORAGE_ERROR,
-        'Storage proxy not yet implemented'
+        'Storage not available'
+      );
+      this.sendLine(serializeMessage(response));
+      return;
+    }
+
+    const method = request.method as StorageMethod;
+    const params = (request.params as Record<string, unknown>) ?? {};
+
+    try {
+      let result: Record<string, unknown>;
+
+      switch (method) {
+        case 'storage.get': {
+          const key = (params.key as string) ?? '';
+          const value = await this.currentStorageContext.get(key);
+          result = { value };
+          break;
+        }
+
+        case 'storage.set': {
+          const key = (params.key as string) ?? '';
+          const value = params.value;
+          const ttl = params.ttl as number | undefined;
+          await this.currentStorageContext.set(key, value, ttl);
+          result = { success: true };
+          break;
+        }
+
+        case 'storage.delete': {
+          const key = (params.key as string) ?? '';
+          const deleted = await this.currentStorageContext.delete(key);
+          result = { deleted };
+          break;
+        }
+
+        case 'storage.list': {
+          const prefix = params.prefix as string | undefined;
+          const keys = await this.currentStorageContext.list(prefix);
+          result = { keys };
+          break;
+        }
+
+        case 'storage.getMany': {
+          const keys = (params.keys as string[]) ?? [];
+          const valuesMap = await this.currentStorageContext.getMany(keys);
+          // Convert Map to plain object for JSON serialization
+          const values: Record<string, unknown> = {};
+          for (const [k, v] of valuesMap) {
+            values[k] = v;
+          }
+          result = { values };
+          break;
+        }
+
+        case 'storage.setMany': {
+          const entries = (params.entries as Record<string, unknown>) ?? {};
+          await this.currentStorageContext.setMany(entries);
+          result = { success: true };
+          break;
+        }
+
+        default: {
+          const response = createErrorResponse(
+            request.id,
+            WorkerErrorCodes.METHOD_NOT_FOUND,
+            `Unknown storage method: ${method}`
+          );
+          this.sendLine(serializeMessage(response));
+          return;
+        }
+      }
+
+      const response = createSuccessResponse(request.id, result);
+      this.sendLine(serializeMessage(response));
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const response = createErrorResponse(
+        request.id,
+        WorkerErrorCodes.STORAGE_ERROR,
+        `Storage error: ${errorMessage}`
       );
       this.sendLine(serializeMessage(response));
     }
