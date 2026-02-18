@@ -304,16 +304,16 @@ class JavaScriptWorker {
       const trimmedLine = line.trim();
       if (!trimmedLine) continue;
 
-      try {
-        await this.handleMessage(trimmedLine);
-      } catch (error) {
+      // Don't await - let the readline loop continue so we can receive
+      // storage proxy responses while an invoke is in progress
+      this.handleMessage(trimmedLine).catch((error) => {
         const errorResponse = createErrorResponse(
           'unknown',
           WorkerErrorCodes.INTERNAL_ERROR,
           `Worker error: ${error instanceof Error ? error.message : String(error)}`
         );
         this.writeResponse(errorResponse);
-      }
+      });
     }
   }
 
@@ -450,7 +450,11 @@ class JavaScriptWorker {
   }
 
   private writeLine(line: string): void {
+    // Use cork/uncork to ensure immediate flushing when stdout is piped
+    // (Node.js block-buffers stdout when not connected to TTY)
+    process.stdout.cork();
     process.stdout.write(line + '\n');
+    process.nextTick(() => process.stdout.uncork());
   }
 }
 

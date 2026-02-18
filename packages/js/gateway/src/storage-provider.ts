@@ -1,7 +1,8 @@
-import { readFile, writeFile, mkdir, readdir, unlink, stat } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { homedir } from 'node:os';
+import Database from 'better-sqlite3';
+import type { Database as DatabaseType, Statement } from 'better-sqlite3';
 import type { TrikStorageContext, StorageCapabilities } from '@trikhub/manifest';
 
 /**
@@ -45,189 +46,103 @@ interface StorageEntry {
 }
 
 /**
- * Storage data file structure
+ * SQLite-based storage context for a single trik
  */
-interface StorageData {
-  entries: Record<string, StorageEntry>;
-  metadata: {
-    trikId: string;
-    createdAt: number;
-    updatedAt: number;
-    totalSize: number;
-  };
-}
-
-/**
- * JSON file-based storage context for a single trik
- */
-class JsonFileStorageContext implements TrikStorageContext {
-  private data: StorageData | null = null;
-  private dirty = false;
-  private saveTimeout: NodeJS.Timeout | null = null;
+class SqliteStorageContext implements TrikStorageContext {
+  private readonly getStmt: Statement;
+  private readonly setStmt: Statement;
+  private readonly deleteStmt: Statement;
+  private readonly listStmt: Statement;
+  private readonly listPrefixStmt: Statement;
+  private readonly cleanupStmt: Statement;
+  private readonly usageStmt: Statement;
+  private readonly clearStmt: Statement;
 
   constructor(
-    private readonly filePath: string,
+    private readonly db: DatabaseType,
     private readonly trikId: string,
     private readonly maxSizeBytes: number
-  ) {}
-
-  private async ensureLoaded(): Promise<StorageData> {
-    if (this.data) {
-      return this.data;
-    }
-
-    let data: StorageData;
-    if (existsSync(this.filePath)) {
-      try {
-        const content = await readFile(this.filePath, 'utf-8');
-        data = JSON.parse(content);
-      } catch {
-        // Corrupted file, start fresh
-        data = this.createEmptyData();
-      }
-    } else {
-      data = this.createEmptyData();
-    }
-
-    this.data = data;
-
-    // Clean up expired entries on load
-    await this.cleanupExpired();
-
-    return data;
-  }
-
-  private createEmptyData(): StorageData {
-    return {
-      entries: {},
-      metadata: {
-        trikId: this.trikId,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        totalSize: 0,
-      },
-    };
-  }
-
-  private async cleanupExpired(): Promise<void> {
-    if (!this.data) return;
-
-    const now = Date.now();
-    let changed = false;
-
-    for (const [key, entry] of Object.entries(this.data.entries)) {
-      if (entry.expiresAt && entry.expiresAt < now) {
-        delete this.data.entries[key];
-        changed = true;
-      }
-    }
-
-    if (changed) {
-      this.dirty = true;
-      await this.scheduleSave();
-    }
-  }
-
-  private async scheduleSave(): Promise<void> {
-    if (this.saveTimeout) {
-      return; // Already scheduled
-    }
-
-    this.saveTimeout = setTimeout(async () => {
-      this.saveTimeout = null;
-      await this.flush();
-    }, 100); // Debounce writes by 100ms
-  }
-
-  private async flush(): Promise<void> {
-    if (!this.dirty || !this.data) {
-      return;
-    }
-
-    // Ensure directory exists
-    const dir = dirname(this.filePath);
-    if (!existsSync(dir)) {
-      await mkdir(dir, { recursive: true });
-    }
-
-    // Calculate and update total size
-    const content = JSON.stringify(this.data, null, 2);
-    this.data.metadata.totalSize = Buffer.byteLength(content, 'utf-8');
-    this.data.metadata.updatedAt = Date.now();
-
-    await writeFile(this.filePath, JSON.stringify(this.data, null, 2), 'utf-8');
-    this.dirty = false;
+  ) {
+    // Prepare statements for performance
+    this.getStmt = db.prepare('SELECT value, expires_at FROM storage WHERE trik_id = ? AND key = ?');
+    this.setStmt = db.prepare(
+      'INSERT OR REPLACE INTO storage (trik_id, key, value, created_at, expires_at) VALUES (?, ?, ?, ?, ?)'
+    );
+    this.deleteStmt = db.prepare('DELETE FROM storage WHERE trik_id = ? AND key = ?');
+    this.listStmt = db.prepare('SELECT key FROM storage WHERE trik_id = ?');
+    this.listPrefixStmt = db.prepare('SELECT key FROM storage WHERE trik_id = ? AND key LIKE ?');
+    this.cleanupStmt = db.prepare(
+      'DELETE FROM storage WHERE trik_id = ? AND expires_at IS NOT NULL AND expires_at < ?'
+    );
+    this.usageStmt = db.prepare(
+      'SELECT COALESCE(SUM(LENGTH(value)), 0) as total FROM storage WHERE trik_id = ?'
+    );
+    this.clearStmt = db.prepare('DELETE FROM storage WHERE trik_id = ?');
   }
 
   async get(key: string): Promise<unknown | null> {
-    const data = await this.ensureLoaded();
-    const entry = data.entries[key];
+    // Clean up expired entries for this trik
+    this.cleanupStmt.run(this.trikId, Date.now());
 
-    if (!entry) {
+    const row = this.getStmt.get(this.trikId, key) as
+      | { value: string; expires_at: number | null }
+      | undefined;
+
+    if (!row) {
       return null;
     }
 
-    // Check expiration
-    if (entry.expiresAt && entry.expiresAt < Date.now()) {
-      delete data.entries[key];
-      this.dirty = true;
-      await this.scheduleSave();
+    // Double-check expiration (in case cleanup missed it)
+    if (row.expires_at !== null && row.expires_at < Date.now()) {
+      this.deleteStmt.run(this.trikId, key);
       return null;
     }
 
-    return entry.value;
+    return JSON.parse(row.value);
   }
 
   async set(key: string, value: unknown, ttl?: number): Promise<void> {
-    const data = await this.ensureLoaded();
+    const valueJson = JSON.stringify(value);
+    const valueSize = Buffer.byteLength(valueJson, 'utf-8');
 
-    // Check size limit before adding
-    const valueSize = Buffer.byteLength(JSON.stringify(value), 'utf-8');
-    const currentSize = data.metadata.totalSize;
+    // Get current usage excluding this key (for updates)
+    const currentRow = this.getStmt.get(this.trikId, key) as { value: string } | undefined;
+    const currentKeySize = currentRow ? Buffer.byteLength(currentRow.value, 'utf-8') : 0;
 
-    if (currentSize + valueSize > this.maxSizeBytes) {
+    const usage = (this.usageStmt.get(this.trikId) as { total: number }).total - currentKeySize;
+
+    if (usage + valueSize > this.maxSizeBytes) {
       throw new Error(
-        `Storage quota exceeded. Current: ${currentSize} bytes, ` +
+        `Storage quota exceeded. Current: ${usage} bytes, ` +
           `Adding: ${valueSize} bytes, Max: ${this.maxSizeBytes} bytes`
       );
     }
 
-    const entry: StorageEntry = {
-      value,
-      createdAt: Date.now(),
-    };
+    const now = Date.now();
+    const expiresAt = ttl !== undefined && ttl > 0 ? now + ttl : null;
 
-    if (ttl !== undefined && ttl > 0) {
-      entry.expiresAt = Date.now() + ttl;
-    }
-
-    data.entries[key] = entry;
-    this.dirty = true;
-    await this.scheduleSave();
+    this.setStmt.run(this.trikId, key, valueJson, now, expiresAt);
   }
 
   async delete(key: string): Promise<boolean> {
-    const data = await this.ensureLoaded();
-
-    if (!(key in data.entries)) {
-      return false;
-    }
-
-    delete data.entries[key];
-    this.dirty = true;
-    await this.scheduleSave();
-    return true;
+    const result = this.deleteStmt.run(this.trikId, key);
+    return result.changes > 0;
   }
 
   async list(prefix?: string): Promise<string[]> {
-    const data = await this.ensureLoaded();
-    const keys = Object.keys(data.entries);
+    // Clean up expired entries first
+    this.cleanupStmt.run(this.trikId, Date.now());
 
+    let rows: { key: string }[];
     if (prefix) {
-      return keys.filter((key) => key.startsWith(prefix));
+      // Escape special LIKE characters and add wildcard
+      const escapedPrefix = prefix.replace(/[%_]/g, '\\$&') + '%';
+      rows = this.listPrefixStmt.all(this.trikId, escapedPrefix) as { key: string }[];
+    } else {
+      rows = this.listStmt.all(this.trikId) as { key: string }[];
     }
 
-    return keys;
+    return rows.map((row) => row.key);
   }
 
   async getMany(keys: string[]): Promise<Map<string, unknown>> {
@@ -250,51 +165,59 @@ class JsonFileStorageContext implements TrikStorageContext {
   }
 
   /**
-   * Force save any pending changes
-   */
-  async forceSave(): Promise<void> {
-    if (this.saveTimeout) {
-      clearTimeout(this.saveTimeout);
-      this.saveTimeout = null;
-    }
-    await this.flush();
-  }
-
-  /**
    * Get current storage usage in bytes
    */
   async getUsage(): Promise<number> {
-    const data = await this.ensureLoaded();
-    return data.metadata.totalSize;
+    return (this.usageStmt.get(this.trikId) as { total: number }).total;
   }
 
   /**
-   * Clear all data
+   * Clear all data for this trik
    */
   async clear(): Promise<void> {
-    this.data = this.createEmptyData();
-    this.dirty = true;
-    await this.flush();
+    this.clearStmt.run(this.trikId);
   }
 }
 
 /**
- * JSON file-based storage provider.
- * Stores data in ~/.trikhub/storage/@scope/trik-name/data.json
+ * SQLite-based storage provider.
+ * Stores all trik data in a single database at ~/.trikhub/storage/storage.db
  */
-export class JsonFileStorageProvider implements StorageProvider {
-  private readonly baseDir: string;
-  private contexts = new Map<string, JsonFileStorageContext>();
+export class SqliteStorageProvider implements StorageProvider {
+  private readonly db: DatabaseType;
+  private readonly contexts = new Map<string, SqliteStorageContext>();
+  private readonly dbPath: string;
 
   constructor(baseDir?: string) {
-    this.baseDir = baseDir ?? join(homedir(), '.trikhub', 'storage');
-  }
+    const storageDir = baseDir ?? join(homedir(), '.trikhub', 'storage');
 
-  private getFilePath(trikId: string): string {
-    // Convert @scope/name to @scope/name/data.json
-    // Handle both scoped (@scope/name) and unscoped (name) trik IDs
-    const normalizedId = trikId.replace(/^@/, '');
-    return join(this.baseDir, `@${normalizedId}`, 'data.json');
+    // Ensure directory exists
+    if (!existsSync(storageDir)) {
+      mkdirSync(storageDir, { recursive: true });
+    }
+
+    this.dbPath = join(storageDir, 'storage.db');
+    this.db = new Database(this.dbPath);
+
+    // Configure for concurrency and durability
+    this.db.pragma('journal_mode = WAL');
+    this.db.pragma('busy_timeout = 5000');
+
+    // Initialize schema
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS storage (
+        trik_id TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER,
+        PRIMARY KEY (trik_id, key)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_storage_trik ON storage(trik_id);
+      CREATE INDEX IF NOT EXISTS idx_storage_expires ON storage(expires_at)
+        WHERE expires_at IS NOT NULL;
+    `);
   }
 
   forTrik(trikId: string, capabilities?: StorageCapabilities): TrikStorageContext {
@@ -304,10 +227,8 @@ export class JsonFileStorageProvider implements StorageProvider {
       return existing;
     }
 
-    const filePath = this.getFilePath(trikId);
     const maxSize = capabilities?.maxSizeBytes ?? DEFAULT_MAX_SIZE_BYTES;
-
-    const context = new JsonFileStorageContext(filePath, trikId, maxSize);
+    const context = new SqliteStorageContext(this.db, trikId, maxSize);
     this.contexts.set(trikId, context);
 
     return context;
@@ -319,18 +240,12 @@ export class JsonFileStorageProvider implements StorageProvider {
       return context.getUsage();
     }
 
-    // Check if file exists
-    const filePath = this.getFilePath(trikId);
-    if (!existsSync(filePath)) {
-      return 0;
-    }
-
-    try {
-      const stats = await stat(filePath);
-      return stats.size;
-    } catch {
-      return 0;
-    }
+    // Query directly if no cached context
+    const stmt = this.db.prepare(
+      'SELECT COALESCE(SUM(LENGTH(value)), 0) as total FROM storage WHERE trik_id = ?'
+    );
+    const row = stmt.get(trikId) as { total: number };
+    return row.total;
   }
 
   async clear(trikId: string): Promise<void> {
@@ -340,59 +255,31 @@ export class JsonFileStorageProvider implements StorageProvider {
       return;
     }
 
-    // Delete file if it exists
-    const filePath = this.getFilePath(trikId);
-    if (existsSync(filePath)) {
-      await unlink(filePath);
-    }
+    // Delete directly if no cached context
+    const stmt = this.db.prepare('DELETE FROM storage WHERE trik_id = ?');
+    stmt.run(trikId);
   }
 
   async listTriks(): Promise<string[]> {
-    if (!existsSync(this.baseDir)) {
-      return [];
-    }
-
-    const triks: string[] = [];
-
-    try {
-      const entries = await readdir(this.baseDir, { withFileTypes: true });
-
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-
-        const scopePath = join(this.baseDir, entry.name);
-
-        if (entry.name.startsWith('@')) {
-          // Scoped triks: @scope/name
-          const scopedEntries = await readdir(scopePath, { withFileTypes: true });
-          for (const scopedEntry of scopedEntries) {
-            if (scopedEntry.isDirectory()) {
-              const dataFile = join(scopePath, scopedEntry.name, 'data.json');
-              if (existsSync(dataFile)) {
-                triks.push(`${entry.name}/${scopedEntry.name}`);
-              }
-            }
-          }
-        } else {
-          // Unscoped triks
-          const dataFile = join(scopePath, 'data.json');
-          if (existsSync(dataFile)) {
-            triks.push(entry.name);
-          }
-        }
-      }
-    } catch {
-      // Directory doesn't exist or isn't readable
-    }
-
-    return triks;
+    const stmt = this.db.prepare('SELECT DISTINCT trik_id FROM storage');
+    const rows = stmt.all() as { trik_id: string }[];
+    return rows.map((row) => row.trik_id);
   }
 
   /**
-   * Get the base directory path (for debugging)
+   * Get the database file path (for debugging)
    */
-  getBaseDir(): string {
-    return this.baseDir;
+  getDbPath(): string {
+    return this.dbPath;
+  }
+
+  /**
+   * Close the database connection.
+   * Call this for graceful shutdown.
+   */
+  close(): void {
+    this.contexts.clear();
+    this.db.close();
   }
 }
 
