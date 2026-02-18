@@ -139,12 +139,31 @@ Full documentation available at **[trikhub.com/docs](https://trikhub.com/docs)**
 
 ## Development
 
+### JavaScript/TypeScript
+
 ```bash
 git clone https://github.com/Molefas/trikhub.git
 cd trikhub
 pnpm install
 pnpm build
 pnpm test
+```
+
+### Python
+
+```bash
+git clone https://github.com/Molefas/trikhub.git
+cd trikhub/packages/python
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install in development mode with test dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest
 ```
 
 ## Contributing
