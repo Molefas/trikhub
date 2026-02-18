@@ -123,7 +123,7 @@ Enable in manifest:
 }
 ```
 
-Data is stored at `~/.trikhub/storage/@scope/trik-name/`. See [Storage documentation](https://trikhub.com/docs/concepts/storage) for details.
+Data is stored in SQLite at `~/.trikhub/storage/storage.db`. See [Storage documentation](https://trikhub.com/docs/concepts/storage) for details.
 
 ## Examples
 

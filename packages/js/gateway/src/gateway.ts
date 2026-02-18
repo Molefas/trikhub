@@ -29,7 +29,7 @@ import {
 import { PythonWorker, type PythonWorkerConfig } from './python-worker.js';
 import { type SessionStorage, InMemorySessionStorage } from './session-storage.js';
 import { type ConfigStore, FileConfigStore } from './config-store.js';
-import { type StorageProvider, JsonFileStorageProvider } from './storage-provider.js';
+import { type StorageProvider, SqliteStorageProvider } from './storage-provider.js';
 
 interface TrikInput {
   action: string;
@@ -159,7 +159,7 @@ export class TrikGateway {
     this.config = config;
     this.sessionStorage = config.sessionStorage ?? new InMemorySessionStorage();
     this.configStore = config.configStore ?? new FileConfigStore();
-    this.storageProvider = config.storageProvider ?? new JsonFileStorageProvider();
+    this.storageProvider = config.storageProvider ?? new SqliteStorageProvider();
   }
 
   /**

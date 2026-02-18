@@ -52,7 +52,7 @@ from trikhub.gateway.config_store import (
 )
 from trikhub.gateway.storage_provider import (
     StorageProvider,
-    JsonFileStorageProvider,
+    SqliteStorageProvider,
     TrikStorageContext,
 )
 from trikhub.gateway.node_worker import (
@@ -213,7 +213,7 @@ class TrikGateway:
         )
         self._config_store = self._config.config_store or FileConfigStore()
         self._storage_provider = (
-            self._config.storage_provider or JsonFileStorageProvider()
+            self._config.storage_provider or SqliteStorageProvider()
         )
         self._config_loaded = False
 
