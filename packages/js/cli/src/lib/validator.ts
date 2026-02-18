@@ -8,6 +8,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { findUnconstrainedStrings, type JSONSchema } from '@trikhub/manifest';
 
 /**
  * Validation result
@@ -22,6 +23,7 @@ export interface ValidationResult {
  * Manifest structure (simplified for validation)
  */
 interface TrikManifest {
+  schemaVersion: 1;
   id: string;
   name: string;
   version: string;
@@ -33,12 +35,9 @@ interface TrikManifest {
   actions: Record<string, TrikAction>;
   capabilities: {
     tools: string[];
-    canRequestClarification: boolean;
   };
   limits: {
     maxExecutionTimeMs: number;
-    maxLlmCalls: number;
-    maxToolCalls: number;
   };
 }
 
@@ -51,70 +50,6 @@ interface TrikAction {
   description?: string;
 }
 
-/**
- * Allowed string formats in agentDataSchema
- * Free-form strings without these constraints are security risks
- */
-const ALLOWED_STRING_FORMATS = ['date', 'date-time', 'time', 'email', 'uri', 'uuid', 'id'];
-
-/**
- * Check if a JSON Schema allows unconstrained strings
- *
- * Unconstrained strings in agentData can lead to prompt injection
- * because the agent's output would flow directly to the user.
- */
-function hasUnconstrainedStrings(schema: unknown, path = ''): string[] {
-  const issues: string[] = [];
-
-  if (!schema || typeof schema !== 'object') {
-    return issues;
-  }
-
-  const s = schema as Record<string, unknown>;
-
-  // Check if this is a string type
-  if (s.type === 'string') {
-    const hasEnum = Array.isArray(s.enum) && s.enum.length > 0;
-    const hasConst = s.const !== undefined;
-    const hasPattern = typeof s.pattern === 'string';
-    const hasAllowedFormat = ALLOWED_STRING_FORMATS.includes(s.format as string);
-
-    if (!hasEnum && !hasConst && !hasPattern && !hasAllowedFormat) {
-      issues.push(
-        `${path || 'root'}: Unconstrained string type. ` +
-          `Use enum, const, pattern, or format (${ALLOWED_STRING_FORMATS.join(', ')}) to constrain.`
-      );
-    }
-  }
-
-  // Recurse into object properties
-  if (s.properties && typeof s.properties === 'object') {
-    for (const [key, value] of Object.entries(s.properties)) {
-      issues.push(...hasUnconstrainedStrings(value, `${path}.${key}`));
-    }
-  }
-
-  // Recurse into array items
-  if (s.items) {
-    issues.push(...hasUnconstrainedStrings(s.items, `${path}[]`));
-  }
-
-  // Check additionalProperties
-  if (s.additionalProperties && typeof s.additionalProperties === 'object') {
-    issues.push(...hasUnconstrainedStrings(s.additionalProperties, `${path}[*]`));
-  }
-
-  // Check anyOf, oneOf, allOf
-  for (const combinator of ['anyOf', 'oneOf', 'allOf']) {
-    if (Array.isArray(s[combinator])) {
-      (s[combinator] as unknown[]).forEach((subSchema, i) => {
-        issues.push(...hasUnconstrainedStrings(subSchema, `${path}(${combinator}[${i}])`));
-      });
-    }
-  }
-
-  return issues;
-}
 
 /**
  * Validate a trik at the given path
@@ -147,7 +82,7 @@ export function validateTrik(trikPath: string): ValidationResult {
   }
 
   // 3. Validate required fields
-  const requiredFields = ['id', 'name', 'version', 'description', 'entry', 'actions', 'capabilities', 'limits'];
+  const requiredFields = ['schemaVersion', 'id', 'name', 'version', 'description', 'entry', 'actions', 'capabilities', 'limits'];
   for (const field of requiredFields) {
     if (!(field in manifest)) {
       errors.push(`Missing required field: ${field}`);
@@ -186,13 +121,13 @@ export function validateTrik(trikPath: string): ValidationResult {
       if (!action.agentDataSchema) {
         errors.push(`Action "${actionName}": Template mode requires agentDataSchema`);
       } else {
-        // Check for unconstrained strings in agentDataSchema
-        const stringIssues = hasUnconstrainedStrings(
-          action.agentDataSchema,
+        // Check for unconstrained strings in agentDataSchema (security check)
+        const unconstrained = findUnconstrainedStrings(
+          action.agentDataSchema as JSONSchema,
           `actions.${actionName}.agentDataSchema`
         );
-        for (const issue of stringIssues) {
-          errors.push(`Action "${actionName}": ${issue}`);
+        for (const path of unconstrained) {
+          errors.push(`Action "${actionName}": Unconstrained string at ${path}`);
         }
       }
 
@@ -213,12 +148,6 @@ export function validateTrik(trikPath: string): ValidationResult {
   if (manifest.limits) {
     if (manifest.limits.maxExecutionTimeMs > 120000) {
       warnings.push('maxExecutionTimeMs is very high (>2min)');
-    }
-    if (manifest.limits.maxLlmCalls > 50) {
-      warnings.push('maxLlmCalls is very high (>50)');
-    }
-    if (manifest.limits.maxToolCalls > 100) {
-      warnings.push('maxToolCalls is very high (>100)');
     }
   }
 
