@@ -1,5 +1,12 @@
 # @saaas-sdk/linter
 
+## 0.7.0
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @trikhub/manifest@0.7.0
+
 ## 0.6.1
 
 ### Patch Changes

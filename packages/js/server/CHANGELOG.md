@@ -1,5 +1,14 @@
 # @trikhub/server
 
+## 0.7.0
+
+### Patch Changes
+
+- Updated dependencies [[`7424db5`](https://github.com/Molefas/trikhub/commit/7424db511e3085068e85350942bedf8df88062aa)]:
+  - @trikhub/gateway@0.7.0
+  - @trikhub/manifest@0.7.0
+  - @trikhub/linter@0.7.0
+
 ## 0.6.1
 
 ### Patch Changes
