@@ -184,6 +184,7 @@ class TestDiscovery:
         trik_dir.mkdir()
 
         manifest = {
+            "schemaVersion": 1,
             "id": "@acme/test-trik",
             "version": "1.0.0",
             "name": "Test Trik",
@@ -206,12 +207,9 @@ class TestDiscovery:
             },
             "capabilities": {
                 "tools": [],
-                "canRequestClarification": False,
             },
             "limits": {
                 "maxExecutionTimeMs": 60000,
-                "maxLlmCalls": 10,
-                "maxToolCalls": 50,
             },
         }
 

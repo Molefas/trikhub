@@ -67,6 +67,7 @@ ACTION_SCHEMA_PASSTHROUGH: dict[str, Any] = {
 
 # Common manifest properties
 COMMON_MANIFEST_PROPERTIES: dict[str, Any] = {
+    "schemaVersion": {"type": "number", "const": 1},
     "id": {"type": "string", "minLength": 1},
     "name": {"type": "string", "minLength": 1},
     "description": {"type": "string"},
@@ -75,18 +76,15 @@ COMMON_MANIFEST_PROPERTIES: dict[str, Any] = {
         "type": "object",
         "properties": {
             "tools": {"type": "array", "items": {"type": "string"}},
-            "canRequestClarification": {"type": "boolean"},
         },
-        "required": ["tools", "canRequestClarification"],
+        "required": ["tools"],
     },
     "limits": {
         "type": "object",
         "properties": {
             "maxExecutionTimeMs": {"type": "number", "minimum": 0},
-            "maxLlmCalls": {"type": "number", "minimum": 0},
-            "maxToolCalls": {"type": "number", "minimum": 0},
         },
-        "required": ["maxExecutionTimeMs", "maxLlmCalls", "maxToolCalls"],
+        "required": ["maxExecutionTimeMs"],
     },
     "entry": {
         "type": "object",
@@ -116,6 +114,7 @@ MANIFEST_SCHEMA: dict[str, Any] = {
         },
     },
     "required": [
+        "schemaVersion",
         "id",
         "name",
         "description",

@@ -164,13 +164,14 @@ function createManifest(overrides: ManifestOverrides): TrikManifest {
   }
 
   return {
+    schemaVersion: 1 as const,
     id: overrides.id ?? 'test-trik',
     name: overrides.name ?? 'Test Trik',
     description: overrides.description ?? 'A test trik',
     version: overrides.version ?? '1.0.0',
     actions,
-    capabilities: overrides.capabilities ?? { tools: [], canRequestClarification: false },
-    limits: overrides.limits ?? { maxExecutionTimeMs: 30000, maxLlmCalls: 5, maxToolCalls: 10 },
+    capabilities: overrides.capabilities ?? { tools: [] },
+    limits: overrides.limits ?? { maxExecutionTimeMs: 30000 },
     entry: overrides.entry ?? { module: './graph.js', export: 'graph' },
   };
 }

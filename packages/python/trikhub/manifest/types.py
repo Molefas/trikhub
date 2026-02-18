@@ -82,17 +82,18 @@ class TrikCapabilities(BaseModel):
     """Trik capabilities declared in manifest."""
 
     tools: list[str]
-    canRequestClarification: bool
+    """List of tool names this trik uses. Declarative - not enforced at runtime."""
     session: SessionCapabilities | None = None
+    """Session capabilities. Enforced - gateway creates/manages sessions."""
     storage: StorageCapabilities | None = None
+    """Storage capabilities. Enforced - gateway provides storage context."""
 
 
 class TrikLimits(BaseModel):
     """Resource limits for trik execution."""
 
     maxExecutionTimeMs: int
-    maxLlmCalls: int
-    maxToolCalls: int
+    """Maximum execution time in milliseconds. Enforced - gateway aborts after timeout."""
 
 
 # ============================================================================
@@ -164,6 +165,8 @@ class ActionDefinition(BaseModel):
 class TrikManifest(BaseModel):
     """The trik manifest - single source of truth for the trik contract."""
 
+    schemaVersion: Literal[1]
+    """Schema version for migration support. Current version: 1."""
     id: str
     name: str
     description: str
