@@ -8,6 +8,10 @@ Usage:
     trik sync                  Discover triks in site-packages
     trik search query          Search for triks in the registry
     trik info @scope/name      Show trik details
+    trik login                 Authenticate with TrikHub via GitHub
+    trik logout                Log out of TrikHub
+    trik whoami                Show current authenticated user
+    trik publish               Publish a trik to the registry
 """
 
 from __future__ import annotations
@@ -840,6 +844,472 @@ async def _info_async(package: str, as_json: bool) -> None:
         click.echo(click.style("\u2713 Installed", fg="green"))
     else:
         click.echo(click.style(f"Install with: trik install {trik_info.full_name}", dim=True))
+
+
+# ============================================================================
+# Login Command
+# ============================================================================
+
+
+@cli.command()
+@click.pass_context
+def login(ctx: click.Context) -> None:
+    """Authenticate with TrikHub via GitHub.
+
+    Uses GitHub's device flow for authentication.
+    """
+    asyncio.run(_login_async())
+
+
+async def _login_async() -> None:
+    """Async login implementation."""
+    import time
+
+    from trikhub.cli.config import (
+        GlobalConfig,
+        is_auth_expired,
+        read_global_config,
+        write_global_config,
+    )
+
+    config = read_global_config()
+
+    # Check if already logged in
+    if config.auth_token and not is_auth_expired(config):
+        click.echo(
+            click.style(f"Already logged in as ", fg="yellow")
+            + click.style(f"@{config.publisher_username}", fg="cyan")
+        )
+        click.echo(click.style("Use 'trik logout' to sign out first", dim=True))
+        return
+
+    click.echo("Initializing authentication...")
+
+    async with RegistryClient() as registry:
+        try:
+            # Start device flow
+            device_auth = await registry.start_device_auth()
+        except Exception as e:
+            click.echo(click.style(f"Failed to start authentication: {e}", fg="red"))
+            sys.exit(1)
+
+        # Display instructions
+        click.echo()
+        click.echo(click.style("  To authenticate, please:", bold=True))
+        click.echo()
+        click.echo(f"  1. Visit: {click.style(device_auth.verification_url, fg='cyan')}")
+        click.echo(f"  2. Enter code: {click.style(device_auth.user_code, fg='yellow', bold=True)}")
+        click.echo()
+        click.echo(click.style(f"  This code expires in {device_auth.expires_in // 60} minutes", dim=True))
+        click.echo()
+
+        # Poll for authorization
+        click.echo("Waiting for authorization...")
+
+        poll_interval = device_auth.interval
+        max_attempts = device_auth.expires_in // poll_interval
+
+        for _ in range(max_attempts):
+            time.sleep(poll_interval)
+
+            try:
+                result = await registry.poll_device_auth(device_auth.device_code)
+
+                if result:
+                    # Authorization complete - save credentials
+                    config.auth_token = result.access_token
+                    config.auth_expires_at = result.expires_at
+                    config.publisher_username = result.publisher.username
+                    write_global_config(config)
+
+                    click.echo(
+                        click.style("✓ Authenticated as ", fg="green")
+                        + click.style(result.publisher.display_name, bold=True)
+                        + click.style(f" (@{result.publisher.username})", fg="cyan")
+                    )
+                    click.echo()
+                    click.echo(click.style("You can now publish triks with 'trik publish'", dim=True))
+                    return
+                # Still pending, continue polling
+            except RuntimeError as e:
+                error_msg = str(e)
+                if "expired" in error_msg:
+                    click.echo(click.style("Authorization expired", fg="red"))
+                    click.echo(click.style("Please run 'trik login' again", dim=True))
+                    sys.exit(1)
+                if "denied" in error_msg or "access_denied" in error_msg:
+                    click.echo(click.style("Authorization denied", fg="red"))
+                    sys.exit(1)
+                raise
+
+        click.echo(click.style("Authorization timeout", fg="red"))
+        click.echo(click.style("Please run 'trik login' again", dim=True))
+        sys.exit(1)
+
+
+# ============================================================================
+# Logout Command
+# ============================================================================
+
+
+@cli.command()
+def logout() -> None:
+    """Log out of TrikHub.
+
+    Removes saved authentication credentials.
+    """
+    asyncio.run(_logout_async())
+
+
+async def _logout_async() -> None:
+    """Async logout implementation."""
+    from trikhub.cli.config import read_global_config, write_global_config
+
+    config = read_global_config()
+
+    if not config.auth_token:
+        click.echo(click.style("Not logged in", fg="yellow"))
+        return
+
+    username = config.publisher_username
+
+    # Try to invalidate session on server
+    try:
+        async with RegistryClient() as registry:
+            await registry.logout()
+    except Exception:
+        # Ignore errors - we'll clear local credentials anyway
+        pass
+
+    # Clear local credentials
+    config.auth_token = None
+    config.auth_expires_at = None
+    config.publisher_username = None
+    write_global_config(config)
+
+    if username:
+        click.echo(click.style(f"Logged out from @{username}", fg="green"))
+    else:
+        click.echo(click.style("Logged out", fg="green"))
+
+
+# ============================================================================
+# Whoami Command
+# ============================================================================
+
+
+@cli.command()
+@click.pass_context
+def whoami(ctx: click.Context) -> None:
+    """Show the current authenticated user."""
+    asyncio.run(_whoami_async())
+
+
+async def _whoami_async() -> None:
+    """Async whoami implementation."""
+    from trikhub.cli.config import is_auth_expired, read_global_config
+
+    config = read_global_config()
+
+    if not config.auth_token:
+        click.echo(click.style("Not logged in", fg="yellow"))
+        click.echo(click.style("Run 'trik login' to authenticate", dim=True))
+        return
+
+    # Check if token is expired
+    if is_auth_expired(config):
+        click.echo(click.style("Session expired", fg="yellow"))
+        click.echo(click.style("Run 'trik login' to re-authenticate", dim=True))
+        return
+
+    click.echo("Fetching user info...")
+
+    try:
+        async with RegistryClient() as registry:
+            user = await registry.get_current_user()
+    except Exception as e:
+        click.echo(click.style(f"Failed to fetch user info: {e}", fg="red"))
+        sys.exit(1)
+
+    click.echo()
+    click.echo(f"  {click.style(user.display_name, bold=True)}")
+    click.echo(f"  {click.style(f'@{user.username}', fg='cyan')}")
+    if user.verified:
+        click.echo(f"  {click.style('✓ Verified publisher', fg='green')}")
+    click.echo()
+
+
+# ============================================================================
+# Publish Command
+# ============================================================================
+
+
+@cli.command()
+@click.option("-d", "--directory", default=".", help="Trik directory")
+@click.option("-t", "--tag", help="Version tag (default: from manifest)")
+@click.pass_context
+def publish(ctx: click.Context, directory: str, tag: str | None) -> None:
+    """Publish a trik to the registry.
+
+    Supports both Node.js and Python package structures:
+    - Node.js: manifest.json at repository root
+    - Python: manifest.json inside package subdirectory
+
+    Examples:
+        trik publish
+        trik publish -d ./my-trik
+        trik publish --tag v1.0.0
+    """
+    asyncio.run(_publish_async(directory, tag))
+
+
+async def _publish_async(directory: str, tag_override: str | None) -> None:
+    """Async publish implementation."""
+    import json
+    import re
+
+    from trikhub.cli.config import is_auth_expired, read_global_config
+    from trikhub.cli.validator import (
+        find_manifest_path,
+        format_validation_result,
+        get_remote_tag_commit_sha,
+        is_dist_committed,
+        is_path_committed,
+        normalize_git_url,
+        validate_trik,
+    )
+
+    config = read_global_config()
+    repo_dir = Path(directory).resolve()
+
+    # Step 1: Check if logged in
+    if not config.auth_token:
+        click.echo(click.style("Not logged in", fg="red"))
+        click.echo(click.style("Run 'trik login' to authenticate first", dim=True))
+        sys.exit(1)
+
+    if is_auth_expired(config):
+        click.echo(click.style("Session expired", fg="red"))
+        click.echo(click.style("Run 'trik login' to re-authenticate", dim=True))
+        sys.exit(1)
+
+    # Step 2: Find manifest.json (supports both Node.js and Python)
+    click.echo("Validating trik structure...")
+
+    manifest_location = find_manifest_path(repo_dir)
+
+    if not manifest_location:
+        click.echo(click.style("✗ Missing manifest.json", fg="red"))
+        click.echo(click.style("Create a manifest.json file with your trik definition", dim=True))
+        click.echo()
+        click.echo(click.style("For Node.js triks: place manifest.json at repository root", dim=True))
+        click.echo(click.style("For Python triks: place manifest.json inside your package directory", dim=True))
+        sys.exit(1)
+
+    manifest_path = manifest_location.manifest_path
+    manifest_dir = manifest_location.manifest_dir
+    package_type = manifest_location.package_type
+
+    # Log detected package type
+    if package_type == "python":
+        rel_path = manifest_dir.relative_to(repo_dir)
+        click.echo(click.style(f"  Detected Python package: {rel_path}/", dim=True))
+
+    # Step 3: Check trikhub.json exists (always at repo root)
+    trikhub_path = repo_dir / "trikhub.json"
+    if not trikhub_path.exists():
+        click.echo(click.style("✗ Missing trikhub.json", fg="red"))
+        click.echo(click.style("Create a trikhub.json file with registry metadata", dim=True))
+        sys.exit(1)
+
+    # Step 4: Read manifest and trikhub.json
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        click.echo(click.style(f"✗ Invalid manifest.json: {e}", fg="red"))
+        sys.exit(1)
+
+    try:
+        trikhub_meta = json.loads(trikhub_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        click.echo(click.style(f"✗ Invalid trikhub.json: {e}", fg="red"))
+        sys.exit(1)
+
+    # Step 5: Check entry point exists (relative to manifest directory)
+    entry = manifest.get("entry", {})
+    entry_module = entry.get("module", "")
+    entry_path = manifest_dir / entry_module
+
+    if not entry_path.exists():
+        click.echo(click.style(f"✗ Missing entry point: {entry_module}", fg="red"))
+        if package_type == "node":
+            click.echo(click.style("Build your trik first (e.g., npm run build)", dim=True))
+        else:
+            click.echo(click.style("Ensure your entry module exists", dim=True))
+        sys.exit(1)
+
+    # Step 6: Run validation
+    validation = validate_trik(manifest_dir)
+    if not validation.valid:
+        click.echo(click.style("✗ Validation failed", fg="red"))
+        click.echo(format_validation_result(validation))
+        sys.exit(1)
+
+    if validation.warnings:
+        click.echo(click.style("⚠ Validation passed with warnings", fg="yellow"))
+        click.echo(format_validation_result(validation))
+    else:
+        click.echo(click.style("✓ Validation passed", fg="green"))
+
+    # Step 7: Determine version and git tag
+    version = tag_override.lstrip("v") if tag_override else manifest.get("version", "")
+    if not version:
+        click.echo(click.style("✗ No version found in manifest or tag option", fg="red"))
+        sys.exit(1)
+
+    git_tag = f"v{version}"
+    click.echo(click.style(f"  Version: {version}", dim=True))
+
+    # Step 8: Get GitHub repo from trikhub.json and verify
+    repo_url = trikhub_meta.get("repository", "")
+    repo_match = re.search(r"github\.com/([^/]+/[^/]+)", repo_url)
+    if not repo_match:
+        click.echo(click.style("✗ Invalid repository URL in trikhub.json", fg="red"))
+        click.echo(click.style("Expected format: https://github.com/owner/repo", dim=True))
+        sys.exit(1)
+
+    github_repo = repo_match.group(1).rstrip(".git")
+    owner = github_repo.split("/")[0]
+    trik_name = manifest.get("id") or manifest.get("name", "")
+    full_name = f"@{owner}/{trik_name}"
+
+    # Step 9: Verify git remote matches trikhub.json repository
+    click.echo("Verifying git remote...")
+    try:
+        from trikhub.cli.validator import get_git_remote_url
+        git_remote = get_git_remote_url(repo_dir)
+
+        if not git_remote:
+            click.echo(click.style("✗ Not a git repository or no remote configured", fg="red"))
+            click.echo(click.style("Initialize git and add a remote that matches trikhub.json:", dim=True))
+            click.echo(click.style(f"  git init", dim=True))
+            click.echo(click.style(f"  git remote add origin {repo_url}", dim=True))
+            sys.exit(1)
+
+        normalized_remote = normalize_git_url(git_remote)
+
+        if github_repo.lower() not in normalized_remote:
+            click.echo(click.style("✗ Git remote does not match trikhub.json repository", fg="red"))
+            click.echo()
+            click.echo(click.style("Repository mismatch detected:", fg="red"))
+            click.echo(click.style(f"  trikhub.json: {repo_url}", dim=True))
+            click.echo(click.style(f"  git remote:   {git_remote}", dim=True))
+            click.echo()
+            click.echo(click.style("Update trikhub.json to match your git remote, or push to the correct repository.", dim=True))
+            sys.exit(1)
+
+        click.echo(click.style("✓ Git remote verified", fg="green"))
+    except Exception as e:
+        click.echo(click.style(f"✗ Git verification failed: {e}", fg="red"))
+        sys.exit(1)
+
+    click.echo(click.style(f"  Trik: {full_name}", dim=True))
+    click.echo(click.style(f"  Repo: {github_repo}", dim=True))
+
+    # Step 10: Check that entry module is committed
+    if package_type == "node":
+        # Node.js: check dist/ is committed
+        click.echo("Checking dist/ is committed...")
+        if not is_dist_committed(repo_dir):
+            click.echo(click.style("✗ dist/ directory is not committed to git", fg="red"))
+            click.echo()
+            click.echo(click.style("Triks require dist/ to be committed for direct GitHub installation.", fg="red"))
+            click.echo(click.style("Add dist/ to your repository:", dim=True))
+            click.echo(click.style("  git add dist/ -f", dim=True))
+            click.echo(click.style('  git commit -m "Add dist for publishing"', dim=True))
+            click.echo(click.style("  git push", dim=True))
+            sys.exit(1)
+        click.echo(click.style("✓ dist/ is committed", fg="green"))
+    else:
+        # Python: check entry module is committed
+        entry_rel_path = str(entry_path.relative_to(repo_dir))
+        click.echo(f"Checking {entry_rel_path} is committed...")
+        if not is_path_committed(repo_dir, entry_rel_path):
+            click.echo(click.style("✗ Entry module is not committed to git", fg="red"))
+            click.echo()
+            click.echo(click.style(f"{entry_rel_path} must be committed for direct GitHub installation.", fg="red"))
+            click.echo(click.style("Add it to your repository:", dim=True))
+            click.echo(click.style(f'  git add "{entry_rel_path}"', dim=True))
+            click.echo(click.style('  git commit -m "Add entry module for publishing"', dim=True))
+            click.echo(click.style("  git push", dim=True))
+            sys.exit(1)
+        click.echo(click.style(f"✓ {entry_rel_path} is committed", fg="green"))
+
+    # Step 11: Verify git tag exists on remote
+    click.echo(f"Verifying tag {git_tag} exists on remote...")
+    commit_sha = get_remote_tag_commit_sha(repo_dir, git_tag)
+
+    if not commit_sha:
+        click.echo(click.style(f"✗ Tag {git_tag} not found on remote", fg="red"))
+        click.echo()
+        click.echo(click.style("The git tag must exist on the remote before publishing.", fg="red"))
+        click.echo(click.style("Create and push the tag:", dim=True))
+        click.echo(click.style(f"  git tag {git_tag}", dim=True))
+        click.echo(click.style(f"  git push origin {git_tag}", dim=True))
+        sys.exit(1)
+
+    click.echo(click.style(f"✓ Tag {git_tag} verified ({commit_sha[:8]}...)", fg="green"))
+
+    # Step 12: Publish to registry
+    click.echo("Publishing to TrikHub registry...")
+
+    async with RegistryClient() as registry:
+        try:
+            # Check if trik exists, if not register it
+            existing_trik = await registry.get_trik(full_name)
+
+            if not existing_trik:
+                # Register new trik
+                try:
+                    await registry.register_trik(
+                        github_repo=github_repo,
+                        name=trik_name,
+                        description=trikhub_meta.get("shortDescription") or manifest.get("description"),
+                        categories=trikhub_meta.get("categories"),
+                        keywords=trikhub_meta.get("keywords"),
+                    )
+                    click.echo(click.style(f"  Registered new trik: {full_name}", dim=True))
+                except RuntimeError as reg_error:
+                    # If trik already exists (409), that's fine - continue to publish version
+                    if "already exists" not in str(reg_error):
+                        raise
+                    click.echo(click.style(f"  Trik already registered: {full_name}", dim=True))
+
+            # Publish version
+            await registry.publish_version(
+                full_name=full_name,
+                version=version,
+                git_tag=git_tag,
+                commit_sha=commit_sha,
+                manifest=manifest,
+            )
+
+            click.echo(click.style("✓ Published to TrikHub registry", fg="green"))
+
+        except PermissionError as e:
+            click.echo(click.style(f"✗ {e}", fg="red"))
+            sys.exit(1)
+        except RuntimeError as e:
+            click.echo(click.style(f"✗ Failed to publish to registry: {e}", fg="red"))
+            sys.exit(1)
+
+    # Success message
+    click.echo()
+    click.echo(click.style("  Published successfully!", fg="green", bold=True))
+    click.echo()
+    click.echo(click.style(f"  Install with: trik install {full_name}@{version}", dim=True))
+    click.echo(click.style(f"  View at: https://trikhub.com/triks/{full_name.replace('@', '%40')}", dim=True))
+    click.echo()
 
 
 # ============================================================================
