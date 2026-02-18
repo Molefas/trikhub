@@ -1,12 +1,15 @@
 # TrikHub Local Playground
+This demo is meant to simulate an existing LangGraph Agent ready to consume Triks and the process of finding, installing and running these.
 
-Run a TypeScript AI agent with TrikHub triks **in a single process** - no server needed.
+## Disclaimer
+There is a significant portion of boilerplate that would ideally not be added to the main Agent, however, I needed to make sure that the basic example is ready to run with one command AND that it supports the main LLMs (OpenAI, Anthropic and Google).
 
 ## What You'll Learn
 - How to load triks using `@trikhub/gateway` and exposing env variables to them
 - How template responses keep agents safe from prompt injection
 - How passthrough content is delivered directly to users
-- How session state enables natural language references ("the second one")
+- How to expose Environment variables per Trik
+- How to interact with persistent storage
 
 ## Architecture
 
@@ -26,7 +29,7 @@ Run a TypeScript AI agent with TrikHub triks **in a single process** - no server
 
 - Node.js 18+
 - pnpm (or npm)
-- OpenAI API key
+- OpenAI / Anthropic / Googel API key
 
 ## Quick Start
 
@@ -49,7 +52,7 @@ pnpm install
 pnpm build
 
 # Navigate to the example
-cd examples/local-playground
+cd examples/js/local-playground
 
 # Install dependencies just for the demo
 npm install
@@ -75,42 +78,17 @@ pnpm dev
 You should see:
 
 ```
-[TrikGateway] Loaded 1 trik(s) from config
-[Triks] Loaded: trik-article-search
-LLM: anthropic (claude-sonnet-4-20250514)
+[TrikGateway] No config file found at /../config.json
+[Triks] No triks configured
+LLM: ... // Your LLM if you've added the details on the .env
 Built-in tools: get_weather, calculate, search_web
-Triks: trik-article-search
-Total tools: 6
+Total tools: 3
+Type "/tools" to list all, "exit" to quit.
+
 You:
 ```
 
 ## Try It Out
-
-### Article Search (uses the trik)
-
-```
-You: search for articles about AI
-Agent: I found 3 articles about AI.
-
-You: list them
---- Direct Content (article-list) ---
-1. **The Future of AI in Healthcare** - AI is transforming...
-2. **Understanding Machine Learning** - A beginner's guide...
-3. **AI Ethics and Society** - Exploring the implications...
---- End ---
-
-You: show me the healthcare one
---- Direct Content (article) ---
-# The Future of AI in Healthcare
-AI is revolutionizing medical diagnosis and treatment planning...
---- End ---
-```
-
-Notice:
-
-- **Search** returns a template ("I found X articles") - safe structured data
-- **List/Details** return passthrough content - delivered directly to you, bypassing the agent
-
 ### Built-in Tools
 
 ```
@@ -119,7 +97,30 @@ Agent: The weather in Lisbon is currently rainy with a temperature of 30°C (86 
 
 ```
 
-The agent validates refund reasons before processing - vague requests like "I just want my money back" are rejected.
+### Install new Triks
+You can now search and install existing Triks to test. 
+```bash
+# This will help you find triks by keywords
+trik search {keyword}
+
+# Install these
+trik install @[org]/[trik-name]
+
+# Restart the CLI
+pnpm run dev
+```
+
+I've shipped a few basic Triks for this example:
+```bash
+# A Python Trik to test cross-env execution
+@molefas/trik-article-search-py
+
+# A basic Trik to test persistent storage through SQLite
+@molefas/trik-demo-notes
+```
+
+You can find more details on how to interact with each Trik in their documentations.
+Find more about these on [Trikhub.com](https://trikhub.com).
 
 ## How It Works
 
@@ -156,9 +157,11 @@ local-playground/
 │   └── tools.ts        # Built-in tools + trik loader
 │   └── llm.ts          # Langgraph Model selection based on key provided
 ├── .trikhub/
-│   └── config.json     # Installed triks
+│   └── config.json     # Installed triks (once there are Triks installed)
+│   └── secrets.json    # Secrets segregation per Trik
 ├── .env.example        # Environment template
 └── package.json
+└── langgraph.json
 ```
 
 ## Troubleshooting
@@ -174,6 +177,7 @@ local-playground/
 **Trik not loading**
 
 → Check `.trikhub/config.json` has the trik listed
+→ If you're running Python Triks you need to have an available Python environment regardless (see below)
 
 ## Using Python Triks
 
@@ -230,8 +234,5 @@ When the gateway loads a Python trik, it:
 This means you can mix JavaScript and Python triks in the same agent seamlessly.
 
 ## Next Steps
-
-- [Build your own trik](../../README.md#building-a-trik)
-- [Try the server playground](../server-playground) - Same concepts, Python + HTTP
+- [Check our docs](https://trikhub.com/docs)
 - [Try the Python local playground](../python/local-playground) - Same concepts in Python
-- [Publish a trik](../../README.md#publishing-to-trikhub)

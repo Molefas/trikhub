@@ -1,10 +1,11 @@
 # TrikHub
+An open-source framework for AI agents to safely publish, distribute and use third-party Agent skills (called `Triks`) mitigating prompt injection risks.
 
-An open-source framework for AI agents to safely use third-party skills without prompt injection risks.
+Although pretty complete already, this project is in its infancy and many more updates, features, fixes and improvements are planned. Any help in the right direction is greatly appreciated.
 
 ## Why TrikHub?
 
-AI agents face two critical challenges when using too many simplistic external tools to solve complex problems:
+AI agents face two critical challenges when using too many simplistic external tools to solve complex problems: security and efficiency; While developers face two more: Reuseability and distribution.
 
 ### 1. Security
 
@@ -20,9 +21,13 @@ If the agent sees this text, it may follow the injected instructions. This is **
 
 Agents waste tokens discovering APIs, reading docs, and debugging failures. A simple task like "download this YouTube video" might require dozens of exploratory calls.
 
+### 3. Reuseability and Distribution
+
+Classicaly developers' first attempt to solve something is to try to find complete or even partial opensource solutions for their problems. With Agent capabilities, it seems as if we're always re-writing everything from scratch.
+
 ## How TrikHub Solves This
 
-By following a clear App or SaaS approach to building Agents that solve complete problems, end to end.
+By following a clear App or SaaS approach to building Agents that solve complete problems, end to end, and distributing these over a basic portal built on top of the well known Github.
 
 ### Optimized Skills (Triks)
 
@@ -58,51 +63,14 @@ Every Trik enforces **Type-Directed Privilege Separation**:
 
 The agent reasons over safe, structured data. Untrusted content bypasses the agent entirely and goes directly to the user.
 
-## Packages
+## Features
 
-| Package | Description |
-|---------|-------------|
-| [@trikhub/gateway](packages/js/gateway) | Core runtime - loads and executes triks, validates outputs |
-| [@trikhub/server](packages/js/server) | HTTP server for language-agnostic integration |
-| [@trikhub/manifest](packages/js/manifest) | TypeScript types and JSON Schema validation |
-| [@trikhub/linter](packages/js/linter) | Static analysis for trik security |
-| [@trikhub/cli](packages/js/cli) | CLI for installing and publishing triks |
-
-## Quick Start
-
-**1. Install a trik**
-
-```bash
-npm install -g @trikhub/cli
-trik install @Mmolefas/article-search
-```
-
-**2. Use in your agent**
-
-```typescript
-import { TrikGateway } from '@trikhub/gateway';
-import { loadLangChainTriks } from '@trikhub/gateway/langchain';
-
-const gateway = new TrikGateway();
-await gateway.loadTriksFromConfig({ configPath: '.trikhub/config.json' });
-
-const tools = loadLangChainTriks(gateway, {
-  onPassthrough: (content) => console.log(content), // Direct to user
-});
-
-// Bind to your LLM
-const model = new ChatOpenAI().bindTools(tools);
-```
-
-**3. Run**
-
-```
-You: Search for AI articles
-Agent: I found 3 articles about AI.
-
-You: Show me the first one
-[Article content delivered directly - agent never sees it]
-```
+As of the first early release, each Trik can have the following capabilities:
+- **Multi-Language Support** - Python and TypeScript triks work side by side
+- **Cross-Environment Execution** - Python agents can run JS triks and vice versa
+- **Type-Directed Privilege Separation** - Secure by design
+- **Isolated Configuration** - Each Trik has access only to its own API keys and secrets
+- **Persistent Storage** - SQLite-backed key-value storage per Trik
 
 ## Persistent Storage
 
@@ -125,14 +93,37 @@ Enable in manifest:
 
 Data is stored in SQLite at `~/.trikhub/storage/storage.db`. See [Storage documentation](https://trikhub.com/docs/concepts/storage) for details.
 
+## Configuration
+
+Triks can declare required API keys, tokens, and other secrets:
+
+```json
+{
+  "config": {
+    "required": [{ "key": "API_KEY", "description": "Your API key" }]
+  }
+}
+```
+
+Users configure these in `~/.trikhub/secrets.json` (global) or `.trikhub/secrets.json` (project-local). See [Configuration documentation](https://trikhub.com/docs/concepts/configuration) for details.
+
+## Packages
+
+| Package | Description |
+|---------|-------------|
+| [@trikhub/gateway](packages/js/gateway) | Core runtime - loads and executes triks, validates outputs |
+| [@trikhub/server](packages/js/server) | HTTP server for language-agnostic integration |
+| [@trikhub/manifest](packages/js/manifest) | TypeScript types and JSON Schema validation |
+| [@trikhub/linter](packages/js/linter) | Static analysis for trik security |
+| [@trikhub/cli](packages/js/cli) | CLI for installing and publishing triks |
+
 ## Examples
 
 Get hands-on with the playground examples:
 
 | Example | Description |
 |---------|-------------|
-| [local-playground](examples/local-playground) | TypeScript agent with in-process gateway |
-| [server-playground](examples/server-playground) | Python agent with HTTP gateway |
+| [local-playground](examples/[js/python]/local-playground) | TypeScript agent with in-process gateway |
 
 ## Documentation
 
@@ -140,6 +131,8 @@ Full documentation available at **[trikhub.com/docs](https://trikhub.com/docs)**
 
 - [What are Triks?](https://trikhub.com/docs/triks) - Understanding the trik format
 - [Security Model](https://trikhub.com/docs/concepts/security) - Deep dive into type-directed privilege separation
+- [Configuration](https://trikhub.com/docs/concepts/configuration) - Managing API keys and secrets
+- [Cross-Environment](https://trikhub.com/docs/concepts/cross-environment) - Running triks across runtimes
 - [Creating Triks](https://trikhub.com/docs/creating-triks) - Build your own triks
 - [API Reference](https://trikhub.com/docs/api) - Package APIs
 
