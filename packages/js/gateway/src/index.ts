@@ -28,7 +28,7 @@ export {
 // Storage provider
 export {
   type StorageProvider,
-  JsonFileStorageProvider,
+  SqliteStorageProvider,
   InMemoryStorageProvider,
 } from './storage-provider.js';
 

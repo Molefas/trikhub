@@ -1,18 +1,17 @@
 """
 Storage Provider for TrikHub Gateway
 
-Mirrors packages/trik-gateway/src/storage-provider.ts
-Provides persistent key-value storage for triks.
+Provides persistent key-value storage for triks using SQLite.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
+import sqlite3
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -130,231 +129,137 @@ class StorageEntry:
     expires_at: int | None = None
 
 
-@dataclass
-class StorageData:
-    """Storage data file structure."""
-
-    entries: dict[str, StorageEntry] = field(default_factory=dict)
-    trik_id: str = ""
-    created_at: int = 0
-    updated_at: int = 0
-    total_size: int = 0
-
-
 # ============================================================================
-# JSON File Storage Context
+# SQLite Storage Provider
 # ============================================================================
 
 
-class JsonFileStorageContext(TrikStorageContext):
-    """JSON file-based storage context for a single trik."""
+class SqliteStorageContext(TrikStorageContext):
+    """SQLite-based storage context for a single trik."""
 
-    def __init__(self, file_path: str, trik_id: str, max_size_bytes: int) -> None:
-        self._file_path = file_path
+    def __init__(
+        self, conn: sqlite3.Connection, trik_id: str, max_size_bytes: int
+    ) -> None:
+        self._conn = conn
         self._trik_id = trik_id
         self._max_size_bytes = max_size_bytes
-        self._data: StorageData | None = None
-        self._dirty = False
-        self._save_task: asyncio.Task[None] | None = None
 
     def _current_time_ms(self) -> int:
         """Get current time in milliseconds."""
         return int(time.time() * 1000)
 
-    def _create_empty_data(self) -> StorageData:
-        """Create empty storage data."""
-        now = self._current_time_ms()
-        return StorageData(
-            entries={},
-            trik_id=self._trik_id,
-            created_at=now,
-            updated_at=now,
-            total_size=0,
-        )
-
-    async def _ensure_loaded(self) -> StorageData:
-        """Ensure data is loaded from disk."""
-        if self._data is not None:
-            return self._data
-
-        if os.path.exists(self._file_path):
-            try:
-                with open(self._file_path) as f:
-                    raw_data = json.load(f)
-
-                # Convert raw dict entries to StorageEntry objects
-                entries: dict[str, StorageEntry] = {}
-                for key, entry_data in raw_data.get("entries", {}).items():
-                    entries[key] = StorageEntry(
-                        value=entry_data.get("value"),
-                        created_at=entry_data.get("created_at", 0),
-                        expires_at=entry_data.get("expires_at"),
-                    )
-
-                self._data = StorageData(
-                    entries=entries,
-                    trik_id=raw_data.get("metadata", {}).get("trik_id", self._trik_id),
-                    created_at=raw_data.get("metadata", {}).get("created_at", 0),
-                    updated_at=raw_data.get("metadata", {}).get("updated_at", 0),
-                    total_size=raw_data.get("metadata", {}).get("total_size", 0),
-                )
-            except Exception:
-                # Corrupted file, start fresh
-                self._data = self._create_empty_data()
-        else:
-            self._data = self._create_empty_data()
-
-        # Clean up expired entries on load
-        await self._cleanup_expired()
-
-        return self._data
-
-    async def _cleanup_expired(self) -> None:
-        """Clean up expired entries."""
-        if self._data is None:
-            return
-
-        now = self._current_time_ms()
-        changed = False
-
-        expired_keys = [
-            key
-            for key, entry in self._data.entries.items()
-            if entry.expires_at is not None and entry.expires_at < now
-        ]
-
-        for key in expired_keys:
-            del self._data.entries[key]
-            changed = True
-
-        if changed:
-            self._dirty = True
-            await self._schedule_save()
-
-    async def _schedule_save(self) -> None:
-        """Schedule a debounced save operation."""
-        if self._save_task is not None:
-            return  # Already scheduled
-
-        async def delayed_save() -> None:
-            await asyncio.sleep(0.1)  # 100ms debounce
-            self._save_task = None
-            await self._flush()
-
-        self._save_task = asyncio.create_task(delayed_save())
-
-    async def _flush(self) -> None:
-        """Flush data to disk."""
-        if not self._dirty or self._data is None:
-            return
-
-        # Ensure directory exists
-        dir_path = os.path.dirname(self._file_path)
-        if not os.path.exists(dir_path):
-            os.makedirs(dir_path, exist_ok=True)
-
-        # Prepare data for serialization
-        entries_dict = {
-            key: {
-                "value": entry.value,
-                "created_at": entry.created_at,
-                "expires_at": entry.expires_at,
-            }
-            for key, entry in self._data.entries.items()
-        }
-
-        output = {
-            "entries": entries_dict,
-            "metadata": {
-                "trik_id": self._data.trik_id,
-                "created_at": self._data.created_at,
-                "updated_at": self._current_time_ms(),
-                "total_size": 0,  # Will be updated below
-            },
-        }
-
-        content = json.dumps(output, indent=2)
-        output["metadata"]["total_size"] = len(content.encode("utf-8"))
-        self._data.total_size = output["metadata"]["total_size"]
-        self._data.updated_at = output["metadata"]["updated_at"]
-
-        with open(self._file_path, "w") as f:
-            json.dump(output, f, indent=2)
-
-        self._dirty = False
-
     async def get(self, key: str) -> Any | None:
         """Get a value by key."""
-        data = await self._ensure_loaded()
-        entry = data.entries.get(key)
+        # Clean up expired entries for this trik
+        cursor = self._conn.cursor()
+        cursor.execute(
+            "DELETE FROM storage WHERE trik_id = ? AND expires_at IS NOT NULL AND expires_at < ?",
+            (self._trik_id, self._current_time_ms()),
+        )
+        self._conn.commit()
 
-        if entry is None:
+        cursor.execute(
+            "SELECT value, expires_at FROM storage WHERE trik_id = ? AND key = ?",
+            (self._trik_id, key),
+        )
+        row = cursor.fetchone()
+
+        if row is None:
             return None
 
-        # Check expiration
-        if entry.expires_at is not None and entry.expires_at < self._current_time_ms():
-            del data.entries[key]
-            self._dirty = True
-            await self._schedule_save()
+        value, expires_at = row
+
+        # Double-check expiration
+        if expires_at is not None and expires_at < self._current_time_ms():
+            cursor.execute(
+                "DELETE FROM storage WHERE trik_id = ? AND key = ?",
+                (self._trik_id, key),
+            )
+            self._conn.commit()
             return None
 
-        return entry.value
+        return json.loads(value)
 
     async def set(self, key: str, value: Any, ttl: int | None = None) -> None:
         """Set a value by key."""
-        data = await self._ensure_loaded()
+        value_json = json.dumps(value)
+        value_size = len(value_json.encode("utf-8"))
 
-        # Check size limit before adding
-        value_size = len(json.dumps(value).encode("utf-8"))
-        current_size = data.total_size
+        cursor = self._conn.cursor()
 
-        if current_size + value_size > self._max_size_bytes:
+        # Get current key size for updates
+        cursor.execute(
+            "SELECT value FROM storage WHERE trik_id = ? AND key = ?",
+            (self._trik_id, key),
+        )
+        row = cursor.fetchone()
+        current_key_size = len(row[0].encode("utf-8")) if row else 0
+
+        # Get current usage excluding this key
+        cursor.execute(
+            "SELECT COALESCE(SUM(LENGTH(value)), 0) FROM storage WHERE trik_id = ?",
+            (self._trik_id,),
+        )
+        usage = cursor.fetchone()[0] - current_key_size
+
+        if usage + value_size > self._max_size_bytes:
             raise ValueError(
-                f"Storage quota exceeded. Current: {current_size} bytes, "
+                f"Storage quota exceeded. Current: {usage} bytes, "
                 f"Adding: {value_size} bytes, Max: {self._max_size_bytes} bytes"
             )
 
-        entry = StorageEntry(
-            value=value,
-            created_at=self._current_time_ms(),
-            expires_at=self._current_time_ms() + ttl if ttl is not None and ttl > 0 else None,
-        )
+        now = self._current_time_ms()
+        expires_at = now + ttl if ttl is not None and ttl > 0 else None
 
-        data.entries[key] = entry
-        self._dirty = True
-        await self._schedule_save()
+        cursor.execute(
+            "INSERT OR REPLACE INTO storage (trik_id, key, value, created_at, expires_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (self._trik_id, key, value_json, now, expires_at),
+        )
+        self._conn.commit()
 
     async def delete(self, key: str) -> bool:
         """Delete a key."""
-        data = await self._ensure_loaded()
-
-        if key not in data.entries:
-            return False
-
-        del data.entries[key]
-        self._dirty = True
-        await self._schedule_save()
-        return True
+        cursor = self._conn.cursor()
+        cursor.execute(
+            "DELETE FROM storage WHERE trik_id = ? AND key = ?",
+            (self._trik_id, key),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
 
     async def list(self, prefix: str | None = None) -> list[str]:
         """List all keys, optionally filtered by prefix."""
-        data = await self._ensure_loaded()
-        keys = list(data.entries.keys())
+        # Clean up expired entries first
+        cursor = self._conn.cursor()
+        cursor.execute(
+            "DELETE FROM storage WHERE trik_id = ? AND expires_at IS NOT NULL AND expires_at < ?",
+            (self._trik_id, self._current_time_ms()),
+        )
+        self._conn.commit()
 
         if prefix:
-            keys = [k for k in keys if k.startswith(prefix)]
+            # Escape special LIKE characters and add wildcard
+            escaped_prefix = prefix.replace("%", "\\%").replace("_", "\\_") + "%"
+            cursor.execute(
+                "SELECT key FROM storage WHERE trik_id = ? AND key LIKE ? ESCAPE '\\'",
+                (self._trik_id, escaped_prefix),
+            )
+        else:
+            cursor.execute(
+                "SELECT key FROM storage WHERE trik_id = ?",
+                (self._trik_id,),
+            )
 
-        return keys
+        return [row[0] for row in cursor.fetchall()]
 
     async def get_many(self, keys: list[str]) -> dict[str, Any]:
         """Get multiple values at once."""
         result: dict[str, Any] = {}
-
         for key in keys:
             value = await self.get(key)
             if value is not None:
                 result[key] = value
-
         return result
 
     async def set_many(self, entries: dict[str, Any]) -> None:
@@ -362,45 +267,61 @@ class JsonFileStorageContext(TrikStorageContext):
         for key, value in entries.items():
             await self.set(key, value)
 
-    async def force_save(self) -> None:
-        """Force save any pending changes."""
-        if self._save_task is not None:
-            self._save_task.cancel()
-            self._save_task = None
-        await self._flush()
-
     async def get_usage(self) -> int:
         """Get current storage usage in bytes."""
-        data = await self._ensure_loaded()
-        return data.total_size
+        cursor = self._conn.cursor()
+        cursor.execute(
+            "SELECT COALESCE(SUM(LENGTH(value)), 0) FROM storage WHERE trik_id = ?",
+            (self._trik_id,),
+        )
+        return cursor.fetchone()[0]
 
     async def clear(self) -> None:
-        """Clear all data."""
-        self._data = self._create_empty_data()
-        self._dirty = True
-        await self._flush()
+        """Clear all data for this trik."""
+        cursor = self._conn.cursor()
+        cursor.execute(
+            "DELETE FROM storage WHERE trik_id = ?",
+            (self._trik_id,),
+        )
+        self._conn.commit()
 
 
-# ============================================================================
-# JSON File Storage Provider
-# ============================================================================
-
-
-class JsonFileStorageProvider(StorageProvider):
+class SqliteStorageProvider(StorageProvider):
     """
-    JSON file-based storage provider.
-    Stores data in ~/.trikhub/storage/@scope/trik-name/data.json
+    SQLite-based storage provider.
+    Stores all trik data in a single database at ~/.trikhub/storage/storage.db
     """
 
     def __init__(self, base_dir: str | None = None) -> None:
-        self._base_dir = base_dir or str(Path.home() / ".trikhub" / "storage")
-        self._contexts: dict[str, JsonFileStorageContext] = {}
+        storage_dir = base_dir or str(Path.home() / ".trikhub" / "storage")
 
-    def _get_file_path(self, trik_id: str) -> str:
-        """Get the file path for a trik's storage."""
-        # Convert @scope/name to @scope/name/data.json
-        normalized_id = trik_id.lstrip("@")
-        return os.path.join(self._base_dir, f"@{normalized_id}", "data.json")
+        # Ensure directory exists
+        os.makedirs(storage_dir, exist_ok=True)
+
+        self._db_path = os.path.join(storage_dir, "storage.db")
+        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        self._contexts: dict[str, SqliteStorageContext] = {}
+
+        # Configure for concurrency and durability
+        self._conn.execute("PRAGMA journal_mode = WAL")
+        self._conn.execute("PRAGMA busy_timeout = 5000")
+
+        # Initialize schema
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS storage (
+                trik_id TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER,
+                PRIMARY KEY (trik_id, key)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_storage_trik ON storage(trik_id);
+            CREATE INDEX IF NOT EXISTS idx_storage_expires ON storage(expires_at)
+                WHERE expires_at IS NOT NULL;
+        """)
+        self._conn.commit()
 
     def for_trik(
         self, trik_id: str, capabilities: StorageCapabilities | None = None
@@ -410,14 +331,13 @@ class JsonFileStorageProvider(StorageProvider):
         if trik_id in self._contexts:
             return self._contexts[trik_id]
 
-        file_path = self._get_file_path(trik_id)
         max_size = (
             capabilities.maxSizeBytes
             if capabilities and capabilities.maxSizeBytes
             else DEFAULT_MAX_SIZE_BYTES
         )
 
-        context = JsonFileStorageContext(file_path, trik_id, max_size)
+        context = SqliteStorageContext(self._conn, trik_id, max_size)
         self._contexts[trik_id] = context
 
         return context
@@ -428,15 +348,13 @@ class JsonFileStorageProvider(StorageProvider):
         if context:
             return await context.get_usage()
 
-        # Check if file exists
-        file_path = self._get_file_path(trik_id)
-        if not os.path.exists(file_path):
-            return 0
-
-        try:
-            return os.path.getsize(file_path)
-        except Exception:
-            return 0
+        # Query directly if no cached context
+        cursor = self._conn.cursor()
+        cursor.execute(
+            "SELECT COALESCE(SUM(LENGTH(value)), 0) FROM storage WHERE trik_id = ?",
+            (trik_id,),
+        )
+        return cursor.fetchone()[0]
 
     async def clear(self, trik_id: str) -> None:
         """Clear all storage for a trik."""
@@ -445,44 +363,28 @@ class JsonFileStorageProvider(StorageProvider):
             await context.clear()
             return
 
-        # Delete file if it exists
-        file_path = self._get_file_path(trik_id)
-        if os.path.exists(file_path):
-            os.unlink(file_path)
+        # Delete directly if no cached context
+        cursor = self._conn.cursor()
+        cursor.execute(
+            "DELETE FROM storage WHERE trik_id = ?",
+            (trik_id,),
+        )
+        self._conn.commit()
 
     async def list_triks(self) -> list[str]:
         """List all triks with stored data."""
-        if not os.path.exists(self._base_dir):
-            return []
+        cursor = self._conn.cursor()
+        cursor.execute("SELECT DISTINCT trik_id FROM storage")
+        return [row[0] for row in cursor.fetchall()]
 
-        triks: list[str] = []
+    def get_db_path(self) -> str:
+        """Get the database file path (for debugging)."""
+        return self._db_path
 
-        try:
-            for entry in os.scandir(self._base_dir):
-                if not entry.is_dir():
-                    continue
-
-                if entry.name.startswith("@"):
-                    # Scoped triks: @scope/name
-                    scope_path = entry.path
-                    for scoped_entry in os.scandir(scope_path):
-                        if scoped_entry.is_dir():
-                            data_file = os.path.join(scoped_entry.path, "data.json")
-                            if os.path.exists(data_file):
-                                triks.append(f"{entry.name}/{scoped_entry.name}")
-                else:
-                    # Unscoped triks
-                    data_file = os.path.join(entry.path, "data.json")
-                    if os.path.exists(data_file):
-                        triks.append(entry.name)
-        except Exception:
-            pass
-
-        return triks
-
-    def get_base_dir(self) -> str:
-        """Get the base directory path (for debugging)."""
-        return self._base_dir
+    def close(self) -> None:
+        """Close the database connection. Call this for graceful shutdown."""
+        self._contexts.clear()
+        self._conn.close()
 
 
 # ============================================================================
