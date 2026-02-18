@@ -46,11 +46,11 @@ Every Trik enforces **Type-Directed Privilege Separation**:
 │    Trik     │────▶│   Gateway   │────▶│    Agent    │
 │  (external) │     │  (validates)│     │    (LLM)    │
 └─────────────┘     └──────┬──────┘     └─────────────┘
-                          │                   │
-                   userContent           agentData only
-                   (passthrough)         (safe types)
-                          │                   │
-                          ▼                   ▼
+                           │                   │
+                    userContent           agentData only
+                    (passthrough)         (safe types)
+                           │                   │
+                           ▼                   ▼
                    ┌─────────────────────────────┐
                    │            User             │
                    └─────────────────────────────┘
