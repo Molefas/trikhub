@@ -83,6 +83,43 @@ class SearchResult:
 
 
 # ============================================================================
+# Auth Data Types
+# ============================================================================
+
+
+@dataclass
+class DeviceAuthResponse:
+    """Device authorization response from registry."""
+
+    device_code: str
+    user_code: str
+    verification_url: str
+    expires_in: int
+    interval: int
+
+
+@dataclass
+class Publisher:
+    """Publisher information from the registry."""
+
+    id: int
+    username: str
+    display_name: str
+    avatar_url: str
+    verified: bool
+    created_at: str
+
+
+@dataclass
+class AuthResult:
+    """Auth result after successful device flow."""
+
+    access_token: str
+    expires_at: str
+    publisher: Publisher
+
+
+# ============================================================================
 # Registry Client
 # ============================================================================
 
@@ -109,8 +146,10 @@ class RegistryClient:
         """Get the auth token."""
         if self._explicit_auth_token:
             return self._explicit_auth_token
-        # TODO: Load from config file
-        return None
+        # Load from global config
+        from .config import read_global_config
+        config = read_global_config()
+        return config.auth_token
 
     async def close(self) -> None:
         """Close the HTTP client."""
@@ -288,6 +327,157 @@ class RegistryClient:
         except Exception:
             # Silently fail analytics - don't break the install
             pass
+
+    # ========================================================================
+    # Authentication Methods
+    # ========================================================================
+
+    async def start_device_auth(self) -> DeviceAuthResponse:
+        """Start device authorization flow.
+
+        Returns device_code for polling and user_code for user to enter.
+        """
+        try:
+            response = await self._client.get(f"{self.base_url}/auth/device")
+        except httpx.ConnectError as e:
+            raise ConnectionError(
+                f"Failed to connect to registry at {self.base_url}: {e}"
+            ) from e
+
+        if not response.is_success:
+            try:
+                data = response.json()
+                message = data.get("error") or data.get("message") or response.text
+            except Exception:
+                message = response.text
+            raise RuntimeError(f"Failed to start authentication: {response.status_code} - {message}")
+
+        data = response.json()
+        return DeviceAuthResponse(
+            device_code=data["deviceCode"],
+            user_code=data["userCode"],
+            verification_url=data["verificationUrl"],
+            expires_in=data["expiresIn"],
+            interval=data.get("interval", 5),
+        )
+
+    async def poll_device_auth(self, device_code: str) -> AuthResult | None:
+        """Poll for device authorization completion.
+
+        Returns None if still pending, AuthResult when complete.
+        """
+        try:
+            response = await self._client.post(
+                f"{self.base_url}/auth/device/poll",
+                json={"deviceCode": device_code},
+            )
+        except httpx.ConnectError as e:
+            raise ConnectionError(
+                f"Failed to connect to registry at {self.base_url}: {e}"
+            ) from e
+
+        if response.status_code == 202:
+            # Still pending
+            return None
+
+        if not response.is_success:
+            try:
+                data = response.json()
+                message = data.get("error") or response.text
+            except Exception:
+                message = response.text
+            raise RuntimeError(f"Authentication failed: {response.status_code} - {message}")
+
+        data = response.json()
+        publisher_data = data["publisher"]
+        return AuthResult(
+            access_token=data["accessToken"],
+            expires_at=data["expiresAt"],
+            publisher=Publisher(
+                id=publisher_data["id"],
+                username=publisher_data["username"],
+                display_name=publisher_data["displayName"],
+                avatar_url=publisher_data["avatarUrl"],
+                verified=publisher_data.get("verified", False),
+                created_at=publisher_data["createdAt"],
+            ),
+        )
+
+    async def get_current_user(self) -> Publisher:
+        """Get the current authenticated user."""
+        if not self.auth_token:
+            raise PermissionError("Not authenticated. Please run `trik login`")
+
+        data = await self._fetch("/auth/me")
+        return Publisher(
+            id=data["id"],
+            username=data["username"],
+            display_name=data["displayName"],
+            avatar_url=data["avatarUrl"],
+            verified=data.get("verified", False),
+            created_at=data["createdAt"],
+        )
+
+    async def logout(self) -> None:
+        """Logout (invalidate session)."""
+        if not self.auth_token:
+            return
+        await self._fetch("/auth/logout", method="POST")
+
+    # ========================================================================
+    # Publishing Methods
+    # ========================================================================
+
+    async def register_trik(
+        self,
+        github_repo: str,
+        name: str | None = None,
+        description: str | None = None,
+        categories: list[str] | None = None,
+        keywords: list[str] | None = None,
+    ) -> TrikInfo:
+        """Register a new trik in the registry."""
+        if not self.auth_token:
+            raise PermissionError("Not authenticated. Please run `trik login`")
+
+        json_data: dict[str, Any] = {"githubRepo": github_repo}
+        if name:
+            json_data["name"] = name
+        if description:
+            json_data["description"] = description
+        if categories:
+            json_data["categories"] = categories
+        if keywords:
+            json_data["keywords"] = keywords
+
+        result = await self._fetch("/api/v1/triks", method="POST", json_data=json_data)
+        return self._api_to_trik_info(result)
+
+    async def publish_version(
+        self,
+        full_name: str,
+        version: str,
+        git_tag: str,
+        commit_sha: str,
+        manifest: dict[str, Any],
+    ) -> TrikVersion:
+        """Publish a new version of a trik."""
+        if not self.auth_token:
+            raise PermissionError("Not authenticated. Please run `trik login`")
+
+        json_data = {
+            "version": version,
+            "gitTag": git_tag,
+            "commitSha": commit_sha,
+            "manifest": manifest,
+        }
+
+        result = await self._fetch(
+            f"/api/v1/triks/{full_name}/versions",
+            method="POST",
+            json_data=json_data,
+        )
+        return self._api_to_version(result)
 
 
 # Default registry client instance

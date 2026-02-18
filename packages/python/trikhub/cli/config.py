@@ -2,6 +2,7 @@
 Configuration management for TrikHub CLI.
 
 Manages the .trikhub/config.json file for tracking installed triks.
+Also handles global config at ~/.trikhub/config.json for auth tokens.
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,10 +23,28 @@ CONFIG_DIR = ".trikhub"
 CONFIG_FILE = "config.json"
 SECRETS_FILE = "secrets.json"
 
+# Global config directory (for auth tokens)
+GLOBAL_CONFIG_DIR = Path.home() / ".trikhub"
+GLOBAL_CONFIG_FILE = "config.json"
+
 
 # ============================================================================
 # Data Types
 # ============================================================================
+
+
+@dataclass
+class GlobalConfig:
+    """Global CLI configuration (auth tokens, settings).
+
+    Stored at ~/.trikhub/config.json. Matches JS TrikConfig type.
+    """
+
+    triks_directory: str = "~/.trikhub/triks"
+    analytics: bool = True
+    auth_token: str | None = None
+    auth_expires_at: str | None = None
+    publisher_username: str | None = None
 
 
 @dataclass
@@ -155,6 +175,76 @@ def is_trik_installed(package_name: str, base_dir: str | None = None) -> bool:
     """Check if a trik is in the config."""
     config = read_config(base_dir)
     return package_name in config.triks
+
+
+# ============================================================================
+# Global Config Management (for auth tokens)
+# ============================================================================
+
+
+def get_global_config_path() -> Path:
+    """Get the path to the global config file."""
+    return GLOBAL_CONFIG_DIR / GLOBAL_CONFIG_FILE
+
+
+def read_global_config() -> GlobalConfig:
+    """Read the global config from ~/.trikhub/config.json."""
+    config_path = get_global_config_path()
+
+    if not config_path.exists():
+        return GlobalConfig()
+
+    try:
+        content = config_path.read_text(encoding="utf-8")
+        data = json.loads(content)
+        return GlobalConfig(
+            triks_directory=data.get("triksDirectory", "~/.trikhub/triks"),
+            analytics=data.get("analytics", True),
+            auth_token=data.get("authToken"),
+            auth_expires_at=data.get("authExpiresAt"),
+            publisher_username=data.get("publisherUsername"),
+        )
+    except (json.JSONDecodeError, OSError):
+        return GlobalConfig()
+
+
+def write_global_config(config: GlobalConfig) -> None:
+    """Write the global config to ~/.trikhub/config.json."""
+    config_path = get_global_config_path()
+    config_dir = config_path.parent
+
+    # Ensure directory exists
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    # Build config dict (use camelCase to match JS)
+    data: dict[str, Any] = {
+        "triksDirectory": config.triks_directory,
+        "analytics": config.analytics,
+    }
+
+    # Only include auth fields if set
+    if config.auth_token:
+        data["authToken"] = config.auth_token
+    if config.auth_expires_at:
+        data["authExpiresAt"] = config.auth_expires_at
+    if config.publisher_username:
+        data["publisherUsername"] = config.publisher_username
+
+    config_path.write_text(
+        json.dumps(data, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def is_auth_expired(config: GlobalConfig) -> bool:
+    """Check if the auth token is expired."""
+    if not config.auth_expires_at:
+        return True
+    try:
+        expires_at = datetime.fromisoformat(config.auth_expires_at.replace("Z", "+00:00"))
+        return expires_at < datetime.now(expires_at.tzinfo)
+    except (ValueError, TypeError):
+        return True
 
 
 # ============================================================================
