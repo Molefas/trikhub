@@ -313,6 +313,13 @@ class PythonWorker:
                 "Missing action parameter",
             )
 
+        # Create storage proxy for this invocation
+        # The proxy sends requests to the gateway via stdout and receives responses via stdin
+        self._storage_proxy = StorageProxy(
+            send_request=self._send_storage_request,
+            receive_response=None,  # Responses handled via handle_response()
+        )
+
         try:
             # Load the trik
             graph = self._trik_loader.load(trik_path)
@@ -329,9 +336,8 @@ class PythonWorker:
             if "config" in params:
                 trik_input["config"] = params["config"]
 
-            # Create storage proxy if needed
-            if self._storage_proxy:
-                trik_input["storage"] = self._storage_proxy
+            # Add storage proxy to input
+            trik_input["storage"] = self._storage_proxy
 
             # Execute the trik
             if asyncio.iscoroutinefunction(graph.invoke):
@@ -353,6 +359,8 @@ class PythonWorker:
                 WorkerErrorCodes.INTERNAL_ERROR,
                 f"Execution error: {e}",
             )
+        finally:
+            self._storage_proxy = None
 
     async def _write_response(self, response: JsonRpcResponse) -> None:
         """Write a response to stdout."""
@@ -362,10 +370,11 @@ class PythonWorker:
             sys.stdout.flush()
 
     async def _send_storage_request(self, request: JsonRpcRequest) -> None:
-        """Send a storage request to the gateway."""
-        await self._write_response(
-            JsonRpcResponse(id=request.id, result=None)  # Placeholder
-        )
+        """Send a storage request to the gateway via stdout."""
+        async with self._write_lock:
+            line = request.to_json() + "\n"
+            sys.stdout.write(line)
+            sys.stdout.flush()
 
 
 def run_worker() -> None:

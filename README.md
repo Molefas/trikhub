@@ -62,11 +62,11 @@ The agent reasons over safe, structured data. Untrusted content bypasses the age
 
 | Package | Description |
 |---------|-------------|
-| [@trikhub/gateway](packages/trik-gateway) | Core runtime - loads and executes triks, validates outputs |
-| [@trikhub/server](packages/trik-server) | HTTP server for language-agnostic integration |
-| [@trikhub/manifest](packages/trik-manifest) | TypeScript types and JSON Schema validation |
-| [@trikhub/linter](packages/trik-linter) | Static analysis for trik security |
-| [@trikhub/cli](packages/trik-cli) | CLI for installing and publishing triks |
+| [@trikhub/gateway](packages/js/gateway) | Core runtime - loads and executes triks, validates outputs |
+| [@trikhub/server](packages/js/server) | HTTP server for language-agnostic integration |
+| [@trikhub/manifest](packages/js/manifest) | TypeScript types and JSON Schema validation |
+| [@trikhub/linter](packages/js/linter) | Static analysis for trik security |
+| [@trikhub/cli](packages/js/cli) | CLI for installing and publishing triks |
 
 ## Quick Start
 
@@ -103,6 +103,27 @@ Agent: I found 3 articles about AI.
 You: Show me the first one
 [Article content delivered directly - agent never sees it]
 ```
+
+## Persistent Storage
+
+Triks can store data that persists across sessions:
+
+```typescript
+const value = await context.storage.get("user-preference");
+await context.storage.set("last-run", Date.now());
+```
+
+Enable in manifest:
+
+```json
+{
+  "capabilities": {
+    "storage": { "enabled": true }
+  }
+}
+```
+
+Data is stored at `~/.trikhub/storage/@scope/trik-name/`. See [Storage documentation](https://trikhub.com/docs/concepts/storage) for details.
 
 ## Examples
 
