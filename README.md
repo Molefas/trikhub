@@ -123,8 +123,8 @@ Get hands-on with the playground examples:
 
 | Example | Description |
 |---------|-------------|
-| [local-playground [Typescript]](examples/[js/js]/local-playground) | TypeScript agent with in-process gateway |
-| [local-playground [Python]](examples/[js/python]/local-playground) | Python agent with in-process gateway |
+| [local-playground [Typescript]](examples/js/local-playground) | TypeScript agent with in-process gateway |
+| [local-playground [Python]](examples/python/local-playground) | Python agent with in-process gateway |
 
 ## Documentation
 
