@@ -244,7 +244,10 @@ async function main() {
   console.log("Loading triks...\n");
 
   // Initialize agent with triks
-  const { graph, loadedTriks, tools, gateway } = await initializeAgentWithTriks();
+  const { graph, loadedTriks, tools, gateway, provider } = await initializeAgentWithTriks();
+
+  // Show LLM provider info
+  console.log(`LLM: ${provider.provider} (${provider.model})`);
 
   // Show config status for loaded triks
   if (loadedTriks.length > 0 && gateway) {

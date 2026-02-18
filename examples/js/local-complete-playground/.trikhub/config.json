@@ -1,5 +1,0 @@
-{
-  "registryUrl": "https://trikhub.dev",
-  "triksDirectory": "~/.trikhub/triks",
-  "triks": ["@demo/notes"]
-}
