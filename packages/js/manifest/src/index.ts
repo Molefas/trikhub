@@ -53,4 +53,9 @@ export {
   createValidator,
   SchemaValidator,
   type ValidationResult,
+  // Security validation utilities
+  ALLOWED_STRING_FORMATS,
+  isConstrainedString,
+  findUnconstrainedStrings,
+  validateAgentDataSecurity,
 } from './validator.js';
