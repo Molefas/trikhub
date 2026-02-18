@@ -23,7 +23,7 @@ from trikhub.gateway.config_store import (
 
 from trikhub.gateway.storage_provider import (
     StorageProvider,
-    JsonFileStorageProvider,
+    SqliteStorageProvider,
     InMemoryStorageProvider,
     TrikStorageContext,
 )
@@ -64,7 +64,7 @@ __all__ = [
     "ConfigStoreOptions",
     # Storage Provider
     "StorageProvider",
-    "JsonFileStorageProvider",
+    "SqliteStorageProvider",
     "InMemoryStorageProvider",
     "TrikStorageContext",
     # Gateway

@@ -107,7 +107,7 @@ async def load_triks(
         result = await load_langchain_triks(
             LoadLangChainTriksOptions(
                 on_passthrough=on_passthrough,
-                debug=False,
+                debug=True,
             )
         )
 
