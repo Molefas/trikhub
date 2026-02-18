@@ -1,71 +1,56 @@
-# Python Local Playground
+# TrikHub Local Playground (Python)
 
-A real-world example of integrating TrikHub with a LangGraph-based AI agent in Python.
+This demo is meant to simulate an existing LangGraph Agent ready to consume Triks and the process of finding, installing and running these.
 
-This example mirrors the [JS Local Playground](../../js/local-playground/) but uses Python and LangGraph instead of TypeScript and LangChain.
+## Disclaimer
+
+There is a significant portion of boilerplate that would ideally not be added to the main Agent, however, I needed to make sure that the basic example is ready to run with one command AND that it supports the main LLMs (OpenAI, Anthropic and Google).
 
 ## What You'll Learn
 
-1. **LangGraph Agent Architecture** - How to build a reactive agent with tool calling
-2. **TrikHub Integration** - Loading and executing triks from a LangGraph agent
-3. **Multi-Provider LLM** - Auto-detecting and using Anthropic, OpenAI, or Google
-4. **Passthrough Content** - Handling direct-to-user content from triks
-5. **Session Management** - Multi-turn conversations with trik state
+- How to load triks using `trikhub` and exposing env variables to them
+- How template responses keep agents safe from prompt injection
+- How passthrough content is delivered directly to users
+- How to expose Environment variables per Trik
+- How to interact with persistent storage
 
 ## Architecture
 
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                         CLI Interface                            │
-│                          (cli.py)                                │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      LangGraph Agent                             │
-│                        (agent.py)                                │
-│  ┌─────────────┐     ┌──────────────┐     ┌─────────────────┐  │
-│  │   Agent     │────▶│  Should      │────▶│    ToolNode     │  │
-│  │   Node      │     │  Continue?   │     │                 │  │
-│  └─────────────┘     └──────────────┘     └─────────────────┘  │
-│         │                                          │            │
-│         └──────────────────────────────────────────┘            │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                         Tools Layer                              │
-│                        (tools.py)                                │
-│  ┌─────────────────┐          ┌────────────────────────────┐   │
-│  │  Built-in Tools │          │      TrikHub Tools         │   │
-│  │  - get_weather  │          │  (via LangChain Adapter)   │   │
-│  │  - calculate    │          │  - article_search:search   │   │
-│  │  - search_web   │          │  - article_search:details  │   │
-│  └─────────────────┘          │  - article_search:list     │   │
-│                               └────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      TrikHub Gateway                             │
-│             (packages/python/trikhub/gateway)                    │
-│  ┌────────────────────────────────────────────────────────────┐ │
-│  │                     Python Triks                            │ │
-│  │              (native Python execution)                      │ │
-│  └────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
 ```
+┌─────────────────────────────────────────────────────────┐
+│                     Python Process                      │
+│  ┌──────────────┐    ┌──────────────┐    ┌───────────┐  │
+│  │   CLI (You)  │◄──►│  LangGraph   │◄──►│  Gateway  │  │
+│  │              │    │    Agent     │    │  (triks)  │  │
+│  └──────────────┘    └──────────────┘    └───────────┘  │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Why in-process?** Fastest option for Python agents. No network latency, no separate server to manage.
 
 ## Prerequisites
 
 - Python 3.10+
-- At least one LLM API key (Anthropic, OpenAI, or Google)
+- pip
+- OpenAI / Anthropic / Google API key
 
 ## Quick Start
 
-### 1. Install Dependencies
+**1. Install dependencies**
+
+From the monorepo root:
+
+## Clone the repository
 
 ```bash
+git clone https://github.com/molefas/trikhub.git
+cd trikhub
+```
+
+## Setup
+
+```bash
+# Navigate to the example
 cd examples/python/local-playground
 
 # Create and activate virtual environment (recommended)
@@ -77,148 +62,154 @@ pip install -e ../../../packages/python
 
 # Install example dependencies
 pip install -r requirements.txt
-```
 
-### 2. Configure Environment
+# Provide an LLM key to the main Agent
+cp .env.example .env
+# Edit .env and add your LLM's API KEY
+```
 
 ```bash
-cp .env.example .env
-# Edit .env and add your API key
+# Provide an LLM key to the Trik Agent
+cd .trikhub
+cp secrets.json.example secrets.json
+# Edit secrets.json with your LLM's API KEY
 ```
 
-### 3. Run the Agent
+**3. Run the agent**
 
 ```bash
 python cli.py
 ```
 
-## Example Conversation
+You should see:
 
-```text
-You: search for articles about AI
-Assistant: I found 2 articles about AI. Would you like me to list them?
-
-You: list them
---- Direct Content (article-list) ---
-1. **The Rise of Artificial Intelligence**
-   AI is transforming industries from healthcare to finance...
-
-2. **Machine Learning in Practice**
-   Practical applications of ML are everywhere...
---- End ---
-
-You: show me the first one
---- Direct Content (article) ---
-# The Rise of Artificial Intelligence
-
-AI is transforming industries from healthcare to finance...
-
-[Full article content displayed directly to user]
---- End ---
 ```
+[TrikGateway] No config file found at /../config.json
+[Triks] No triks configured
+LLM: ... // Your LLM if you've added the details on the .env
+Built-in tools: get_weather, calculate, search_web
+Total tools: 3
+Type "/tools" to list all, "exit" to quit.
+
+You:
+```
+
+## Try It Out
+
+### Built-in Tools
+
+```
+You: Can you tell me the weather in Lisbon, Portugal?
+Agent: The weather in Lisbon is currently rainy with a temperature of 30°C (86 F). It's quite warm despite the rain!
+```
+
+### Install new Triks
+
+You can now search and install existing Triks to test.
+
+```bash
+# This will help you find triks by keywords
+trik search {keyword}
+
+# Install these
+trik install @[org]/[trik-name]
+
+# Restart the CLI
+python cli.py
+```
+
+I've shipped a few basic Triks for this example:
+
+```bash
+# A Python Trik to test cross-env execution
+@molefas/trik-article-search-py
+
+# A basic Trik to test persistent storage through SQLite
+@molefas/trik-demo-notes
+```
+
+You can find more details on how to interact with each Trik in their documentations.
+Find more about these on [Trikhub.com](https://trikhub.com).
+
+## How It Works
+
+### Template Mode (Safe for Agent)
+
+```
+Trik returns: { template: "success", count: 3 }
+Agent sees:   "I found 3 articles about AI."
+```
+
+The agent only sees structured data (enums, numbers, IDs) - never free-form text that could contain prompt injection.
+
+### Passthrough Mode (Direct to User)
+
+```
+Trik returns: { content: "# Article Title\n\nFull article text..." }
+Agent sees:   "[Content delivered directly]"
+You see:      The full article
+```
+
+Content that might contain untrusted text bypasses the agent entirely.
+
+### Session State
+
+Triks remember context. When you say "the healthcare one", the trik resolves this reference using the history of your conversation.
 
 ## Project Structure
 
-```text
-examples/python/local-playground/
-├── cli.py              # REPL interface (entry point)
-├── agent.py            # LangGraph StateGraph setup
-├── tools.py            # Built-in tools + trik loading
-├── llm_factory.py      # Multi-provider LLM factory
-├── requirements.txt    # Python dependencies
-├── .env.example        # Environment template
-├── .trikhub/
-│   └── config.json     # Trik configuration
-└── README.md           # This file
 ```
-
-## Key Concepts
-
-### Passthrough Content
-
-When a trik returns `responseMode: "passthrough"`, the content bypasses the agent and goes directly to the user. This is useful for:
-
-- Large content (articles, documents)
-- Sensitive data that shouldn't be processed by the LLM
-- Rich content formats (markdown, HTML)
-
-### Template Responses
-
-When a trik returns `responseMode: "template"`, the agent receives structured data it can use to formulate a response. This is useful for:
-
-- Search results (IDs only, not full content)
-- Status information
-- Metadata the agent can act on
-
-### Session Management
-
-Triks can maintain state across multiple calls using sessions. The LangChain adapter handles this automatically, storing session IDs per trik.
+local-playground/
+├── src/
+│   ├── cli.py          # Interactive REPL
+│   ├── agent.py        # LangGraph workflow with validation
+│   ├── tools.py        # Built-in tools + trik loader
+│   └── llm_factory.py  # LangGraph Model selection based on key provided
+├── .trikhub/
+│   └── config.json     # Installed triks (once there are Triks installed)
+│   └── secrets.json    # Secrets segregation per Trik
+├── .env.example        # Environment template
+├── requirements.txt
+└── langgraph.json
+```
 
 ## Troubleshooting
 
-### "No API key found"
+**"No API key found"**
 
-Make sure you have set at least one API key in your `.env` file:
+→ Copy `.env.example` to `.env` and add your key
 
-```bash
-ANTHROPIC_API_KEY=sk-ant-...
-# or
-OPENAI_API_KEY=sk-...
-# or
-GOOGLE_API_KEY=...
-```
+**Trik not loading**
 
-### "No triks loaded"
+→ Check `.trikhub/config.json` has the trik listed
+→ If you're running JavaScript Triks you need to have Node.js 18+ installed (see below)
 
-Check that:
+**Import errors**
 
-1. The `.trikhub/config.json` file exists and lists the trik package name
-2. The trik is installed via pip (`pip install -r requirements.txt`)
-
-### Import errors
-
-Make sure you've installed the TrikHub SDK:
-
-```bash
-pip install -e ../../../packages/python
-```
-
-## Installing Triks
-
-Triks are installed as Python packages from GitHub or PyPI:
-
-```bash
-# In requirements.txt
-trik-article-search-py @ git+https://github.com/Molefas/trik-article-search-py
-```
-
-Then reference the package name in `.trikhub/config.json`:
-
-```json
-{
-  "triks": [
-    "trik-article-search-py"
-  ]
-}
-```
-
-The gateway resolves the package from your Python environment and loads the manifest.
+→ Make sure you've installed the TrikHub SDK: `pip install -e ../../../packages/python`
 
 ## Using JavaScript Triks
 
 The Python gateway can execute JavaScript triks through a Node.js worker subprocess. This allows you to use triks written in either language from a single agent.
 
-### Adding a JavaScript Trik
+### Installing a JavaScript Trik
 
 1. Ensure Node.js 18+ is installed
-2. Install the JS trik as a pip package (triks are published to both npm and pip):
+2. Install the JS trik using the CLI:
 
    ```bash
-   # In requirements.txt
+   trik install @molefas/trik-article-search
+   ```
+
+   Or manually add it to your `requirements.txt` and `.trikhub/config.json`:
+
+   **requirements.txt:**
+
+   ```
    trik-article-search @ git+https://github.com/Molefas/trik-article-search
    ```
 
-3. Add to your `.trikhub/config.json`:
+   **.trikhub/config.json:**
 
    ```json
    {
@@ -229,7 +220,8 @@ The Python gateway can execute JavaScript triks through a Node.js worker subproc
    }
    ```
 
-4. The gateway automatically detects JS triks by their `runtime: "node"` manifest entry and uses the Node.js worker
+3. Run `pip install -r requirements.txt` to fetch the packages
+4. The gateway automatically detects JavaScript triks by their `runtime: "node"` manifest entry and uses the Node.js worker
 
 ### Node.js Worker
 
@@ -241,7 +233,6 @@ When the gateway loads a JavaScript trik, it:
 
 This means you can mix Python and JavaScript triks in the same agent seamlessly.
 
-## Related Examples
-
-- [JS Local Playground](../../js/local-playground/) - Same example in TypeScript
-- [Python Playground](../playground/) - Low-level gateway test harness
+## Next Steps
+- [Check our docs](https://trikhub.com/docs)
+- [Try the JS local playground](../../js/local-playground) - Same concepts in JavaScript
