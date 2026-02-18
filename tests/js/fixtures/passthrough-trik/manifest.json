@@ -1,4 +1,5 @@
 {
+  "schemaVersion": 1,
   "id": "passthrough-trik",
   "name": "Passthrough Test Trik",
   "description": "A test trik for passthrough mode",
@@ -26,17 +27,14 @@
   },
   "capabilities": {
     "tools": [],
-    "canRequestClarification": false,
     "session": {
       "enabled": true,
       "maxDurationMs": 3600000,
-      "maxHistoryLength": 50
+      "maxHistoryEntries": 50
     }
   },
   "limits": {
-    "maxExecutionTimeMs": 30000,
-    "maxLlmCalls": 5,
-    "maxToolCalls": 10
+    "maxExecutionTimeMs": 30000
   },
   "entry": {
     "module": "./graph.js",

@@ -72,13 +72,22 @@ export interface TrikConfig {
  * Trik capabilities declared in manifest
  */
 export interface TrikCapabilities {
-  /** List of tool names this trik uses */
+  /**
+   * List of tool names this trik uses.
+   * @enforcement declarative - Used for registry search and tooling, not enforced at runtime
+   */
   tools: string[];
-  /** Whether trik can request clarification from user */
-  canRequestClarification: boolean;
-  /** Session capabilities for multi-turn conversations */
+
+  /**
+   * Session capabilities for multi-turn conversations.
+   * @enforcement enforced - Gateway creates/manages sessions based on these settings
+   */
   session?: SessionCapabilities;
-  /** Storage capabilities for persistent data */
+
+  /**
+   * Storage capabilities for persistent data.
+   * @enforcement enforced - Gateway provides storage context and enforces quotas
+   */
   storage?: StorageCapabilities;
 }
 
@@ -86,12 +95,11 @@ export interface TrikCapabilities {
  * Resource limits for trik execution
  */
 export interface TrikLimits {
-  /** Maximum execution time in milliseconds */
+  /**
+   * Maximum execution time in milliseconds.
+   * @enforcement enforced - Gateway aborts execution after this timeout
+   */
   maxExecutionTimeMs: number;
-  /** Maximum number of LLM calls allowed */
-  maxLlmCalls: number;
-  /** Maximum number of tool calls allowed */
-  maxToolCalls: number;
 }
 
 /**
@@ -299,6 +307,12 @@ export interface ActionDefinition {
  * Triks define actions with type-directed privilege separation.
  */
 export interface TrikManifest {
+  /**
+   * Schema version for migration support.
+   * Current version: 1
+   */
+  schemaVersion: 1;
+
   /** Unique identifier for the trik */
   id: string;
   /** Human-readable name */

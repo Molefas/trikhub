@@ -11,6 +11,7 @@ describe('trik-manifest', () => {
     // Proves: Well-formed manifests with actions pass validation
     it('should validate a complete manifest', () => {
       const manifest: TrikManifest = {
+        schemaVersion: 1,
         id: 'test-trik',
         name: 'Test Trik',
         description: 'A test trik',
@@ -23,8 +24,8 @@ describe('trik-manifest', () => {
             responseTemplates: { success: { text: 'Found {{count}} results' } },
           },
         },
-        capabilities: { tools: [], canRequestClarification: false },
-        limits: { maxExecutionTimeMs: 30000, maxLlmCalls: 5, maxToolCalls: 10 },
+        capabilities: { tools: [] },
+        limits: { maxExecutionTimeMs: 30000 },
         entry: { module: './graph.js', export: 'default' },
       };
 
@@ -48,6 +49,7 @@ describe('trik-manifest', () => {
     // Proves: Version format is validated (prevents malformed manifests)
     it('should reject manifest with invalid version format', () => {
       const manifest = {
+        schemaVersion: 1,
         id: 'test-trik',
         name: 'Test',
         description: 'Test',
@@ -60,8 +62,8 @@ describe('trik-manifest', () => {
             responseTemplates: { success: { text: 'Done' } },
           },
         },
-        capabilities: { tools: [], canRequestClarification: false },
-        limits: { maxExecutionTimeMs: 30000, maxLlmCalls: 5, maxToolCalls: 10 },
+        capabilities: { tools: [] },
+        limits: { maxExecutionTimeMs: 30000 },
         entry: { module: './graph.js', export: 'default' },
       };
 
@@ -72,6 +74,7 @@ describe('trik-manifest', () => {
     // Proves: Template mode requires agentDataSchema and responseTemplates
     it('should reject template mode action without agentDataSchema', () => {
       const manifest = {
+        schemaVersion: 1,
         id: 'test-trik',
         name: 'Test',
         description: 'Test',
@@ -83,8 +86,8 @@ describe('trik-manifest', () => {
             // Missing agentDataSchema and responseTemplates
           },
         },
-        capabilities: { tools: [], canRequestClarification: false },
-        limits: { maxExecutionTimeMs: 30000, maxLlmCalls: 5, maxToolCalls: 10 },
+        capabilities: { tools: [] },
+        limits: { maxExecutionTimeMs: 30000 },
         entry: { module: './graph.js', export: 'default' },
       };
 
@@ -95,6 +98,7 @@ describe('trik-manifest', () => {
     // Proves: Passthrough mode requires userContentSchema
     it('should reject passthrough mode action without userContentSchema', () => {
       const manifest = {
+        schemaVersion: 1,
         id: 'test-trik',
         name: 'Test',
         description: 'Test',
@@ -106,8 +110,8 @@ describe('trik-manifest', () => {
             // Missing userContentSchema
           },
         },
-        capabilities: { tools: [], canRequestClarification: false },
-        limits: { maxExecutionTimeMs: 30000, maxLlmCalls: 5, maxToolCalls: 10 },
+        capabilities: { tools: [] },
+        limits: { maxExecutionTimeMs: 30000 },
         entry: { module: './graph.js', export: 'default' },
       };
 
@@ -118,6 +122,7 @@ describe('trik-manifest', () => {
     // Proves: Valid passthrough mode manifest passes
     it('should validate passthrough mode action with userContentSchema', () => {
       const manifest = {
+        schemaVersion: 1,
         id: 'test-trik',
         name: 'Test',
         description: 'Test',
@@ -135,8 +140,8 @@ describe('trik-manifest', () => {
             },
           },
         },
-        capabilities: { tools: [], canRequestClarification: false },
-        limits: { maxExecutionTimeMs: 30000, maxLlmCalls: 5, maxToolCalls: 10 },
+        capabilities: { tools: [] },
+        limits: { maxExecutionTimeMs: 30000 },
         entry: { module: './graph.js', export: 'default' },
       };
 
