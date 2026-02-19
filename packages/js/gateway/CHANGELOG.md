@@ -1,5 +1,12 @@
 # @saaas-sdk/gateway
 
+## 0.9.0
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @trikhub/manifest@0.9.0
+
 ## 0.7.0
 
 ### Minor Changes
