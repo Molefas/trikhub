@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@inquirer/prompts": "^7.2.1",
+    "@trikhub/linter": "workspace:*",
     "@trikhub/manifest": "workspace:*",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
