@@ -1,9 +1,16 @@
 #!/usr/bin/env node
+/**
+ * CLI entry point for trik-server
+ *
+ * This is a thin wrapper around TrikServer that:
+ * - Parses command line arguments
+ * - Loads configuration from environment variables
+ * - Starts the server with signal handlers
+ */
+
 import { createRequire } from 'node:module';
+import { TrikServer } from './trik-server.js';
 import { loadConfig } from './config.js';
-import { SkillLoader } from './services/skill-loader.js';
-import { createServer } from './server.js';
-import type { FastifyInstance } from 'fastify';
 
 const require = createRequire(import.meta.url);
 const pkg = require('../package.json');
@@ -42,6 +49,7 @@ Examples:
 API Endpoints:
   GET  /api/v1/health      Health check
   GET  /api/v1/tools       List available tools
+  GET  /api/v1/triks       List installed triks
   POST /api/v1/execute     Execute a skill action
   GET  /api/v1/content/:ref  Retrieve passthrough content
   GET  /docs               Swagger UI documentation
@@ -50,26 +58,6 @@ API Endpoints:
 
 function printVersion(): void {
   console.log(`trik-server v${pkg.version}`);
-}
-
-let server: FastifyInstance | null = null;
-let isShuttingDown = false;
-
-async function shutdown(signal: string): Promise<void> {
-  if (isShuttingDown) return;
-  isShuttingDown = true;
-
-  if (server) {
-    server.log.info({ signal }, 'Received shutdown signal, closing server...');
-    try {
-      await server.close();
-      server.log.info('Server closed gracefully');
-    } catch (err) {
-      server.log.error({ err }, 'Error during shutdown');
-      process.exit(1);
-    }
-  }
-  process.exit(0);
 }
 
 async function main(): Promise<void> {
@@ -85,59 +73,30 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  // Load config from environment variables
   const config = loadConfig();
 
-  // Initialize skill loader
-  const skillLoader = new SkillLoader({
-    skillsDirectory: config.skillsDirectory,
+  // Create server with config
+  const server = new TrikServer({
+    port: config.port,
+    host: config.host,
     configPath: config.configPath,
-    lintBeforeLoad: config.lintOnLoad,
+    skillsDirectory: config.skillsDirectory,
+    authToken: config.authToken,
+    logLevel: config.logLevel,
+    lintOnLoad: config.lintOnLoad,
     lintWarningsAsErrors: config.lintWarningsAsErrors,
     allowedSkills: config.allowedSkills,
   });
 
-  // Create server first so we can use its logger
-  const gateway = skillLoader.getGateway();
-  server = await createServer(config, gateway);
-  const log = server.log;
+  // Register signal handlers for graceful shutdown
+  server.registerSignalHandlers();
 
-  log.info(
-    {
-      skillsDirectory: config.skillsDirectory,
-      configPath: config.configPath || '(none)',
-      lintOnLoad: config.lintOnLoad,
-      auth: config.authToken ? 'enabled' : 'disabled',
-    },
-    'Starting trik-server'
-  );
-
-  // Load skills at startup
-  log.info('Discovering skills...');
-  const loadResult = await skillLoader.discoverAndLoad();
-
-  log.info({ loaded: loadResult.loaded, failed: loadResult.failed }, 'Skills discovery complete');
-  for (const skill of loadResult.skills) {
-    if (skill.status === 'loaded') {
-      log.info({ skillId: skill.skillId }, 'Skill loaded');
-    } else {
-      log.warn({ skillId: skill.skillId, path: skill.path, error: skill.error }, 'Skill failed to load');
-    }
-  }
-
-  // Register shutdown handlers
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
-
-  // Start listening
-  await server.listen({ port: config.port, host: config.host });
-  log.info({ url: `http://${config.host}:${config.port}` }, 'Server listening');
+  // Initialize and start
+  await server.run();
 }
 
 main().catch((err) => {
-  if (server) {
-    server.log.fatal({ err }, 'Fatal error');
-  } else {
-    console.error('[trik-server] Fatal error:', err);
-  }
+  console.error('[trik-server] Fatal error:', err);
   process.exit(1);
 });
