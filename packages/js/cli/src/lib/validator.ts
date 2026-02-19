@@ -1,9 +1,18 @@
 /**
- * Trik Validator
+ * @deprecated Use @trikhub/linter instead.
  *
- * Validates downloaded triks before installation.
- * This is a lightweight validator for the CLI - the full linter
- * is available in @saaas-sdk/linter for skill development.
+ * This validator is deprecated and no longer used by the CLI.
+ * All validation is now centralized in @trikhub/linter which provides:
+ * - Support for both Node.js and Python package structures
+ * - Consistent validation between `trik lint` and `trik publish`
+ * - Full manifest schema validation via @trikhub/manifest
+ *
+ * Migration:
+ *   import { TrikLinter } from '@trikhub/linter';
+ *   const linter = new TrikLinter({ checkCompiledEntry: true });
+ *   const results = await linter.lintManifestOnly(trikPath);
+ *
+ * This file will be removed in a future version.
  */
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -11,7 +20,7 @@ import { join } from 'node:path';
 import { findUnconstrainedStrings, type JSONSchema } from '@trikhub/manifest';
 
 /**
- * Validation result
+ * @deprecated Use LintResult[] from @trikhub/linter instead.
  */
 export interface ValidationResult {
   valid: boolean;
@@ -52,7 +61,7 @@ interface TrikAction {
 
 
 /**
- * Validate a trik at the given path
+ * @deprecated Use TrikLinter.lintManifestOnly() from @trikhub/linter instead.
  */
 export function validateTrik(trikPath: string): ValidationResult {
   const errors: string[] = [];
@@ -159,7 +168,7 @@ export function validateTrik(trikPath: string): ValidationResult {
 }
 
 /**
- * Format validation result for display
+ * @deprecated Use TrikLinter.formatResults() from @trikhub/linter instead.
  */
 export function formatValidationResult(result: ValidationResult): string {
   const lines: string[] = [];

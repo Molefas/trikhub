@@ -15,8 +15,11 @@ import { infoCommand } from './commands/info.js';
 import { uninstallCommand } from './commands/uninstall.js';
 import { loginCommand, logoutCommand, whoamiCommand } from './commands/login.js';
 import { publishCommand } from './commands/publish.js';
+import { unpublishCommand } from './commands/unpublish.js';
 import { upgradeCommand, upgradeAllCommand } from './commands/upgrade.js';
 import { syncCommand } from './commands/sync.js';
+import { initCommand } from './commands/init.js';
+import { lintCommand } from './commands/lint.js';
 
 // Read version from package.json
 const require = createRequire(import.meta.url);
@@ -102,6 +105,12 @@ program
   .option('-t, --tag <version>', 'Version tag (default: from manifest)')
   .action(publishCommand);
 
+// Unpublish command
+program
+  .command('unpublish <trik>')
+  .description('Permanently remove a trik from the registry')
+  .action(unpublishCommand);
+
 // Upgrade command
 program
   .command('upgrade [trik]')
@@ -124,8 +133,21 @@ program
   .option('-j, --json', 'Output as JSON')
   .action(syncCommand);
 
+// Init command
+program
+  .command('init <language>')
+  .description('Initialize a new trik project (ts or py)')
+  .action(initCommand);
+
+// Lint command
+program
+  .command('lint <path>')
+  .description('Validate a trik for security and correctness')
+  .option('--warnings-as-errors', 'Treat warnings as errors')
+  .option('--skip <rule>', 'Skip a specific rule (can be repeated)', (val, prev: string[]) => [...prev, val], [])
+  .action(lintCommand);
+
 // TODO: Add more commands
-// program.command('init').description('Initialize a new trik project');
 // program.command('outdated').description('Check for outdated triks');
 
 program.parse();

@@ -1,5 +1,6 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir, access } from 'node:fs/promises';
 import { join, extname } from 'node:path';
+import { constants } from 'node:fs';
 import ts from 'typescript';
 import {
   type TrikManifest,
@@ -18,6 +19,74 @@ import {
   checkDefaultTemplateRecommended,
 } from './rules.js';
 
+type PackageType = 'node' | 'python';
+
+interface ManifestLocation {
+  /** Full path to manifest.json */
+  manifestPath: string;
+  /** Directory containing manifest.json (for resolving entry points) */
+  manifestDir: string;
+  /** Package type (node or python) */
+  packageType: PackageType;
+}
+
+/**
+ * Check if a file exists
+ */
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await access(path, constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Find the manifest.json file in a trik repository
+ *
+ * Node.js packages: manifest.json at root
+ * Python packages: manifest.json inside package subdirectory
+ */
+async function findManifestPath(repoDir: string): Promise<ManifestLocation | null> {
+  // First, check for manifest.json at root (Node.js pattern)
+  const rootManifest = join(repoDir, 'manifest.json');
+  if (await fileExists(rootManifest)) {
+    return {
+      manifestPath: rootManifest,
+      manifestDir: repoDir,
+      packageType: 'node',
+    };
+  }
+
+  // Check if this is a Python package (has pyproject.toml or setup.py)
+  const hasPyproject = await fileExists(join(repoDir, 'pyproject.toml'));
+  const hasSetupPy = await fileExists(join(repoDir, 'setup.py'));
+
+  if (hasPyproject || hasSetupPy) {
+    // Python package: search subdirectories for manifest.json
+    try {
+      const entries = await readdir(repoDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory() && !entry.name.startsWith('.') && !entry.name.startsWith('_')) {
+          const subManifest = join(repoDir, entry.name, 'manifest.json');
+          if (await fileExists(subManifest)) {
+            return {
+              manifestPath: subManifest,
+              manifestDir: join(repoDir, entry.name),
+              packageType: 'python',
+            };
+          }
+        }
+      }
+    } catch {
+      // Directory read failed
+    }
+  }
+
+  return null;
+}
+
 /**
  * Linter configuration
  */
@@ -28,7 +97,12 @@ export interface LinterConfig {
   skipRules?: string[];
   /** Treat warnings as errors */
   warningsAsErrors?: boolean;
+  /** Check that compiled entry point exists - used for publish validation */
+  checkCompiledEntry?: boolean;
 }
+
+// Re-export for use by CLI
+export { findManifestPath, type ManifestLocation, type PackageType };
 
 /**
  * Linter for trik validation
@@ -48,10 +122,9 @@ export class TrikLinter {
   }
 
   /**
-   * Load and parse the manifest
+   * Load and parse the manifest from a specific path
    */
-  private async loadManifest(trikPath: string): Promise<TrikManifest> {
-    const manifestPath = join(trikPath, 'manifest.json');
+  private async loadManifestFromPath(manifestPath: string): Promise<TrikManifest> {
     const content = await readFile(manifestPath, 'utf-8');
     const data = JSON.parse(content);
 
@@ -105,12 +178,25 @@ export class TrikLinter {
    */
   async lintManifestOnly(trikPath: string): Promise<LintResult[]> {
     const results: LintResult[] = [];
-    const manifestPath = join(trikPath, 'manifest.json');
+
+    // Find manifest (supports both Node.js and Python package structures)
+    const location = await findManifestPath(trikPath);
+    if (!location) {
+      results.push({
+        rule: 'valid-manifest',
+        severity: 'error',
+        message: 'No manifest.json found. For Node.js triks, place it at root. For Python triks, place it inside your package directory.',
+        file: trikPath,
+      });
+      return results;
+    }
+
+    const { manifestPath, manifestDir } = location;
 
     // 1. Load and validate manifest
     let manifest: TrikManifest;
     try {
-      manifest = await this.loadManifest(trikPath);
+      manifest = await this.loadManifestFromPath(manifestPath);
     } catch (error) {
       results.push({
         rule: 'valid-manifest',
@@ -126,7 +212,20 @@ export class TrikLinter {
 
     // 3. Check manifest completeness
     if (!this.shouldSkipRule('manifest-completeness')) {
-      results.push(...this.checkManifestCompleteness(manifest, trikPath));
+      results.push(...this.checkManifestCompleteness(manifest, manifestDir));
+    }
+
+    // 4. Check compiled entry point exists (for publish validation)
+    if (this.config.checkCompiledEntry) {
+      const entryPath = join(manifestDir, manifest.entry.module);
+      if (!(await fileExists(entryPath))) {
+        results.push({
+          rule: 'entry-point-exists',
+          severity: 'error',
+          message: `Entry point not found: ${manifest.entry.module}`,
+          file: manifestDir,
+        });
+      }
     }
 
     // Apply warningsAsErrors if configured
@@ -146,12 +245,25 @@ export class TrikLinter {
    */
   async lint(trikPath: string): Promise<LintResult[]> {
     const results: LintResult[] = [];
-    const manifestPath = join(trikPath, 'manifest.json');
+
+    // Find manifest (supports both Node.js and Python package structures)
+    const location = await findManifestPath(trikPath);
+    if (!location) {
+      results.push({
+        rule: 'valid-manifest',
+        severity: 'error',
+        message: 'No manifest.json found. For Node.js triks, place it at root. For Python triks, place it inside your package directory.',
+        file: trikPath,
+      });
+      return results;
+    }
+
+    const { manifestPath, manifestDir, packageType } = location;
 
     // 1. Load and validate manifest
     let manifest: TrikManifest;
     try {
-      manifest = await this.loadManifest(trikPath);
+      manifest = await this.loadManifestFromPath(manifestPath);
     } catch (error) {
       results.push({
         rule: 'valid-manifest',
@@ -167,10 +279,35 @@ export class TrikLinter {
 
     // 3. Check manifest completeness
     if (!this.shouldSkipRule('manifest-completeness')) {
-      results.push(...this.checkManifestCompleteness(manifest, trikPath));
+      results.push(...this.checkManifestCompleteness(manifest, manifestDir));
     }
 
-    // 4. Find and analyze source files
+    // 4. For Python packages, skip TypeScript source analysis
+    if (packageType === 'python') {
+      // Check entry point exists
+      const entryPath = join(manifestDir, manifest.entry.module);
+      if (!(await fileExists(entryPath))) {
+        results.push({
+          rule: 'entry-point-exists',
+          severity: 'error',
+          message: `Entry point "${manifest.entry.module}" not found`,
+          file: manifestDir,
+        });
+      }
+
+      // Apply warningsAsErrors if configured
+      if (this.config.warningsAsErrors) {
+        for (const result of results) {
+          if (result.severity === 'warning') {
+            result.severity = 'error';
+          }
+        }
+      }
+
+      return results;
+    }
+
+    // 5. Find and analyze TypeScript source files (Node.js packages only)
     const sourceFiles = await this.findSourceFiles(trikPath);
 
     if (sourceFiles.length === 0) {
@@ -183,7 +320,7 @@ export class TrikLinter {
       return results;
     }
 
-    // 5. Check entry point exists
+    // 6. Check entry point exists
     const entryPath = join(trikPath, manifest.entry.module.replace('.js', '.ts'));
     if (!sourceFiles.some((f) => f.endsWith(entryPath.split('/').pop()!.replace('.js', '.ts')))) {
       results.push({

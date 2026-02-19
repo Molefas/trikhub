@@ -1,4 +1,10 @@
-export { TrikLinter, type LinterConfig } from './linter.js';
+export {
+  TrikLinter,
+  type LinterConfig,
+  findManifestPath,
+  type ManifestLocation,
+  type PackageType,
+} from './linter.js';
 export {
   type LintResult,
   type LintSeverity,

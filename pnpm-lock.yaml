@@ -29,6 +29,9 @@ importers:
       '@inquirer/prompts':
         specifier: ^7.2.1
         version: 7.10.1(@types/node@20.19.33)
+      '@trikhub/linter':
+        specifier: workspace:*
+        version: link:../linter
       '@trikhub/manifest':
         specifier: workspace:*
         version: link:../manifest

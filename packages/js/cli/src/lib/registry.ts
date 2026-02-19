@@ -184,9 +184,13 @@ export class RegistryClient {
   private async fetch<T>(path: string, options: RequestInit = {}): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
       ...(options.headers as Record<string, string>),
     };
+
+    // Only set Content-Type for requests with a body
+    if (options.body) {
+      headers['Content-Type'] = 'application/json';
+    }
 
     if (this.authToken) {
       headers['Authorization'] = `Bearer ${this.authToken}`;
@@ -444,6 +448,19 @@ export class RegistryClient {
     });
 
     return apiToTrikVersion(result);
+  }
+
+  /**
+   * Delete a trik from the registry (unpublish)
+   */
+  async deleteTrik(fullName: string): Promise<void> {
+    if (!this.authToken) {
+      throw new Error('Not authenticated. Please run `trik login`');
+    }
+
+    await this.fetch(`/api/v1/triks/${trikPath(fullName)}`, {
+      method: 'DELETE',
+    });
   }
 }
 

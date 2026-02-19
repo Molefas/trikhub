@@ -4,7 +4,7 @@
  * Publishes a trik to the TrikHub registry.
  *
  * New simplified flow:
- * 1. Validate trik structure
+ * 1. Validate trik structure using @trikhub/linter
  * 2. Verify git tag exists on remote
  * 3. Get commit SHA for the tag
  * 4. Register with TrikHub registry (no tarball, no GitHub Release)
@@ -14,15 +14,15 @@
  * - Python: manifest.json inside package subdirectory (e.g., package_name/manifest.json)
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve, relative } from 'node:path';
 import { execSync } from 'node:child_process';
 import chalk from 'chalk';
 import ora from 'ora';
+import { TrikLinter, findManifestPath } from '@trikhub/linter';
 import { TrikHubMetadata } from '../types.js';
 import { RegistryClient } from '../lib/registry.js';
 import { loadConfig } from '../lib/storage.js';
-import { validateTrik, formatValidationResult } from '../lib/validator.js';
 
 interface PublishOptions {
   directory?: string;
@@ -42,62 +42,6 @@ interface TrikManifest {
   actions: Record<string, unknown>;
   capabilities?: unknown;
   limits?: unknown;
-}
-
-type PackageType = 'node' | 'python';
-
-interface ManifestLocation {
-  /** Full path to manifest.json */
-  manifestPath: string;
-  /** Directory containing manifest.json (for resolving entry points) */
-  manifestDir: string;
-  /** Package type (node or python) */
-  packageType: PackageType;
-}
-
-/**
- * Find the manifest.json file in a trik repository
- *
- * Node.js packages: manifest.json at root
- * Python packages: manifest.json inside package subdirectory
- */
-function findManifestPath(repoDir: string): ManifestLocation | null {
-  // First, check for manifest.json at root (Node.js pattern)
-  const rootManifest = join(repoDir, 'manifest.json');
-  if (existsSync(rootManifest)) {
-    return {
-      manifestPath: rootManifest,
-      manifestDir: repoDir,
-      packageType: 'node',
-    };
-  }
-
-  // Check if this is a Python package (has pyproject.toml)
-  const hasPyproject = existsSync(join(repoDir, 'pyproject.toml'));
-  const hasSetupPy = existsSync(join(repoDir, 'setup.py'));
-
-  if (hasPyproject || hasSetupPy) {
-    // Python package: search subdirectories for manifest.json
-    try {
-      const entries = readdirSync(repoDir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isDirectory() && !entry.name.startsWith('.') && !entry.name.startsWith('_')) {
-          const subManifest = join(repoDir, entry.name, 'manifest.json');
-          if (existsSync(subManifest)) {
-            return {
-              manifestPath: subManifest,
-              manifestDir: join(repoDir, entry.name),
-              packageType: 'python',
-            };
-          }
-        }
-      }
-    } catch {
-      // Directory read failed
-    }
-  }
-
-  return null;
 }
 
 /**
@@ -194,11 +138,11 @@ export async function publishCommand(options: PublishOptions): Promise<void> {
   const repoDir = resolve(options.directory || '.');
 
   try {
-    // Step 1: Validate trik structure
+    // Step 1: Validate trik structure using the centralized linter
     spinner.start('Validating trik structure...');
 
     // Find manifest.json (supports both Node.js and Python package structures)
-    const manifestLocation = findManifestPath(repoDir);
+    const manifestLocation = await findManifestPath(repoDir);
 
     if (!manifestLocation) {
       spinner.fail('Missing manifest.json');
@@ -224,7 +168,7 @@ export async function publishCommand(options: PublishOptions): Promise<void> {
       process.exit(1);
     }
 
-    // Read manifest
+    // Read manifest for later use (version, id, etc.)
     let manifest: TrikManifest;
     try {
       manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
@@ -244,29 +188,27 @@ export async function publishCommand(options: PublishOptions): Promise<void> {
       process.exit(1);
     }
 
-    // Check entry point exists (relative to manifest directory)
+    // Compute entry path for later git commit check
     const entryPath = join(manifestDir, manifest.entry.module);
-    if (!existsSync(entryPath)) {
-      spinner.fail(`Missing entry point: ${manifest.entry.module}`);
-      if (packageType === 'node') {
-        console.log(chalk.dim('Build your trik first (e.g., npm run build)'));
-      } else {
-        console.log(chalk.dim('Ensure your entry module exists'));
-      }
-      process.exit(1);
-    }
 
-    // Run validation (pass the manifest directory, not repo root)
-    const validation = validateTrik(manifestDir);
-    if (!validation.valid) {
+    // Run validation using the centralized linter (includes entry point check)
+    const linter = new TrikLinter({
+      checkCompiledEntry: true, // Verify compiled entry point exists
+      skipRules: ['manifest-completeness'], // Skip optional field warnings for publish
+    });
+    const results = await linter.lintManifestOnly(repoDir);
+    const hasErrors = linter.hasErrors(results);
+    const warnings = results.filter((r) => r.severity === 'warning');
+
+    if (hasErrors) {
       spinner.fail('Validation failed');
-      console.log(formatValidationResult(validation));
+      console.log(linter.formatResults(results));
       process.exit(1);
     }
 
-    if (validation.warnings.length > 0) {
+    if (warnings.length > 0) {
       spinner.warn('Validation passed with warnings');
-      console.log(formatValidationResult(validation));
+      console.log(linter.formatResults(results));
     } else {
       spinner.succeed('Validation passed');
     }

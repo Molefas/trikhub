@@ -206,3 +206,44 @@ export function getInstalledTriks(ctx?: ConfigContext): InstalledTrik[] {
   const lockfile = loadLockfile(context);
   return Object.values(lockfile.triks);
 }
+
+// ============================================================================
+// Defaults Storage (for trik init)
+// ============================================================================
+
+const DEFAULTS_PATH = join(homedir(), '.trikhub', 'defaults.json');
+
+/**
+ * Trik init defaults - persisted across sessions
+ */
+export interface TrikDefaults {
+  authorName?: string;
+  authorGithub?: string;
+}
+
+/**
+ * Load saved defaults for trik init
+ */
+export function loadDefaults(): TrikDefaults {
+  if (!existsSync(DEFAULTS_PATH)) {
+    return {};
+  }
+
+  try {
+    const content = readFileSync(DEFAULTS_PATH, 'utf-8');
+    return JSON.parse(content) as TrikDefaults;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Save defaults for trik init
+ */
+export function saveDefaults(defaults: TrikDefaults): void {
+  const dir = dirname(DEFAULTS_PATH);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  writeFileSync(DEFAULTS_PATH, JSON.stringify(defaults, null, 2));
+}

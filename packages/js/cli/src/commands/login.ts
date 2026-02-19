@@ -12,18 +12,28 @@ import { loadConfig, saveConfig } from '../lib/storage.js';
 export async function loginCommand(): Promise<void> {
   const spinner = ora();
   const config = loadConfig();
+  const registry = new RegistryClient();
 
-  // Check if already logged in
+  // Check if already logged in and token is still valid
   if (config.authToken && config.authExpiresAt) {
     const expiresAt = new Date(config.authExpiresAt);
     if (expiresAt > new Date()) {
-      console.log(chalk.yellow(`Already logged in as ${chalk.cyan(config.publisherUsername)}`));
-      console.log(chalk.dim('Use `trik logout` to sign out first'));
-      return;
+      // Verify token actually works with the server
+      try {
+        const user = await registry.getCurrentUser();
+        console.log(chalk.yellow(`Already logged in as ${chalk.cyan('@' + user.username)}`));
+        console.log(chalk.dim('Use `trik logout` to sign out first'));
+        return;
+      } catch {
+        // Token invalid server-side, clear it and proceed with login
+        console.log(chalk.dim('Previous session expired, starting new login...'));
+        delete config.authToken;
+        delete config.authExpiresAt;
+        delete config.publisherUsername;
+        saveConfig(config);
+      }
     }
   }
-
-  const registry = new RegistryClient();
 
   try {
     // Start device flow
