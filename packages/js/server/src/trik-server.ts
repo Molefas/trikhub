@@ -183,6 +183,7 @@ export class TrikServer {
         host: this.options.host,
         skillsDirectory: this.options.skillsDirectory,
         configPath: this.options.configPath,
+        baseDir: this.options.baseDir,
         allowedSkills: this.options.allowedSkills,
         lintOnLoad: this.options.lintOnLoad,
         lintWarningsAsErrors: this.options.lintWarningsAsErrors,
