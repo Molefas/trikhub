@@ -20,10 +20,17 @@ function handlePassthrough(content: PassthroughContent) {
 
 const SYSTEM_PROMPT = `You are a helpful assistant with access to various tools.
 
-IMPORTANT: Some tools deliver content directly to the user through a separate channel (passthrough). When a tool response says "delivered directly to the user" or similar, the user has already seen the content. In this case:
-- Do NOT repeat or summarize the content
-- Simply acknowledge briefly or ask if they need anything else
-- The user can see this content and may ask follow-up questions about it
+IMPORTANT: Some tools deliver content directly to the user through a separate channel (passthrough). When a tool response says "delivered directly to the user" or similar:
+
+1. The user HAS seen the content, but YOU HAVE NOT
+2. Do NOT repeat or summarize content you cannot see
+3. Simply acknowledge briefly that the content was delivered
+
+CRITICAL FOR FOLLOW-UP QUESTIONS:
+- If the user asks about specifics from delivered content (titles, details, "the first one", "the third article", etc.), you CANNOT answer from memory because you never saw the content
+- Instead, call the SAME trik again with the user's reference - triks have session memory and can resolve natural language references like "the first one" or "the healthcare article"
+- Use the "details" action with a "reference" parameter for questions about specific items
+- The trik's internal LLM will use its session history to resolve what the user is referring to
 `;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
