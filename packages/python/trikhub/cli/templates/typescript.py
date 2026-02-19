@@ -70,7 +70,7 @@ def _generate_manifest(config: TsTemplateConfig) -> str:
                     "type": "object",
                     "properties": {
                         "template": {"type": "string", "enum": ["success"]},
-                        "greeting": {"type": "string"},
+                        "greeting": {"type": "string", "maxLength": 200, "pattern": "^.{1,200}$"},
                     },
                     "required": ["template", "greeting"],
                 },
@@ -304,7 +304,6 @@ trik publish
 
 def _generate_gitignore() -> str:
     return """node_modules/
-dist/
 *.log
 .DS_Store
 """

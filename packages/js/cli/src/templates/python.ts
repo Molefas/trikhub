@@ -70,7 +70,7 @@ function generateManifest(config: PyTemplateConfig): string {
           type: 'object',
           properties: {
             template: { type: 'string', enum: ['success'] },
-            greeting: { type: 'string' },
+            greeting: { type: 'string', maxLength: 200, pattern: '^.{1,200}$' },
           },
           required: ['template', 'greeting'],
         },
