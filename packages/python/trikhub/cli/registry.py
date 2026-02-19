@@ -479,6 +479,22 @@ class RegistryClient:
         )
         return self._api_to_version(result)
 
+    async def delete_trik(self, full_name: str) -> None:
+        """Delete a trik from the registry (unpublish).
+
+        Args:
+            full_name: Full trik name (e.g., "@scope/name")
+
+        Raises:
+            PermissionError: If not authenticated
+            FileNotFoundError: If trik not found
+            RuntimeError: On API errors
+        """
+        if not self.auth_token:
+            raise PermissionError("Not authenticated. Please run `trik login`")
+
+        await self._fetch(f"/api/v1/triks/{full_name}", method="DELETE")
+
 
 # Default registry client instance
 _registry: RegistryClient | None = None
