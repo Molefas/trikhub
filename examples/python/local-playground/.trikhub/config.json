@@ -1,0 +1,11 @@
+{
+  "triks": [
+    "@molefas/trik-demo-notes"
+  ],
+  "trikhub": {
+    "@molefas/trik-demo-notes": "1.0.7"
+  },
+  "runtimes": {
+    "@molefas/trik-demo-notes": "node"
+  }
+}

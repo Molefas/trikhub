@@ -21,6 +21,22 @@ export async function createServer(config: ServerConfig, gateway: TrikGateway): 
     },
   });
 
+  // Override default JSON parser to allow empty bodies
+  // Some clients (like Home Assistant) send Content-Type: application/json with no body
+  fastify.removeContentTypeParser('application/json');
+  fastify.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+    if (!body || body === '') {
+      done(null, {});
+      return;
+    }
+    try {
+      const json = JSON.parse(body as string);
+      done(null, json);
+    } catch (err) {
+      done(err as Error, undefined);
+    }
+  });
+
   // Register OpenAPI documentation
   await fastify.register(fastifySwagger, {
     openapi: {
@@ -95,7 +111,7 @@ export async function createServer(config: ServerConfig, gateway: TrikGateway): 
   await toolsRoutes(fastify, gateway);
   await executeRoutes(fastify, gateway);
   await contentRoutes(fastify, gateway);
-  await triksRoutes(fastify, gateway, config.configPath);
+  await triksRoutes(fastify, gateway, config.configPath, config.baseDir);
 
   return fastify;
 }

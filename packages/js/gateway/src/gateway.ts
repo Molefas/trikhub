@@ -518,6 +518,14 @@ export class TrikGateway {
     return this.triks.has(trikId);
   }
 
+  /**
+   * Unload a trik from memory.
+   * Call this after uninstalling a trik to remove it from the available tools.
+   */
+  unloadTrik(trikId: string): boolean {
+    return this.triks.delete(trikId);
+  }
+
   getAvailableTriks(): TrikInfo[] {
     return Array.from(this.triks.values()).map(({ manifest }) => ({
       id: manifest.id,

@@ -50,6 +50,8 @@ interface NpmTriksConfig {
   triks: string[];
   /** Packages installed from TrikHub registry (not npm) - need reinstall on sync */
   trikhub?: Record<string, string>; // packageName -> version
+  /** Runtime for each trik (node or python) - used for cross-language uninstall */
+  runtimes?: Record<string, TrikRuntime>;
 }
 
 interface PackageJson {
@@ -133,6 +135,7 @@ async function readNpmConfig(baseDir: string): Promise<NpmTriksConfig> {
     return {
       triks: Array.isArray(config.triks) ? config.triks : [],
       trikhub: config.trikhub ?? {},
+      runtimes: config.runtimes ?? {},
     };
   } catch {
     return { triks: [] };
@@ -176,11 +179,13 @@ async function isTrikPackage(packagePath: string): Promise<boolean> {
 /**
  * Add a trik to the config
  * @param trikhubVersion - If provided, marks this as a TrikHub-only package (not on npm)
+ * @param runtime - The trik runtime (node or python) - used for cross-language uninstall
  */
 async function addTrikToConfig(
   packageName: string,
   baseDir: string,
-  trikhubVersion?: string
+  trikhubVersion?: string,
+  runtime?: TrikRuntime
 ): Promise<void> {
   const config = await readNpmConfig(baseDir);
 
@@ -194,6 +199,14 @@ async function addTrikToConfig(
       config.trikhub = {};
     }
     config.trikhub[packageName] = trikhubVersion;
+  }
+
+  // Track runtime for cross-language uninstall
+  if (runtime) {
+    if (!config.runtimes) {
+      config.runtimes = {};
+    }
+    config.runtimes[packageName] = runtime;
   }
 
   await writeNpmConfig(config, baseDir);
@@ -275,7 +288,8 @@ async function tryNpmInstall(
   packageSpec: string,
   baseDir: string
 ): Promise<{ success: boolean; notFound: boolean }> {
-  const args = pm === 'npm' ? ['install', packageSpec] : ['add', packageSpec];
+  // Use --prefix to explicitly set install directory (npm can ignore cwd in some contexts)
+  const args = pm === 'npm' ? ['install', '--prefix', baseDir, packageSpec] : ['add', packageSpec];
 
   // Run silently to capture output
   const result = await runCommand(pm, args, baseDir, { silent: true });
@@ -410,8 +424,10 @@ async function installFromTrikhub(
   await addToPackageJson(packageName, trikInfo.githubRepo, versionInfo.gitTag, baseDir);
 
   // Run package manager install
+  // Use --prefix to explicitly set install directory (npm can ignore cwd in some contexts)
   spinner.text = `Installing ${chalk.cyan(packageName)}@${versionToInstall}...`;
-  const installResult = await runCommand(pm, ['install'], baseDir, { silent: true });
+  const installArgs = pm === 'npm' ? ['install', '--prefix', baseDir] : ['install'];
+  const installResult = await runCommand(pm, installArgs, baseDir, { silent: true });
 
   if (installResult.code !== 0) {
     spinner.fail(`Failed to install ${packageName}`);
@@ -604,8 +620,8 @@ export async function installCommand(
       const crossResult = await installCrossLanguageFromTrikhub(packageName, versionSpec, baseDir, spinner);
 
       if (crossResult.success) {
-        // Add to config
-        await addTrikToConfig(packageName, baseDir, crossResult.version);
+        // Add to config with runtime for cross-language uninstall
+        await addTrikToConfig(packageName, baseDir, crossResult.version, trikRuntime);
         spinner.succeed(`Installed ${chalk.green(packageName)}@${crossResult.version} (${trikRuntime} runtime)`);
 
         console.log();

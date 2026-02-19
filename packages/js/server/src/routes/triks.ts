@@ -84,7 +84,8 @@ const reloadResponseSchema = {
 export async function triksRoutes(
   fastify: FastifyInstance,
   gateway: TrikGateway,
-  configPath?: string
+  configPath?: string,
+  baseDir?: string
 ): Promise<void> {
   // List installed triks
   fastify.get<{ Reply: ListResponse }>(
@@ -156,17 +157,20 @@ export async function triksRoutes(
       }
 
       try {
-        // Run trik install command
+        // Run trik install command from baseDir (where package.json lives)
+        const installCwd = baseDir || '/app';
         const { stdout, stderr } = await execAsync(`trik install ${packageName}`, {
           timeout: 120000, // 2 minute timeout
-          cwd: '/app',
+          cwd: installCwd,
         });
 
         fastify.log.info({ stdout, stderr }, `Installed trik: ${packageName}`);
 
         // Reload skills after install
+        // baseDir must be /app (or /data) where package.json and node_modules live,
+        // not dirname(configPath) which would be /data/.trikhub/
         if (configPath) {
-          await gateway.loadTriksFromConfig({ configPath });
+          await gateway.loadTriksFromConfig({ configPath, baseDir });
         }
 
         return {
@@ -201,6 +205,11 @@ export async function triksRoutes(
             name: { type: 'string', description: 'Package name to uninstall' },
           },
         },
+        // Allow empty body (some clients send Content-Type: application/json with no body)
+        body: {
+          type: 'object',
+          additionalProperties: true,
+        },
         response: {
           200: installResponseSchema,
           500: installResponseSchema,
@@ -211,17 +220,17 @@ export async function triksRoutes(
       const { name } = request.params;
 
       try {
+        const uninstallCwd = baseDir || '/app';
         const { stdout, stderr } = await execAsync(`trik uninstall ${name}`, {
           timeout: 60000,
-          cwd: '/app',
+          cwd: uninstallCwd,
         });
 
         fastify.log.info({ stdout, stderr }, `Uninstalled trik: ${name}`);
 
-        // Reload skills after uninstall
-        if (configPath) {
-          await gateway.loadTriksFromConfig({ configPath });
-        }
+        // Unload trik from gateway memory
+        gateway.unloadTrik(name);
+        fastify.log.info(`Unloaded trik from memory: ${name}`);
 
         return {
           success: true,
@@ -259,7 +268,7 @@ export async function triksRoutes(
         let loaded = 0;
 
         if (configPath) {
-          const manifests = await gateway.loadTriksFromConfig({ configPath });
+          const manifests = await gateway.loadTriksFromConfig({ configPath, baseDir });
           loaded = manifests.length;
         }
 
