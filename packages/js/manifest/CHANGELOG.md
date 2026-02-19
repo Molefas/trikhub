@@ -1,5 +1,11 @@
 # @saaas-sdk/manifest
 
+## 0.10.0
+
+### Minor Changes
+
+- [`25a16ef`](https://github.com/Molefas/trikhub/commit/25a16ef1be6f158a5ad4da58497b6a1d52be6c74) - Added unpublish feature; Added lint to CLI; Added init feature.
+
 ## 0.9.0
 
 ## 0.7.0
