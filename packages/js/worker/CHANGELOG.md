@@ -1,5 +1,12 @@
 # @trikhub/worker-js
 
+## 0.7.1
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @trikhub/manifest@0.11.0
+
 ## 0.7.0
 
 ### Minor Changes
