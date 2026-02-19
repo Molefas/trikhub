@@ -8,6 +8,8 @@ export interface ServerConfig {
   skillsDirectory?: string;
   /** Path to .trikhub/config.json for loading npm-installed skills. Defaults to .trikhub/config.json in cwd if it exists. */
   configPath?: string;
+  /** Base directory for resolving node_modules. Defaults to dirname of configPath. */
+  baseDir?: string;
   allowedSkills?: string[];
   lintOnLoad: boolean;
   lintWarningsAsErrors: boolean;
@@ -37,6 +39,7 @@ export function loadConfig(): ServerConfig {
     host: process.env.HOST || '0.0.0.0',
     skillsDirectory,
     configPath,
+    baseDir: process.env.BASE_DIR,
     allowedSkills: allowedSkillsEnv ? allowedSkillsEnv.split(',').map((s) => s.trim()) : undefined,
     lintOnLoad: process.env.LINT_ON_LOAD !== 'false',
     lintWarningsAsErrors: process.env.LINT_WARNINGS_AS_ERRORS === 'true',

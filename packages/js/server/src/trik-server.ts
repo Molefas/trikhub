@@ -22,6 +22,9 @@ export interface TrikServerOptions {
   /** Path to .trikhub/config.json for loading npm-installed triks */
   configPath?: string;
 
+  /** Base directory for resolving node_modules. Defaults to dirname of configPath. */
+  baseDir?: string;
+
   /** Directory containing local trik files */
   skillsDirectory?: string;
 
@@ -155,6 +158,7 @@ export class TrikServer {
     this.skillLoader = new SkillLoader({
       skillsDirectory: this.options.skillsDirectory,
       configPath: this.options.configPath,
+      baseDir: this.options.baseDir,
       secretsPath: this.options.secretsPath,
       lintBeforeLoad: this.options.lintOnLoad,
       lintWarningsAsErrors: this.options.lintWarningsAsErrors,
@@ -179,6 +183,7 @@ export class TrikServer {
         host: this.options.host,
         skillsDirectory: this.options.skillsDirectory,
         configPath: this.options.configPath,
+        baseDir: this.options.baseDir,
         allowedSkills: this.options.allowedSkills,
         lintOnLoad: this.options.lintOnLoad,
         lintWarningsAsErrors: this.options.lintWarningsAsErrors,
