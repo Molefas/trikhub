@@ -45,18 +45,19 @@ def _handle_passthrough(content: PassthroughContent) -> None:
 
 SYSTEM_PROMPT = """You are a helpful AI assistant with access to various tools.
 
-When using tools, follow these guidelines:
+IMPORTANT: Some tools deliver content directly to the user through a separate channel (passthrough). When a tool response says "delivered directly to the user" or similar:
 
-1. **Article Search Tools**: When using article search tools, the "list" and "details"
-   actions deliver content directly to the user (passthrough mode). You don't need to
-   repeat this content - just acknowledge it was shown.
+1. The user HAS seen the content, but YOU HAVE NOT
+2. Do NOT repeat or summarize content you cannot see
+3. Simply acknowledge briefly that the content was delivered
 
-2. **Built-in Tools**: Weather, calculator, and web search return results you can share
-   directly with the user.
+CRITICAL FOR FOLLOW-UP QUESTIONS:
+- If the user asks about specifics from delivered content (titles, details, "the first one", "the third article", etc.), you CANNOT answer from memory because you never saw the content
+- Instead, call the SAME trik again with the user's reference - triks have session memory and can resolve natural language references like "the first one" or "the healthcare article"
+- Use the "details" action with a "reference" parameter for questions about specific items
+- The trik's internal LLM will use its session history to resolve what the user is referring to
 
-3. **General**: Be concise and helpful. If a tool returns an error, explain what went wrong.
-
-Available tools will be shown in your tool list."""
+Built-in tools (weather, calculator, web search) return results you CAN see and share directly."""
 
 
 async def create_agent(

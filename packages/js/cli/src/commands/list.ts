@@ -15,6 +15,8 @@ interface ListOptions {
 
 interface NpmTriksConfig {
   triks: string[];
+  /** Packages installed from TrikHub registry (not npm) - includes cross-language triks */
+  trikhub?: Record<string, string>; // packageName -> version
 }
 
 interface TrikInfo {
@@ -22,6 +24,8 @@ interface TrikInfo {
   version: string;
   description?: string;
   exists: boolean;
+  /** Whether this is a cross-language trik (stored in .trikhub/triks/) */
+  crossLanguage?: boolean;
 }
 
 const NPM_CONFIG_DIR = '.trikhub';
@@ -49,6 +53,7 @@ async function readNpmConfig(baseDir: string): Promise<NpmTriksConfig> {
     const config = JSON.parse(content) as NpmTriksConfig;
     return {
       triks: Array.isArray(config.triks) ? config.triks : [],
+      trikhub: config.trikhub ?? {},
     };
   } catch {
     return { triks: [] };
@@ -56,30 +61,91 @@ async function readNpmConfig(baseDir: string): Promise<NpmTriksConfig> {
 }
 
 /**
- * Get info about an installed trik from node_modules
+ * Get info about an installed trik from node_modules or .trikhub/triks/
  */
-async function getTrikInfo(packageName: string, baseDir: string): Promise<TrikInfo> {
-  const packagePath = join(baseDir, 'node_modules', ...packageName.split('/'));
-  const packageJsonPath = join(packagePath, 'package.json');
+async function getTrikInfo(
+  packageName: string,
+  baseDir: string,
+  config: NpmTriksConfig
+): Promise<TrikInfo> {
+  // First, check node_modules (for JS triks installed via npm)
+  const nodeModulesPath = join(baseDir, 'node_modules', ...packageName.split('/'));
+  const packageJsonPath = join(nodeModulesPath, 'package.json');
 
-  const info: TrikInfo = {
-    name: packageName,
-    version: 'unknown',
-    exists: existsSync(packagePath),
-  };
+  if (existsSync(nodeModulesPath)) {
+    const info: TrikInfo = {
+      name: packageName,
+      version: 'unknown',
+      exists: true,
+      crossLanguage: false,
+    };
 
-  if (info.exists && existsSync(packageJsonPath)) {
-    try {
-      const content = await readFile(packageJsonPath, 'utf-8');
-      const pkg = JSON.parse(content);
-      info.version = pkg.version || 'unknown';
-      info.description = pkg.description;
-    } catch {
-      // Ignore errors reading package.json
+    if (existsSync(packageJsonPath)) {
+      try {
+        const content = await readFile(packageJsonPath, 'utf-8');
+        const pkg = JSON.parse(content);
+        info.version = pkg.version || 'unknown';
+        info.description = pkg.description;
+      } catch {
+        // Ignore errors reading package.json
+      }
     }
+
+    return info;
   }
 
-  return info;
+  // Second, check .trikhub/triks/ (for cross-language triks)
+  const triksPath = join(baseDir, NPM_CONFIG_DIR, 'triks', ...packageName.split('/'));
+
+  if (existsSync(triksPath)) {
+    const info: TrikInfo = {
+      name: packageName,
+      version: config.trikhub?.[packageName] || 'unknown',
+      exists: true,
+      crossLanguage: true,
+    };
+
+    // Try to find manifest.json for description (may be in subdirectory for Python packages)
+    const manifestPath = join(triksPath, 'manifest.json');
+    if (existsSync(manifestPath)) {
+      try {
+        const content = await readFile(manifestPath, 'utf-8');
+        const manifest = JSON.parse(content);
+        info.description = manifest.description;
+      } catch {
+        // Ignore errors
+      }
+    } else {
+      // For Python packages, manifest may be in a subdirectory (package_name/manifest.json)
+      try {
+        const { readdir } = await import('node:fs/promises');
+        const entries = await readdir(triksPath, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isDirectory() && !entry.name.startsWith('.')) {
+            const subManifest = join(triksPath, entry.name, 'manifest.json');
+            if (existsSync(subManifest)) {
+              const content = await readFile(subManifest, 'utf-8');
+              const manifest = JSON.parse(content);
+              info.description = manifest.description;
+              break;
+            }
+          }
+        }
+      } catch {
+        // Ignore errors
+      }
+    }
+
+    return info;
+  }
+
+  // Trik not found in either location
+  return {
+    name: packageName,
+    version: config.trikhub?.[packageName] || 'unknown',
+    exists: false,
+    crossLanguage: !!config.trikhub?.[packageName],
+  };
 }
 
 export async function listCommand(options: ListOptions): Promise<void> {
@@ -88,7 +154,7 @@ export async function listCommand(options: ListOptions): Promise<void> {
 
   if (options.json) {
     const triks = await Promise.all(
-      config.triks.map((name) => getTrikInfo(name, baseDir))
+      config.triks.map((name) => getTrikInfo(name, baseDir, config))
     );
     console.log(JSON.stringify({
       configPath: getNpmConfigPath(baseDir),
@@ -107,7 +173,7 @@ export async function listCommand(options: ListOptions): Promise<void> {
   console.log(chalk.bold(`\nInstalled triks (${config.triks.length}):\n`));
 
   for (const trikName of config.triks) {
-    const info = await getTrikInfo(trikName, baseDir);
+    const info = await getTrikInfo(trikName, baseDir, config);
 
     const status = info.exists
       ? chalk.green('●')
@@ -122,8 +188,16 @@ export async function listCommand(options: ListOptions): Promise<void> {
       console.log(chalk.dim(`      ${info.description}`));
     }
 
+    if (info.crossLanguage && info.exists) {
+      console.log(chalk.dim(`      📦 Cross-language trik (in .trikhub/triks/)`));
+    }
+
     if (!info.exists) {
-      console.log(chalk.red(`      ⚠ Not in node_modules! Run 'npm install' or 'trik install ${trikName}'`));
+      if (info.crossLanguage) {
+        console.log(chalk.red(`      ⚠ Not in .trikhub/triks/! Run 'trik install ${trikName}'`));
+      } else {
+        console.log(chalk.red(`      ⚠ Not in node_modules! Run 'npm install' or 'trik install ${trikName}'`));
+      }
     }
 
     console.log();
