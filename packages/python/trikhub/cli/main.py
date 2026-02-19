@@ -12,6 +12,7 @@ Usage:
     trik logout                Log out of TrikHub
     trik whoami                Show current authenticated user
     trik publish               Publish a trik to the registry
+    trik unpublish @scope/name Permanently remove a trik from the registry
 """
 
 from __future__ import annotations
@@ -1310,6 +1311,91 @@ async def _publish_async(directory: str, tag_override: str | None) -> None:
     click.echo(click.style(f"  Install with: trik install {full_name}@{version}", dim=True))
     click.echo(click.style(f"  View at: https://trikhub.com/triks/{full_name.replace('@', '%40')}", dim=True))
     click.echo()
+
+
+# ============================================================================
+# Unpublish Command
+# ============================================================================
+
+
+@cli.command()
+@click.argument("package")
+@click.pass_context
+def unpublish(ctx: click.Context, package: str) -> None:
+    """Permanently remove a trik from the registry.
+
+    This will delete the trik and ALL its versions. This action cannot be undone.
+
+    Examples:
+        trik unpublish @acme/article-search
+    """
+    asyncio.run(_unpublish_async(package))
+
+
+async def _unpublish_async(package: str) -> None:
+    """Async unpublish implementation."""
+    from trikhub.cli.config import is_auth_expired, read_global_config
+
+    config = read_global_config()
+
+    # Step 1: Check authentication
+    if not config.auth_token:
+        click.echo(click.style("Not logged in", fg="red"))
+        click.echo(click.style("Run 'trik login' to authenticate first", dim=True))
+        sys.exit(1)
+
+    if is_auth_expired(config):
+        click.echo(click.style("Session expired", fg="red"))
+        click.echo(click.style("Run 'trik login' to re-authenticate", dim=True))
+        sys.exit(1)
+
+    # Step 2: Verify trik exists
+    click.echo(f"Checking trik {click.style(package, fg='cyan')}...")
+
+    async with RegistryClient() as registry:
+        try:
+            trik_info = await registry.get_trik(package)
+            if not trik_info:
+                click.echo(click.style(f"Trik not found: {package}", fg="red"))
+                sys.exit(1)
+        except Exception as e:
+            click.echo(click.style(f"Failed to fetch trik info: {e}", fg="red"))
+            sys.exit(1)
+
+        click.echo(click.style(f"Found {package}", fg="green"))
+
+        # Step 3: User confirmation
+        click.echo()
+        click.echo(
+            click.style(
+                f"WARNING: This will permanently delete {package} and ALL its versions.",
+                fg="red",
+                bold=True,
+            )
+        )
+        click.echo(click.style("This action cannot be undone.", fg="red"))
+        click.echo()
+
+        confirmation = click.prompt(f"To confirm, type the trik name ({package})")
+
+        if confirmation != package:
+            click.echo(
+                click.style("Unpublish cancelled - trik name did not match", fg="yellow")
+            )
+            sys.exit(1)
+
+        # Step 4: Delete the trik
+        click.echo(f"Unpublishing {click.style(package, fg='cyan')}...")
+
+        try:
+            await registry.delete_trik(package)
+            click.echo(click.style(f"✓ Successfully unpublished {package}", fg="green"))
+        except PermissionError as e:
+            click.echo(click.style(f"✗ {e}", fg="red"))
+            sys.exit(1)
+        except RuntimeError as e:
+            click.echo(click.style(f"✗ Failed to unpublish: {e}", fg="red"))
+            sys.exit(1)
 
 
 # ============================================================================

@@ -15,6 +15,7 @@ import { infoCommand } from './commands/info.js';
 import { uninstallCommand } from './commands/uninstall.js';
 import { loginCommand, logoutCommand, whoamiCommand } from './commands/login.js';
 import { publishCommand } from './commands/publish.js';
+import { unpublishCommand } from './commands/unpublish.js';
 import { upgradeCommand, upgradeAllCommand } from './commands/upgrade.js';
 import { syncCommand } from './commands/sync.js';
 
@@ -101,6 +102,12 @@ program
   .option('-d, --directory <path>', 'Trik directory to publish', '.')
   .option('-t, --tag <version>', 'Version tag (default: from manifest)')
   .action(publishCommand);
+
+// Unpublish command
+program
+  .command('unpublish <trik>')
+  .description('Permanently remove a trik from the registry')
+  .action(unpublishCommand);
 
 // Upgrade command
 program
