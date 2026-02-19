@@ -11,6 +11,10 @@ npm install -g @trikhub/cli
 ## Quick Start
 
 ```bash
+# Create a new trik
+trik init ts   # TypeScript
+trik init py   # Python
+
 # Search for triks
 trik search article
 
@@ -31,6 +35,75 @@ trik uninstall @acme/article-search
 ```
 
 ## Commands
+
+### `trik init <language>`
+
+Create a new trik project with boilerplate code.
+
+```bash
+# Create a TypeScript trik
+trik init ts
+
+# Create a Python trik
+trik init py
+```
+
+The interactive wizard will prompt for:
+
+- **Trik name** - lowercase, alphanumeric + dashes (e.g., `my-trik`)
+- **Display name** - Human-readable name
+- **Description** - Short description
+- **Author name** - Your name (saved for future use)
+- **GitHub username** - Your GitHub handle (saved for future use)
+- **Category** - utilities, productivity, developer, etc.
+- **Storage** - Enable persistent key-value storage
+- **Configuration** - Enable environment variables (API keys, etc.)
+- **Location** - Where to create the project
+
+#### Generated Structure
+
+**TypeScript:**
+
+```text
+my-trik/
+├── manifest.json      # Trik definition
+├── trikhub.json       # Registry metadata
+├── package.json
+├── tsconfig.json
+├── src/
+│   └── index.ts       # Main entry point
+├── test.ts            # Local test script
+├── README.md
+└── .gitignore
+```
+
+**Python:**
+
+```text
+my-trik/
+├── trikhub.json       # Registry metadata
+├── pyproject.toml
+├── test.py            # Local test script
+├── README.md
+├── .gitignore
+└── my_trik/           # Package directory
+    ├── __init__.py
+    ├── manifest.json  # Trik definition
+    └── graph.py       # Main entry point
+```
+
+#### Testing Your Trik
+
+```bash
+# TypeScript
+cd my-trik
+npm install
+npm test
+
+# Python
+cd my-trik
+python test.py
+```
 
 ### `trik install <name>`
 

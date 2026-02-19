@@ -17,6 +17,7 @@ import { loginCommand, logoutCommand, whoamiCommand } from './commands/login.js'
 import { publishCommand } from './commands/publish.js';
 import { upgradeCommand, upgradeAllCommand } from './commands/upgrade.js';
 import { syncCommand } from './commands/sync.js';
+import { initCommand } from './commands/init.js';
 
 // Read version from package.json
 const require = createRequire(import.meta.url);
@@ -124,8 +125,13 @@ program
   .option('-j, --json', 'Output as JSON')
   .action(syncCommand);
 
+// Init command
+program
+  .command('init <language>')
+  .description('Initialize a new trik project (ts or py)')
+  .action(initCommand);
+
 // TODO: Add more commands
-// program.command('init').description('Initialize a new trik project');
 // program.command('outdated').description('Check for outdated triks');
 
 program.parse();
