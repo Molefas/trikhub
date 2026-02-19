@@ -1,5 +1,16 @@
 # @saaas-sdk/gateway
 
+## 0.11.0
+
+### Minor Changes
+
+- [#35](https://github.com/Molefas/trikhub/pull/35) [`93560c9`](https://github.com/Molefas/trikhub/commit/93560c9479d157e6805c458bbab3ecc7a2be2ee6) Thanks [@Molefas](https://github.com/Molefas)! - Updated CLI & Server packages for better docker support
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @trikhub/manifest@0.11.0
+
 ## 0.10.0
 
 ### Minor Changes
