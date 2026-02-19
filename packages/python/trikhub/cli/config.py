@@ -295,3 +295,61 @@ def set_trik_secrets(
     secrets = read_secrets(base_dir)
     secrets[trik_id] = trik_secrets
     write_secrets(secrets, base_dir)
+
+
+# ============================================================================
+# Defaults Storage (for trik init)
+# ============================================================================
+
+DEFAULTS_FILE = "defaults.json"
+
+
+@dataclass
+class TrikDefaults:
+    """Trik init defaults - persisted across sessions."""
+
+    author_name: str | None = None
+    author_github: str | None = None
+
+
+def get_defaults_path() -> Path:
+    """Get the path to the defaults.json file."""
+    return GLOBAL_CONFIG_DIR / DEFAULTS_FILE
+
+
+def load_defaults() -> TrikDefaults:
+    """Load saved defaults for trik init."""
+    defaults_path = get_defaults_path()
+
+    if not defaults_path.exists():
+        return TrikDefaults()
+
+    try:
+        content = defaults_path.read_text(encoding="utf-8")
+        data = json.loads(content)
+        return TrikDefaults(
+            author_name=data.get("authorName"),
+            author_github=data.get("authorGithub"),
+        )
+    except (json.JSONDecodeError, OSError):
+        return TrikDefaults()
+
+
+def save_defaults(defaults: TrikDefaults) -> None:
+    """Save defaults for trik init."""
+    defaults_path = get_defaults_path()
+    defaults_dir = defaults_path.parent
+
+    # Ensure directory exists
+    defaults_dir.mkdir(parents=True, exist_ok=True)
+
+    data: dict[str, Any] = {}
+    if defaults.author_name:
+        data["authorName"] = defaults.author_name
+    if defaults.author_github:
+        data["authorGithub"] = defaults.author_github
+
+    defaults_path.write_text(
+        json.dumps(data, indent=2) + "\n",
+        encoding="utf-8",
+    )

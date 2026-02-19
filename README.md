@@ -126,6 +126,32 @@ Get hands-on with the playground examples:
 | [local-playground [Typescript]](examples/js/local-playground) | TypeScript agent with in-process gateway |
 | [local-playground [Python]](examples/python/local-playground) | Python agent with in-process gateway |
 
+## Creating a New Trik
+
+The CLI includes a scaffolding tool to quickly create new triks:
+
+```bash
+# Install the CLI
+npm install -g @trikhub/cli
+
+# Create a TypeScript trik
+trik init ts
+
+# Create a Python trik
+trik init py
+```
+
+The wizard guides you through setting up the project structure, manifest, and boilerplate code. Once created:
+
+```bash
+cd my-trik
+npm install      # or skip for Python
+npm test         # or python test.py
+trik publish     # when ready
+```
+
+See the [CLI documentation](packages/js/cli/README.md) for more details.
+
 ## Documentation
 
 Full documentation available at **[trikhub.com/docs](https://trikhub.com/docs)**:
