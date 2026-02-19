@@ -95,7 +95,7 @@ export async function createServer(config: ServerConfig, gateway: TrikGateway): 
   await toolsRoutes(fastify, gateway);
   await executeRoutes(fastify, gateway);
   await contentRoutes(fastify, gateway);
-  await triksRoutes(fastify, gateway, config.configPath);
+  await triksRoutes(fastify, gateway, config.configPath, config.baseDir);
 
   return fastify;
 }

@@ -1,0 +1,12 @@
+{
+  "displayName": "Demo Notes Trik",
+  "shortDescription": "Demo trik for testing storage and configuration capabilities",
+  "categories": ["storage", "demo", "notes"],
+  "keywords": ["notes", "storage", "config", "demo", "crud"],
+  "author": {
+    "name": "Molefas",
+    "github": "Molefas"
+  },
+  "repository": "https://github.com/Molefas/trik-demo-notes",
+  "homepage": "https://github.com/Molefas/trik-demo-notes"
+}

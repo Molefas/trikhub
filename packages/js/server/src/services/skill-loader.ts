@@ -8,6 +8,8 @@ export interface SkillLoaderConfig {
   skillsDirectory?: string;
   /** Path to .trikhub/config.json for loading npm-installed skills */
   configPath?: string;
+  /** Base directory for resolving node_modules. Defaults to dirname of configPath. */
+  baseDir?: string;
   /** Path to .trikhub/secrets.json. If not set, derives from configPath or uses cwd. */
   secretsPath?: string;
   lintBeforeLoad: boolean;
@@ -164,6 +166,7 @@ export class SkillLoader {
       try {
         const manifests = await this.gateway.loadTriksFromConfig({
           configPath: this.config.configPath,
+          baseDir: this.config.baseDir,
         });
         for (const manifest of manifests) {
           skills.push({

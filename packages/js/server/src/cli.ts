@@ -30,6 +30,7 @@ Environment Variables:
   HOST                 Server host (default: 0.0.0.0)
   SKILLS_DIR           Directory containing skills (default: ./skills)
   CONFIG_PATH          Path to .trikhub/config.json for npm-based skills
+  BASE_DIR             Base directory for resolving node_modules (default: dirname of CONFIG_PATH)
   AUTH_TOKEN           Bearer token for authentication (optional)
   LOG_LEVEL            Log level: debug, info, warn, error (default: info)
   LINT_ON_LOAD         Lint skills before loading: true/false (default: true)
@@ -81,6 +82,7 @@ async function main(): Promise<void> {
     port: config.port,
     host: config.host,
     configPath: config.configPath,
+    baseDir: config.baseDir,
     skillsDirectory: config.skillsDirectory,
     authToken: config.authToken,
     logLevel: config.logLevel,
