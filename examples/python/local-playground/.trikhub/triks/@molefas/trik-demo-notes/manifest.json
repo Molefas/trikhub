@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 1,
+  "id": "trik-demo-notes",
+  "name": "Demo Notes",
+  "description": "A demo trik for testing storage and configuration capabilities",
+  "version": "1.0.7",
+  "actions": {
+    "add_note": {
+      "description": "Add a new note to persistent storage",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string", "description": "Note title" },
+          "content": { "type": "string", "description": "Note content" }
+        },
+        "required": ["title", "content"]
+      },
+      "responseMode": "template",
+      "agentDataSchema": {
+        "type": "object",
+        "properties": {
+          "template": { "type": "string", "enum": ["note_added"] },
+          "noteId": { "type": "string", "format": "id" },
+          "title": { "type": "string", "maxLength": 100, "pattern": "^.{1,100}$" }
+        },
+        "required": ["template", "noteId", "title"]
+      },
+      "responseTemplates": {
+        "note_added": { "text": "Added note \"{{title}}\" with ID {{noteId}}" }
+      }
+    },
+    "list_notes": {
+      "description": "List all stored notes with their titles",
+      "inputSchema": { "type": "object", "properties": {} },
+      "responseMode": "template",
+      "agentDataSchema": {
+        "type": "object",
+        "properties": {
+          "template": { "type": "string", "enum": ["notes_list", "no_notes"] },
+          "count": { "type": "integer" },
+          "noteIds": { "type": "array", "items": { "type": "string", "format": "id" } },
+          "titles": { "type": "array", "items": { "type": "string", "maxLength": 100, "pattern": "^.{1,100}$" } }
+        },
+        "required": ["template", "count"]
+      },
+      "responseTemplates": {
+        "notes_list": { "text": "Found {{count}} note(s): {{titles}}" },
+        "no_notes": { "text": "No notes found. Add some notes first!" }
+      }
+    },
+    "get_note": {
+      "description": "Display a note's full content to the user. Use this when the user wants to READ or SEE a specific note. The content will be shown directly to the user.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "noteId": { "type": "string", "description": "The note ID to retrieve (optional if searching by title)" },
+          "titleSearch": { "type": "string", "description": "Search for a note by title (partial match)" }
+        }
+      },
+      "responseMode": "passthrough",
+      "userContentSchema": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "content": { "type": "string" },
+          "createdAt": { "type": "string" }
+        }
+      }
+    },
+    "update_note": {
+      "description": "Update an existing note's title and/or content. Use this when the user wants to EDIT or MODIFY a note.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "noteId": { "type": "string", "description": "The note ID to update (optional if searching by title)" },
+          "titleSearch": { "type": "string", "description": "Search for a note by title to update (partial match)" },
+          "newTitle": { "type": "string", "description": "New title for the note (optional, keeps existing if not provided)" },
+          "newContent": { "type": "string", "description": "New content for the note (optional, keeps existing if not provided)" }
+        }
+      },
+      "responseMode": "template",
+      "agentDataSchema": {
+        "type": "object",
+        "properties": {
+          "template": { "type": "string", "enum": ["note_updated", "note_not_found", "no_changes"] },
+          "noteId": { "type": "string", "format": "id" },
+          "title": { "type": "string", "maxLength": 100, "pattern": "^.{1,100}$" }
+        },
+        "required": ["template"]
+      },
+      "responseTemplates": {
+        "note_updated": { "text": "Updated note \"{{title}}\" ({{noteId}})" },
+        "note_not_found": { "text": "Note not found" },
+        "no_changes": { "text": "No changes provided. Specify newTitle and/or newContent." }
+      }
+    },
+    "delete_note": {
+      "description": "Delete a note by ID or by searching for it by title. Use this when the user wants to REMOVE a note permanently.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "noteId": { "type": "string", "description": "The note ID to delete (optional if searching by title)" },
+          "titleSearch": { "type": "string", "description": "Search for a note by title to delete (partial match)" }
+        }
+      },
+      "responseMode": "template",
+      "agentDataSchema": {
+        "type": "object",
+        "properties": {
+          "template": { "type": "string", "enum": ["note_deleted", "note_not_found"] },
+          "noteId": { "type": "string", "format": "id" },
+          "title": { "type": "string", "maxLength": 100, "pattern": "^.{1,100}$" }
+        },
+        "required": ["template"]
+      },
+      "responseTemplates": {
+        "note_deleted": { "text": "Deleted note \"{{title}}\" ({{noteId}})" },
+        "note_not_found": { "text": "Note not found" }
+      }
+    }
+  },
+  "capabilities": {
+    "tools": [],
+    "storage": {
+      "enabled": true,
+      "maxSizeBytes": 10485760,
+      "persistent": true
+    }
+  },
+  "config": {
+    "required": [
+      { "key": "API_KEY", "description": "Demo API key (any value works for testing)" }
+    ],
+    "optional": [
+      { "key": "WEBHOOK_URL", "description": "Optional webhook URL for notifications", "default": "" }
+    ]
+  },
+  "limits": {
+    "maxExecutionTimeMs": 30000
+  },
+  "entry": {
+    "module": "dist/index.js",
+    "export": "default"
+  }
+}

@@ -84,7 +84,8 @@ const reloadResponseSchema = {
 export async function triksRoutes(
   fastify: FastifyInstance,
   gateway: TrikGateway,
-  configPath?: string
+  configPath?: string,
+  baseDir?: string
 ): Promise<void> {
   // List installed triks
   fastify.get<{ Reply: ListResponse }>(
@@ -165,8 +166,10 @@ export async function triksRoutes(
         fastify.log.info({ stdout, stderr }, `Installed trik: ${packageName}`);
 
         // Reload skills after install
+        // baseDir must be /app (or /data) where package.json and node_modules live,
+        // not dirname(configPath) which would be /data/.trikhub/
         if (configPath) {
-          await gateway.loadTriksFromConfig({ configPath });
+          await gateway.loadTriksFromConfig({ configPath, baseDir });
         }
 
         return {
@@ -220,7 +223,7 @@ export async function triksRoutes(
 
         // Reload skills after uninstall
         if (configPath) {
-          await gateway.loadTriksFromConfig({ configPath });
+          await gateway.loadTriksFromConfig({ configPath, baseDir });
         }
 
         return {
@@ -259,7 +262,7 @@ export async function triksRoutes(
         let loaded = 0;
 
         if (configPath) {
-          const manifests = await gateway.loadTriksFromConfig({ configPath });
+          const manifests = await gateway.loadTriksFromConfig({ configPath, baseDir });
           loaded = manifests.length;
         }
 

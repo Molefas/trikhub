@@ -1,0 +1,4 @@
+node_modules/
+.trikhub/secrets.json
+*.log
+.DS_Store
