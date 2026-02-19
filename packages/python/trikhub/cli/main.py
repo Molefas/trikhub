@@ -2,6 +2,7 @@
 TrikHub CLI - Command-line interface for managing Python triks.
 
 Usage:
+    trik init ts|py            Initialize a new trik project
     trik install @scope/name   Install a trik from the registry or pip
     trik uninstall @scope/name Uninstall a trik
     trik list                  List installed triks
@@ -237,6 +238,185 @@ def cli(ctx: click.Context, dev: bool) -> None:
     if dev:
         import os
         os.environ["TRIKHUB_ENV"] = "development"
+
+
+# ============================================================================
+# Init Command
+# ============================================================================
+
+CATEGORIES = [
+    ("utilities", "Utilities"),
+    ("productivity", "Productivity"),
+    ("developer", "Developer Tools"),
+    ("data", "Data & Analytics"),
+    ("search", "Search"),
+    ("content", "Content"),
+    ("communication", "Communication"),
+    ("finance", "Finance"),
+    ("entertainment", "Entertainment"),
+    ("education", "Education"),
+    ("other", "Other"),
+]
+
+
+def validate_trik_name(ctx: Any, param: Any, value: str) -> str:
+    """Validate trik name: lowercase, 2-50 chars, starts with letter, alphanumeric + dashes."""
+    import re
+
+    value = value.lower()
+    if len(value) < 2 or len(value) > 50:
+        raise click.BadParameter("Name must be 2-50 characters")
+    if not re.match(r"^[a-z]", value):
+        raise click.BadParameter("Name must start with a letter")
+    if not re.match(r"^[a-z][a-z0-9-]*$", value):
+        raise click.BadParameter("Name must be lowercase, alphanumeric + dashes only")
+    return value
+
+
+@cli.command()
+@click.argument("language", type=click.Choice(["ts", "typescript", "py", "python"], case_sensitive=False))
+def init(language: str) -> None:
+    """Initialize a new trik project.
+
+    Creates a new trik project with boilerplate code.
+
+    Examples:
+        trik init ts    # Create a TypeScript trik
+        trik init py    # Create a Python trik
+    """
+    from trikhub.cli.config import load_defaults, save_defaults, TrikDefaults
+    from trikhub.cli.templates import generate_typescript_project, generate_python_project
+
+    # Normalize language
+    lang = "ts" if language in ("ts", "typescript") else "py"
+
+    click.echo()
+    click.echo(click.style("  Create a new Trik", bold=True))
+    click.echo()
+
+    # Load saved defaults
+    defaults = load_defaults()
+
+    # Interactive prompts
+    name = click.prompt(
+        "Trik name",
+        default="my-trik",
+        value_proc=lambda x: x.lower(),
+    )
+
+    # Validate name
+    import re
+    if len(name) < 2 or len(name) > 50:
+        click.echo(click.style("Error: Name must be 2-50 characters", fg="red"))
+        sys.exit(1)
+    if not re.match(r"^[a-z]", name):
+        click.echo(click.style("Error: Name must start with a letter", fg="red"))
+        sys.exit(1)
+    if not re.match(r"^[a-z][a-z0-9-]*$", name):
+        click.echo(click.style("Error: Name must be lowercase, alphanumeric + dashes only", fg="red"))
+        sys.exit(1)
+
+    # Generate default display name from name
+    default_display = " ".join(part.capitalize() for part in name.split("-"))
+
+    display_name = click.prompt("Display name", default=default_display)
+    description = click.prompt("Short description", default="A short description")
+    author_name = click.prompt("Author name", default=defaults.author_name or "")
+    author_github = click.prompt("GitHub username", default=defaults.author_github or "")
+
+    # Category selection
+    click.echo("\nCategories:")
+    for i, (value, label) in enumerate(CATEGORIES, 1):
+        click.echo(f"  {i}. {label}")
+
+    category_idx = click.prompt(
+        "Category (number)",
+        type=click.IntRange(1, len(CATEGORIES)),
+        default=1,
+    )
+    category = CATEGORIES[category_idx - 1][0]
+
+    enable_storage = click.confirm("Enable persistent storage?", default=False)
+    enable_config = click.confirm("Enable configuration (env vars)?", default=False)
+
+    # Path selection
+    click.echo("\nWhere to create the trik?")
+    click.echo(f"  1. Current folder (./{name})")
+    click.echo("  2. Other location...")
+
+    path_choice = click.prompt("Choice", type=click.IntRange(1, 2), default=1)
+
+    if path_choice == 1:
+        target_dir = Path.cwd() / name
+    else:
+        custom_path = click.prompt("Enter path", default=f"./{name}")
+        target_dir = Path(custom_path).resolve()
+
+    # Check if directory exists
+    if target_dir.exists():
+        click.echo()
+        click.echo(click.style(f"Error: Directory already exists: {target_dir}", fg="red"))
+        sys.exit(1)
+
+    click.echo()
+    click.echo("Creating trik...")
+
+    # Generate files
+    if lang == "ts":
+        from trikhub.cli.templates.typescript import TsTemplateConfig
+        config = TsTemplateConfig(
+            name=name,
+            display_name=display_name,
+            description=description,
+            author_name=author_name,
+            author_github=author_github,
+            category=category,
+            enable_storage=enable_storage,
+            enable_config=enable_config,
+        )
+        files = generate_typescript_project(config)
+    else:
+        from trikhub.cli.templates.python import PyTemplateConfig
+        config = PyTemplateConfig(
+            name=name,
+            display_name=display_name,
+            description=description,
+            author_name=author_name,
+            author_github=author_github,
+            category=category,
+            enable_storage=enable_storage,
+            enable_config=enable_config,
+        )
+        files = generate_python_project(config)
+
+    # Write files
+    for file in files:
+        file_path = target_dir / file.path
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(file.content, encoding="utf-8")
+
+    # Save author defaults for next time
+    if author_name or author_github:
+        save_defaults(TrikDefaults(
+            author_name=author_name or defaults.author_name,
+            author_github=author_github or defaults.author_github,
+        ))
+
+    click.echo(click.style(f"✓ Created trik: {name}", fg="green"))
+
+    # Print next steps
+    click.echo()
+    click.echo(click.style("  Next steps:", bold=True))
+    click.echo()
+    click.echo(click.style(f"  cd {name}", dim=True))
+    if lang == "ts":
+        click.echo(click.style("  npm install", dim=True))
+        click.echo(click.style("  npm run build", dim=True))
+        click.echo(click.style("  npm test              # Test your trik locally", dim=True))
+    else:
+        click.echo(click.style("  python test.py        # Test your trik locally", dim=True))
+    click.echo(click.style("  trik publish          # When ready to publish", dim=True))
+    click.echo()
 
 
 # ============================================================================
