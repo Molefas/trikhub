@@ -287,7 +287,7 @@ Your `manifest.json` must pass validation:
 - Template mode requires `responseTemplates`
 - Passthrough mode requires `userContentSchema`
 
-See the [SAAAS SDK documentation](https://github.com/trikhub/saaas-sdk) for manifest schema details.
+See the [Trikhub Manifest Schema](https://trikhub.com/docs/reference/manifest-schema) for manifest schema details.
 
 ## Trik Names
 
@@ -457,12 +457,6 @@ node dist/cli.js --help
 # With local registry
 TRIKHUB_REGISTRY=http://localhost:3000 node dist/cli.js search article
 ```
-
-## Related Projects
-
-- **[@trikhub/registry](https://github.com/trikhub/registry)** - The TrikHub registry service
-- **[SAAAS SDK](https://github.com/trikhub/saaas-sdk)** - SDK for building AI skills
-- **[trikhub.com](https://trikhub.com)** - Web interface for browsing triks
 
 ## License
 
