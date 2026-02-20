@@ -1,0 +1,52 @@
+# Home Assistant Addon Dockerfile
+ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:latest
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+# Install pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+# Copy workspace files
+COPY pnpm-workspace.yaml ./
+COPY pnpm-lock.yaml ./
+COPY package.json ./
+COPY tsconfig.base.json ./
+
+# Copy all packages
+COPY packages/ ./packages/
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Build all packages
+RUN pnpm build
+
+# Production stage - use HA base image
+FROM $BUILD_FROM
+
+# Install Node.js
+RUN apk add --no-cache nodejs npm jq
+
+WORKDIR /app
+
+# Copy built application
+COPY --from=builder /app/packages/skill-manifest/dist ./packages/skill-manifest/dist
+COPY --from=builder /app/packages/skill-manifest/package.json ./packages/skill-manifest/
+COPY --from=builder /app/packages/skill-gateway/dist ./packages/skill-gateway/dist
+COPY --from=builder /app/packages/skill-gateway/package.json ./packages/skill-gateway/
+COPY --from=builder /app/packages/skill-linter/dist ./packages/skill-linter/dist
+COPY --from=builder /app/packages/skill-linter/package.json ./packages/skill-linter/
+COPY --from=builder /app/packages/skill-server/dist ./packages/skill-server/dist
+COPY --from=builder /app/packages/skill-server/package.json ./packages/skill-server/
+
+# Copy root package files
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/pnpm-workspace.yaml ./
+COPY --from=builder /app/node_modules ./node_modules
+
+# Copy run script
+COPY packages/skill-server/run.sh /run.sh
+RUN chmod a+x /run.sh
+
+CMD ["/run.sh"]

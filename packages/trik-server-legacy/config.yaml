@@ -1,0 +1,39 @@
+name: "Skill Gateway"
+version: "0.1.0"
+slug: skill-gateway
+description: "HTTP server for AI skill consumption with prompt injection protection"
+url: "https://github.com/your-repo/skill-poc-v2"
+
+arch:
+  - amd64
+  - aarch64
+
+ports:
+  3000/tcp: 3000
+ports_description:
+  3000/tcp: "Skill Gateway API"
+
+map:
+  - share:rw
+  - config:ro
+
+options:
+  skills_dir: "/share/skills"
+  port: 3000
+  log_level: "info"
+  lint_on_load: true
+  auth_token: ""
+
+schema:
+  skills_dir: str
+  port: port
+  log_level: list(debug|info|warn|error)
+  lint_on_load: bool
+  auth_token: str?
+
+startup: application
+boot: auto
+
+init: false
+homeassistant_api: false
+hassio_api: false
