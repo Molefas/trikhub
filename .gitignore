@@ -34,9 +34,4 @@ pnpm-debug.log*
 
 # Test coverage
 coverage/
-
-# Local trik server for Home Assistant connection (not part of main repo)
-packages/trik-server-legacy/
-
-# Legacy examples (deprecated)
-*_legacy/
+tests/e2e
