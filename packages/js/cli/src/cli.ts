@@ -20,6 +20,7 @@ import { upgradeCommand, upgradeAllCommand } from './commands/upgrade.js';
 import { syncCommand } from './commands/sync.js';
 import { initCommand } from './commands/init.js';
 import { lintCommand } from './commands/lint.js';
+import { mcpCommand } from './commands/mcp.js';
 
 // Read version from package.json
 const require = createRequire(import.meta.url);
@@ -146,6 +147,13 @@ program
   .option('--warnings-as-errors', 'Treat warnings as errors')
   .option('--skip <rule>', 'Skip a specific rule (can be repeated)', (val, prev: string[]) => [...prev, val], [])
   .action(lintCommand);
+
+// MCP command
+program
+  .command('mcp')
+  .description('Start the TrikHub MCP server for AI-assisted development')
+  .option('--stdio', 'Run in stdio mode for MCP clients')
+  .action(mcpCommand);
 
 // TODO: Add more commands
 // program.command('outdated').description('Check for outdated triks');
