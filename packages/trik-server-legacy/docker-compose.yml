@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  skill-server:
+    build:
+      context: ../..
+      dockerfile: packages/skill-server/Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./skills:/data/skills:ro
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      - SKILLS_DIR=/data/skills
+      - LINT_ON_LOAD=true
+      - LOG_LEVEL=info
+      # - AUTH_TOKEN=your-secret-token
+    restart: unless-stopped

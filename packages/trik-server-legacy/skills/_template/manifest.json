@@ -1,0 +1,43 @@
+{
+  "id": "_template",
+  "name": "Template Skill",
+  "version": "1.0.0",
+  "description": "A template skill to copy and customize",
+  "entry": {
+    "module": "graph.js",
+    "export": "graph"
+  },
+  "capabilities": {
+    "tools": [],
+    "session": {
+      "enabled": false
+    }
+  },
+  "limits": {
+    "maxExecutionTimeMs": 30000
+  },
+  "actions": {
+    "hello": {
+      "description": "A simple hello action",
+      "responseMode": "template",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" }
+        },
+        "required": ["name"]
+      },
+      "agentDataSchema": {
+        "type": "object",
+        "properties": {
+          "template": { "type": "string", "enum": ["greeting"] },
+          "nameLength": { "type": "integer" }
+        },
+        "required": ["template", "nameLength"]
+      },
+      "responseTemplates": {
+        "greeting": { "text": "Hello! The name has {{nameLength}} characters." }
+      }
+    }
+  }
+}
