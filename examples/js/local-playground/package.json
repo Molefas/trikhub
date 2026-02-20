@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@langchain/langgraph-cli": "^0.0.23",
+    "@trikhub/cli": "file:../../../packages/js/cli",
     "@types/node": "^22.10.7",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
