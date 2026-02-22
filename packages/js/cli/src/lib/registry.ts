@@ -169,10 +169,15 @@ export class RegistryClient {
 
   /**
    * Get the auth token
+   * Priority: explicit constructor arg > env var > config file
    */
   private get authToken(): string | undefined {
     if (this._explicitAuthToken) {
       return this._explicitAuthToken;
+    }
+    // Check env var (useful for testing and CI)
+    if (process.env.TRIKHUB_AUTH_TOKEN) {
+      return process.env.TRIKHUB_AUTH_TOKEN;
     }
     const config = loadConfig();
     return config.authToken;

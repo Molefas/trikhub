@@ -12,7 +12,7 @@
  * 4. Update .trikhub/config.json with the trik
  */
 
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -24,6 +24,33 @@ import { registry } from '../lib/registry.js';
 import { TrikVersion, TrikRuntime } from '../types.js';
 
 type ProjectType = 'node' | 'python';
+
+/**
+ * Get mock repo path for E2E testing.
+ * When TRIKHUB_MOCK_REPOS_FILE is set, looks up the local bare repo path.
+ */
+function getMockRepoPath(githubRepo: string): string | null {
+  const mockReposFile = process.env.TRIKHUB_MOCK_REPOS_FILE;
+  if (!mockReposFile) return null;
+
+  try {
+    const mapping = JSON.parse(readFileSync(mockReposFile, 'utf-8'));
+    return mapping[githubRepo] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get the clone URL for a repo - uses mock path in E2E tests
+ */
+function getCloneUrl(githubRepo: string): string {
+  const mockPath = getMockRepoPath(githubRepo);
+  if (mockPath) {
+    return mockPath;
+  }
+  return `https://github.com/${githubRepo}.git`;
+}
 
 /**
  * Detect whether this is a Node.js or Python project
@@ -209,12 +236,18 @@ async function addTrikToConfig(
 
 /**
  * Verify that a GitHub tag points to the expected commit SHA
+ * Can be skipped with TRIKHUB_SKIP_TAG_CHECK=true (for E2E testing with mock repos)
  */
 async function verifyGitHubTagSha(
   githubRepo: string,
   gitTag: string,
   expectedSha: string
 ): Promise<{ valid: boolean; currentSha?: string }> {
+  // Skip verification in test mode
+  if (process.env.TRIKHUB_SKIP_TAG_CHECK === 'true') {
+    return { valid: true };
+  }
+
   try {
     // Use GitHub API to get the tag reference
     const response = await fetch(
@@ -339,9 +372,10 @@ async function downloadToTriksDirectory(
 
   // Clone the repository at the specific tag
   spinner.text = `Downloading ${chalk.cyan(packageName)}...`;
+  const cloneUrl = getCloneUrl(githubRepo);
   const cloneResult = await runCommand(
     'git',
-    ['clone', '--depth', '1', '--branch', gitTag, `https://github.com/${githubRepo}.git`, trikDir],
+    ['clone', '--depth', '1', '--branch', gitTag, cloneUrl, trikDir],
     baseDir,
     { silent: true }
   );
@@ -433,7 +467,11 @@ async function installFromTrikhub(
 
   // Install directly using the git URL to bypass npm cache
   // This is more reliable than updating package.json + npm install
-  const gitUrl = `github:${trikInfo.githubRepo}#${versionInfo.gitTag}`;
+  // Check for mock repo path (E2E testing) or use GitHub URL
+  const mockPath = getMockRepoPath(trikInfo.githubRepo);
+  const gitUrl = mockPath
+    ? `git+file://${mockPath}#${versionInfo.gitTag}`
+    : `github:${trikInfo.githubRepo}#${versionInfo.gitTag}`;
   spinner.text = `Installing ${chalk.cyan(packageName)}@${versionToInstall}...`;
 
   let installArgs: string[];
