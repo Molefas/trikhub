@@ -192,28 +192,26 @@ export async function uninstallCommand(trikInput: string): Promise<void> {
       spinner.succeed(`Removed ${chalk.green(packageName)} from .trikhub/config.json`);
     }
 
-    // Check if it's a cross-language trik (non-node runtime means it was downloaded to .trikhub/triks/)
-    const isCrossLanguage = runtime && runtime !== 'node';
+    // Check if the trik is stored in .trikhub/triks/ (TrikHub-managed)
+    const trikDirPath = getTrikDirPath(baseDir, packageName);
+    const isInTriksDir = existsSync(trikDirPath);
 
-    if (isCrossLanguage) {
-      // Remove from .trikhub/triks/ directory
+    // Also check node_modules for npm-based triks
+    const nodeModulesPath = join(baseDir, 'node_modules', ...packageName.split('/'));
+    const isInNodeModules = existsSync(nodeModulesPath);
+
+    // Remove from .trikhub/triks/ if present (TrikHub-managed triks)
+    if (isInTriksDir) {
       spinner.start(`Removing ${chalk.cyan(packageName)} from .trikhub/triks/...`);
-      const removed = await removeTrikDirectory(baseDir, packageName);
+      await removeTrikDirectory(baseDir, packageName);
+      spinner.succeed(`Removed ${chalk.green(packageName)} from .trikhub/triks/`);
+    }
 
-      if (removed) {
-        spinner.succeed(`Removed ${chalk.green(packageName)} from .trikhub/triks/`);
-      } else {
-        spinner.info(`${chalk.yellow(packageName)} directory not found in .trikhub/triks/`);
-      }
-
-      console.log();
-      console.log(chalk.green(`✓ Uninstalled ${packageName}`));
-    } else {
-      // Same-language trik: use package manager to uninstall
+    // Remove from node_modules if present (npm-based triks)
+    if (isInNodeModules) {
       const pm = detectPackageManager(baseDir);
 
       // Build uninstall command
-      // Use --prefix for npm to explicitly set the project directory
       const uninstallArgs: string[] = [];
 
       switch (pm) {
@@ -229,15 +227,19 @@ export async function uninstallCommand(trikInput: string): Promise<void> {
           break;
       }
 
-      // Run package manager uninstall
       spinner.start(`Uninstalling ${chalk.cyan(packageName)}...`);
       spinner.stopAndPersist({ symbol: '📦', text: `Uninstalling ${chalk.cyan(packageName)}...` });
 
       await runCommand(pm, uninstallArgs, baseDir);
-
-      console.log();
-      console.log(chalk.green(`✓ Uninstalled ${packageName}`));
     }
+
+    if (!isInTriksDir && !isInNodeModules && !wasInConfig) {
+      console.log(chalk.yellow(`${packageName} was not installed`));
+      return;
+    }
+
+    console.log();
+    console.log(chalk.green(`✓ Uninstalled ${packageName}`));
 
   } catch (error) {
     spinner.fail('Uninstall failed');

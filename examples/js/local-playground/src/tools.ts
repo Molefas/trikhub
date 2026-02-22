@@ -78,7 +78,7 @@ export async function loadTriks(
   onPassthrough?: (content: PassthroughContent) => void
 ): Promise<TrikLoaderResult> {
   try {
-    const result = await loadLangChainTriks({ onPassthrough });
+    const result = await loadLangChainTriks({ onPassthrough, debug: true });
 
     if (result.loadedTriks.length === 0) {
       console.log('[Triks] No triks configured');

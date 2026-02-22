@@ -232,42 +232,47 @@ export async function publishCommand(options: PublishOptions): Promise<void> {
     const fullName = `@${owner}/${trikName}`;
 
     // Step 4: Verify git remote matches trikhub.json repository
-    spinner.start('Verifying git remote...');
-    try {
-      const gitRemote = execSync('git remote get-url origin', {
-        cwd: repoDir,
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      }).trim();
+    // Skip this check if TRIKHUB_SKIP_REMOTE_CHECK is set (for E2E testing with mock remotes)
+    if (process.env.TRIKHUB_SKIP_REMOTE_CHECK === 'true') {
+      console.log(chalk.dim('  Skipping git remote verification (TRIKHUB_SKIP_REMOTE_CHECK=true)'));
+    } else {
+      spinner.start('Verifying git remote...');
+      try {
+        const gitRemote = execSync('git remote get-url origin', {
+          cwd: repoDir,
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
 
-      // Normalize URLs for comparison (handle SSH and HTTPS variants)
-      const normalizeGitUrl = (url: string): string => {
-        return url
-          .replace(/^git@github\.com:/, 'github.com/')
-          .replace(/^https?:\/\//, '')
-          .replace(/\.git$/, '')
-          .toLowerCase();
-      };
+        // Normalize URLs for comparison (handle SSH and HTTPS variants)
+        const normalizeGitUrl = (url: string): string => {
+          return url
+            .replace(/^git@github\.com:/, 'github.com/')
+            .replace(/^https?:\/\//, '')
+            .replace(/\.git$/, '')
+            .toLowerCase();
+        };
 
-      const normalizedRemote = normalizeGitUrl(gitRemote);
+        const normalizedRemote = normalizeGitUrl(gitRemote);
 
-      if (!normalizedRemote.includes(githubRepo.toLowerCase())) {
-        spinner.fail('Git remote does not match trikhub.json repository');
-        console.log(chalk.red('\nRepository mismatch detected:'));
-        console.log(chalk.dim(`  trikhub.json: ${repoUrl}`));
-        console.log(chalk.dim(`  git remote:   ${gitRemote}`));
-        console.log();
-        console.log(chalk.dim('Update trikhub.json to match your git remote, or push to the correct repository.'));
+        if (!normalizedRemote.includes(githubRepo.toLowerCase())) {
+          spinner.fail('Git remote does not match trikhub.json repository');
+          console.log(chalk.red('\nRepository mismatch detected:'));
+          console.log(chalk.dim(`  trikhub.json: ${repoUrl}`));
+          console.log(chalk.dim(`  git remote:   ${gitRemote}`));
+          console.log();
+          console.log(chalk.dim('Update trikhub.json to match your git remote, or push to the correct repository.'));
+          process.exit(1);
+        }
+        spinner.succeed('Git remote verified');
+      } catch {
+        // Not a git repo or no remote configured
+        spinner.fail('Not a git repository or no remote configured');
+        console.log(chalk.dim('Initialize git and add a remote that matches trikhub.json:'));
+        console.log(chalk.dim(`  git init`));
+        console.log(chalk.dim(`  git remote add origin ${repoUrl}`));
         process.exit(1);
       }
-      spinner.succeed('Git remote verified');
-    } catch {
-      // Not a git repo or no remote configured
-      spinner.fail('Not a git repository or no remote configured');
-      console.log(chalk.dim('Initialize git and add a remote that matches trikhub.json:'));
-      console.log(chalk.dim(`  git init`));
-      console.log(chalk.dim(`  git remote add origin ${repoUrl}`));
-      process.exit(1);
     }
 
     console.log(chalk.dim(`  Trik: ${fullName}`));

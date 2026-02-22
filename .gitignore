@@ -35,3 +35,6 @@ pnpm-debug.log*
 # Test coverage
 coverage/
 tests/e2e
+
+# Docs
+docs/

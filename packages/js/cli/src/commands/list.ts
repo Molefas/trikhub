@@ -80,11 +80,25 @@ async function getTrikInfo(
       crossLanguage: false,
     };
 
-    if (existsSync(packageJsonPath)) {
+    // Prefer version from config.trikhub (more accurate for recently installed/upgraded triks)
+    // Fall back to package.json version in node_modules
+    if (config.trikhub?.[packageName]) {
+      info.version = config.trikhub[packageName];
+    } else if (existsSync(packageJsonPath)) {
       try {
         const content = await readFile(packageJsonPath, 'utf-8');
         const pkg = JSON.parse(content);
         info.version = pkg.version || 'unknown';
+      } catch {
+        // Ignore errors reading package.json
+      }
+    }
+
+    // Get description from package.json
+    if (existsSync(packageJsonPath)) {
+      try {
+        const content = await readFile(packageJsonPath, 'utf-8');
+        const pkg = JSON.parse(content);
         info.description = pkg.description;
       } catch {
         // Ignore errors reading package.json
