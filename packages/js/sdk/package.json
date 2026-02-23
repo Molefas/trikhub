@@ -1,0 +1,61 @@
+{
+  "name": "@trikhub/sdk",
+  "version": "0.11.0",
+  "description": "SDK for building trik agents — wrapAgent(), transfer_back tool, and tool call interception",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "trik",
+    "sdk",
+    "langchain",
+    "langgraph",
+    "typescript",
+    "trikhub"
+  ],
+  "author": "Molefas",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Molefas/trikhub.git",
+    "directory": "packages/js/sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/Molefas/trikhub/issues"
+  },
+  "homepage": "https://github.com/Molefas/trikhub/tree/main/packages/js/sdk#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@trikhub/manifest": "workspace:*"
+  },
+  "devDependencies": {
+    "@langchain/core": "^0.3.0",
+    "zod": "^3.0.0"
+  },
+  "peerDependencies": {
+    "@langchain/core": ">=0.3.0",
+    "zod": ">=3.0.0"
+  }
+}
