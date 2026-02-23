@@ -6,43 +6,14 @@ export type {
   TrikLimits,
   TrikEntry,
   TrikRuntime,
-  ExecuteRequest,
-  ExecuteResponse,
-  SuccessResponse,
-  ClarificationResponse,
-  ErrorResponse,
-  ClarifyRequest,
-  ClarificationQuestion,
-  ClarificationAnswer,
-  GatewayResult,
-  GatewaySuccess,
-  GatewaySuccessTemplate,
-  GatewaySuccessPassthrough,
-  GatewayError,
-  GatewayClarification,
-  GatewayErrorCode,
-  // Type-directed privilege separation types
-  AllowedAgentStringFormat,
-  ResponseMode,
-  ResponseTemplate,
-  ActionDefinition,
-  // Session types
+  // Session/Storage capabilities
   SessionCapabilities,
-  SessionHistoryEntry,
-  TrikSession,
-  SessionContext,
-  GraphInput,
-  GraphResult,
-  // Passthrough types
-  PassthroughContent,
-  PassthroughDeliveryReceipt,
-  UserContentReference,
+  StorageCapabilities,
   // Configuration types
   ConfigRequirement,
   TrikConfig,
   TrikConfigContext,
   // Storage types
-  StorageCapabilities,
   TrikStorageContext,
 } from './types.js';
 
@@ -53,9 +24,4 @@ export {
   createValidator,
   SchemaValidator,
   type ValidationResult,
-  // Security validation utilities
-  ALLOWED_STRING_FORMATS,
-  isConstrainedString,
-  findUnconstrainedStrings,
-  validateAgentDataSecurity,
 } from './validator.js';

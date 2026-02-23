@@ -12,11 +12,6 @@ import {
   checkDynamicCodeExecution,
   checkUndeclaredTools,
   checkProcessEnvAccess,
-  // Privilege separation rules
-  checkNoFreeStringsInAgentData,
-  checkTemplateFieldsExist,
-  checkHasResponseTemplates,
-  checkDefaultTemplateRecommended,
 } from './rules.js';
 
 type PackageType = 'node' | 'python';
@@ -168,9 +163,6 @@ export class TrikLinter {
    *
    * This validates:
    * - Manifest structure and required fields
-   * - Privilege separation rules (no free strings in agentData)
-   * - Template field existence
-   * - Response templates presence
    *
    * This does NOT validate:
    * - Source code (forbidden imports, eval, etc.)
@@ -348,7 +340,7 @@ export class TrikLinter {
 
       // Check undeclared tools
       if (!this.shouldSkipRule('undeclared-tool')) {
-        results.push(...checkUndeclaredTools(sourceFile, manifest.capabilities.tools));
+        results.push(...checkUndeclaredTools(sourceFile, []));
       }
 
       // Check process.env access
@@ -372,30 +364,9 @@ export class TrikLinter {
   /**
    * Lint manifest with privilege separation rules
    */
-  private lintManifest(manifest: TrikManifest, manifestPath: string): LintResult[] {
-    const results: LintResult[] = [];
-
-    // Core security rule: no free-form strings in agentDataSchema
-    if (!this.shouldSkipRule('no-free-strings-in-agent-data')) {
-      results.push(...checkNoFreeStringsInAgentData(manifest, manifestPath));
-    }
-
-    // Validate template placeholders reference real fields
-    if (!this.shouldSkipRule('template-fields-exist')) {
-      results.push(...checkTemplateFieldsExist(manifest, manifestPath));
-    }
-
-    // Ensure actions have response templates
-    if (!this.shouldSkipRule('has-response-templates')) {
-      results.push(...checkHasResponseTemplates(manifest, manifestPath));
-    }
-
-    // Recommend having a default/success template
-    if (!this.shouldSkipRule('default-template-recommended')) {
-      results.push(...checkDefaultTemplateRecommended(manifest, manifestPath));
-    }
-
-    return results;
+  private lintManifest(_manifest: TrikManifest, _manifestPath: string): LintResult[] {
+    // Stub — v1 TDPS rules removed in P1, v2 quality rules in P2
+    return [];
   }
 
   /**
@@ -432,7 +403,7 @@ export class TrikLinter {
       });
     }
 
-    if (manifest.limits.maxExecutionTimeMs > 60000) {
+    if (manifest.limits && 'maxExecutionTimeMs' in manifest.limits && (manifest.limits as any).maxExecutionTimeMs > 60000) {
       results.push({
         rule: 'manifest-completeness',
         severity: 'warning',

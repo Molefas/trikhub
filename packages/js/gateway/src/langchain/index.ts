@@ -1,12 +1,1 @@
-export {
-  createLangChainTools,
-  parseToolName,
-  getToolNameMap,
-  loadLangChainTriks,
-  type LangChainAdapterOptions,
-  type LoadLangChainTriksOptions,
-  type LangChainTriksResult,
-  type PassthroughContent,
-} from './adapter.js';
-
-export { jsonSchemaToZod } from './schema-converter.js';
+// LangChain integration cleared for P1 — will be rewritten as enhance() in P5.

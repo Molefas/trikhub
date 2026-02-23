@@ -12,8 +12,9 @@ import ora from 'ora';
 import { input, select, confirm } from '@inquirer/prompts';
 import { TrikCategory } from '../types.js';
 import { loadDefaults, saveDefaults } from '../lib/storage.js';
-import { generateTypescriptProject } from '../templates/typescript.js';
-import { generatePythonProject } from '../templates/python.js';
+// v1 template generators removed in P1, v2 templates in P8
+// import { generateTypescriptProject } from '../templates/typescript.js';
+// import { generatePythonProject } from '../templates/python.js';
 
 type Language = 'ts' | 'py';
 
@@ -170,43 +171,10 @@ export async function initCommand(languageArg: string): Promise<void> {
       enableConfig,
     };
 
-    const files =
-      language === 'ts'
-        ? generateTypescriptProject(config)
-        : generatePythonProject(config);
-
-    // Write files
-    for (const file of files) {
-      const filePath = join(targetDir, file.path);
-      const dir = join(filePath, '..');
-      await mkdir(dir, { recursive: true });
-      await writeFile(filePath, file.content, 'utf-8');
-    }
-
-    // Save author defaults for next time
-    if (authorName || authorGithub) {
-      saveDefaults({
-        authorName: authorName || defaults.authorName,
-        authorGithub: authorGithub || defaults.authorGithub,
-      });
-    }
-
-    spinner.succeed(`Created trik: ${chalk.green(name)}`);
-
-    // Print next steps
-    console.log();
-    console.log(chalk.bold('  Next steps:'));
-    console.log();
-    console.log(chalk.dim(`  cd ${name}`));
-    if (language === 'ts') {
-      console.log(chalk.dim('  npm install'));
-      console.log(chalk.dim('  npm run build'));
-      console.log(chalk.dim('  npm test              # Test your trik locally'));
-    } else {
-      console.log(chalk.dim('  python test.py        # Test your trik locally'));
-    }
-    console.log(chalk.dim('  trik publish          # When ready to publish'));
-    console.log();
+    // v1 template generators removed in P1, v2 templates in P8
+    spinner.stop();
+    console.log(chalk.yellow('\n  trik init is not yet available for v2. Coming soon.\n'));
+    return;
   } catch (error) {
     spinner.fail('Failed to create trik');
     if (error instanceof Error) {

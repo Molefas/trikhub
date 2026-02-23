@@ -1,6 +1,6 @@
 import { tool, type DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
-import { TrikGateway, type PassthroughContent } from '@trikhub/gateway';
+import { TrikGateway } from '@trikhub/gateway';
 import { loadLangChainTriks } from '@trikhub/gateway/langchain';
 
 // ============================================================================
@@ -74,11 +74,9 @@ export interface AllToolsResult extends TrikLoaderResult {
   allTools: DynamicStructuredTool[];
 }
 
-export async function loadTriks(
-  onPassthrough?: (content: PassthroughContent) => void
-): Promise<TrikLoaderResult> {
+export async function loadTriks(): Promise<TrikLoaderResult> {
   try {
-    const result = await loadLangChainTriks({ onPassthrough, debug: true });
+    const result = await loadLangChainTriks({ debug: true });
 
     if (result.loadedTriks.length === 0) {
       console.log('[Triks] No triks configured');
@@ -101,10 +99,8 @@ export async function loadTriks(
   }
 }
 
-export async function loadAllTools(
-  onPassthrough?: (content: PassthroughContent) => void
-): Promise<AllToolsResult> {
-  const trikResult = await loadTriks(onPassthrough);
+export async function loadAllTools(): Promise<AllToolsResult> {
+  const trikResult = await loadTriks();
 
   return {
     ...trikResult,

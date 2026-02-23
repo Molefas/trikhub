@@ -1,9 +1,1 @@
-/**
- * MCP Tools Export
- */
-
-export * from './types.js';
-export { analyzeTrikRequirements } from './analyze.js';
-export { designAction, designSchema } from './design.js';
-export { scaffoldTrik } from './scaffold.js';
-export { validateTrikManifest, diagnoseError } from './validate.js';
+// Stub — v1 tool exports removed in P1, v2 exports in P7

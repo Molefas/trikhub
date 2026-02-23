@@ -49,10 +49,7 @@ Examples:
 
 API Endpoints:
   GET  /api/v1/health      Health check
-  GET  /api/v1/tools       List available tools
   GET  /api/v1/triks       List installed triks
-  POST /api/v1/execute     Execute a skill action
-  GET  /api/v1/content/:ref  Retrieve passthrough content
   GET  /docs               Swagger UI documentation
 `);
 }

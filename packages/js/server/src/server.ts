@@ -5,9 +5,6 @@ import { createRequire } from 'module';
 import type { TrikGateway } from '@trikhub/gateway';
 import type { ServerConfig } from './config.js';
 import { healthRoutes } from './routes/health.js';
-import { toolsRoutes } from './routes/tools.js';
-import { executeRoutes } from './routes/execute.js';
-import { contentRoutes } from './routes/content.js';
 import { triksRoutes } from './routes/triks.js';
 
 // Read version from package.json
@@ -43,7 +40,7 @@ export async function createServer(config: ServerConfig, gateway: TrikGateway): 
       openapi: '3.1.0',
       info: {
         title: 'Trik Gateway API',
-        description: 'HTTP API for executing triks with prompt injection protection',
+        description: 'HTTP API for trik gateway',
         version: pkg.version,
       },
       servers: [
@@ -64,9 +61,6 @@ export async function createServer(config: ServerConfig, gateway: TrikGateway): 
       security: config.authToken ? [{ bearerAuth: [] }] : [],
       tags: [
         { name: 'health', description: 'Health check endpoints' },
-        { name: 'tools', description: 'Tool discovery endpoints' },
-        { name: 'execute', description: 'Trik execution endpoints' },
-        { name: 'content', description: 'Passthrough content delivery' },
         { name: 'triks', description: 'Trik package management' },
       ],
     },
@@ -108,9 +102,6 @@ export async function createServer(config: ServerConfig, gateway: TrikGateway): 
 
   // Register routes
   await healthRoutes(fastify, gateway);
-  await toolsRoutes(fastify, gateway);
-  await executeRoutes(fastify, gateway);
-  await contentRoutes(fastify, gateway);
   await triksRoutes(fastify, gateway, config.configPath, config.baseDir);
 
   return fastify;

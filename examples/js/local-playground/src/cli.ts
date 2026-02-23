@@ -1,7 +1,7 @@
 import "dotenv/config";
 import * as readline from "readline";
 import { HumanMessage, BaseMessage } from "@langchain/core/messages";
-import { initializeAgentWithTriks, getLastPassthroughContent } from "./agent.js";
+import { initializeAgentWithTriks } from "./agent.js";
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -66,14 +66,6 @@ async function main() {
         { messages },
         { configurable: { thread_id: threadId } }
       );
-
-      // Check for passthrough content (direct output from trik)
-      const passthroughContent = getLastPassthroughContent();
-      if (passthroughContent) {
-        console.log(`\n--- Direct Content (${passthroughContent.contentType}) ---`);
-        console.log(passthroughContent.content);
-        console.log("--- End ---\n");
-      }
 
       // Always show assistant message
       const assistantMessage = result.messages[result.messages.length - 1];

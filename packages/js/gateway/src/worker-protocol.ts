@@ -8,14 +8,6 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import type {
-  SessionHistoryEntry,
-  PassthroughContent,
-  ClarificationQuestion,
-} from '@trikhub/manifest';
-
-// Re-export for convenience
-export type { SessionHistoryEntry, PassthroughContent, ClarificationQuestion };
 
 // ============================================================================
 // JSON-RPC 2.0 Base Types
@@ -47,23 +39,7 @@ export interface JsonRpcError {
 
 export type WorkerMethod = 'invoke' | 'health' | 'shutdown';
 
-export interface InvokeParams {
-  /** Absolute path to the trik directory */
-  trikPath: string;
-  /** Action name to execute */
-  action: string;
-  /** Action input (validated against inputSchema) */
-  input: unknown;
-  /** Session context if session is enabled */
-  session?: {
-    sessionId: string;
-    history: SessionHistoryEntry[];
-  };
-  /** Configuration values (API keys, etc.) */
-  config?: Record<string, string>;
-}
-
-// SessionHistoryEntry is imported from @trikhub/manifest
+// InvokeParams stub — v2 protocol (processMessage) defined in P3.
 
 export interface HealthParams {
   /** Optional timeout in ms */
@@ -79,22 +55,7 @@ export interface ShutdownParams {
 // Worker Response Types
 // ============================================================================
 
-export interface InvokeResult {
-  /** Response mode (template or passthrough) */
-  responseMode?: 'template' | 'passthrough';
-  /** Structured agent data (template mode) */
-  agentData?: unknown;
-  /** User content (passthrough mode) */
-  userContent?: PassthroughContent;
-  /** Whether clarification is needed */
-  needsClarification?: boolean;
-  /** Clarification questions if needed */
-  clarificationQuestions?: ClarificationQuestion[];
-  /** Whether to end the session */
-  endSession?: boolean;
-}
-
-// PassthroughContent and ClarificationQuestion are imported from @trikhub/manifest
+// InvokeResult stub — v2 protocol (ProcessMessageResult) defined in P3.
 
 export interface HealthResult {
   status: 'ok' | 'error';
@@ -155,9 +116,7 @@ export const WorkerErrorCodes = {
 
   // Custom worker errors
   TRIK_NOT_FOUND: 1001,
-  ACTION_NOT_FOUND: 1002,
   EXECUTION_TIMEOUT: 1003,
-  SCHEMA_VALIDATION_FAILED: 1004,
   WORKER_NOT_READY: 1005,
   STORAGE_ERROR: 1006,
 } as const;
@@ -176,10 +135,6 @@ export function createRequest(
     method,
     params,
   };
-}
-
-export function createInvokeRequest(params: InvokeParams): JsonRpcRequest {
-  return createRequest('invoke', params);
 }
 
 export function createHealthRequest(): JsonRpcRequest {

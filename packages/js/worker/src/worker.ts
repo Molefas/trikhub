@@ -16,7 +16,7 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
-import type { TrikManifest, SessionHistoryEntry } from '@trikhub/manifest';
+import type { TrikManifest } from '@trikhub/manifest';
 
 // ============================================================================
 // JSON-RPC 2.0 Types
@@ -272,7 +272,6 @@ interface InvokeParams {
   input?: unknown;
   session?: {
     sessionId: string;
-    history: SessionHistoryEntry[];
   };
   config?: Record<string, string>;
 }
