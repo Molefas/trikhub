@@ -37,4 +37,6 @@ coverage/
 tests/e2e
 
 # Docs
-docs/
+docs/*
+!docs/plans/
+!docs/handoff-architecture.md
