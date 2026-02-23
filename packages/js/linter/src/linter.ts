@@ -403,11 +403,11 @@ export class TrikLinter {
       });
     }
 
-    if (manifest.limits && 'maxExecutionTimeMs' in manifest.limits && (manifest.limits as any).maxExecutionTimeMs > 60000) {
+    if (manifest.limits && manifest.limits.maxTurnTimeMs > 60000) {
       results.push({
         rule: 'manifest-completeness',
         severity: 'warning',
-        message: 'maxExecutionTimeMs is very high (>60s) - consider reducing',
+        message: 'maxTurnTimeMs is very high (>60s) - consider reducing',
         file: manifestPath,
       });
     }

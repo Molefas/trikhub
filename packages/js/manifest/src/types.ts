@@ -22,6 +22,62 @@ export interface JSONSchema {
   [key: string]: unknown;
 }
 
+// ============================================================================
+// Manifest Types
+// ============================================================================
+
+/**
+ * Agent mode determines how the trik interacts with users.
+ * - "conversational": Agent with LLM, handles multi-turn conversations
+ * - "one-shot": Deterministic, no LLM, processes a single request
+ */
+export type AgentMode = 'conversational' | 'one-shot';
+
+/**
+ * Model preferences for the agent's LLM.
+ */
+export interface ModelPreferences {
+  /** Provider hint: "anthropic", "openai", "any" */
+  provider?: string;
+  /** Required model capabilities, e.g. ["tool_use"] */
+  capabilities?: string[];
+  /** Temperature for generation (0.0-2.0) */
+  temperature?: number;
+}
+
+/**
+ * Agent definition — the core of a v2 manifest.
+ * Declares how this trik operates as an agent.
+ */
+export interface AgentDefinition {
+  /** How this agent operates */
+  mode: AgentMode;
+  /** Description used to generate the handoff tool for the main agent */
+  handoffDescription: string;
+  /** Inline system prompt (conversational mode) */
+  systemPrompt?: string;
+  /** Path to system prompt file, relative to manifest (conversational mode) */
+  systemPromptFile?: string;
+  /** LLM model preferences */
+  model?: ModelPreferences;
+  /** Domain tags describing this agent's expertise */
+  domain: string[];
+}
+
+/**
+ * Tool declaration in the manifest.
+ * Describes an internal tool the agent uses — not the tool's runtime schema
+ * (which lives in code), but metadata for logging and quality scoring.
+ */
+export interface ToolDeclaration {
+  /** What this tool does */
+  description: string;
+  /** Template for log entries when this tool is called. Placeholders: {{field}} */
+  logTemplate?: string;
+  /** Schema for log template placeholder values. Must use constrained types. */
+  logSchema?: Record<string, JSONSchema>;
+}
+
 /**
  * Session capabilities for multi-turn conversations
  */
@@ -87,11 +143,8 @@ export interface TrikCapabilities {
  * Resource limits for trik execution
  */
 export interface TrikLimits {
-  /**
-   * Maximum execution time in milliseconds.
-   * @enforcement enforced - Gateway aborts execution after this timeout
-   */
-  maxExecutionTimeMs: number;
+  /** Maximum time per turn in milliseconds */
+  maxTurnTimeMs: number;
 }
 
 /**
@@ -116,11 +169,11 @@ export interface TrikEntry {
 }
 
 /**
- * The trik manifest - stub for P1 (v2 types defined in P2).
+ * The trik manifest — v2 with agent-based handoff architecture.
  */
 export interface TrikManifest {
-  /** Schema version */
-  schemaVersion: number;
+  /** Schema version (must be 2) */
+  schemaVersion: 2;
   /** Unique identifier for the trik */
   id: string;
   /** Human-readable name */
@@ -129,6 +182,12 @@ export interface TrikManifest {
   description: string;
   /** Semantic version */
   version: string;
+
+  /** Agent definition — how this trik operates */
+  agent: AgentDefinition;
+
+  /** Internal tools the agent uses (manifest-level metadata, not runtime schemas) */
+  tools?: Record<string, ToolDeclaration>;
   /** Declared capabilities */
   capabilities?: TrikCapabilities;
   /** Resource limits */
@@ -137,6 +196,7 @@ export interface TrikManifest {
   entry: TrikEntry;
   /** Configuration requirements (API keys, tokens, etc.) */
   config?: TrikConfig;
+
   /** Optional: author name */
   author?: string;
   /** Optional: repository URL */
@@ -145,25 +205,20 @@ export interface TrikManifest {
   license?: string;
 }
 
+// ============================================================================
+// Runtime Communication Types
+// ============================================================================
+
 /**
  * Configuration context passed to triks.
  * Provides access to user-configured values (API keys, tokens, etc.).
  */
 export interface TrikConfigContext {
-  /**
-   * Get a configuration value by key.
-   * Returns undefined if the key is not configured.
-   */
+  /** Get a configuration value by key. Returns undefined if not configured. */
   get(key: string): string | undefined;
-
-  /**
-   * Check if a configuration key is set.
-   */
+  /** Check if a configuration key is set. */
   has(key: string): boolean;
-
-  /**
-   * Get all configured keys (without values, for debugging).
-   */
+  /** Get all configured keys (without values, for debugging). */
   keys(): string[];
 }
 
@@ -172,38 +227,81 @@ export interface TrikConfigContext {
  * Provides persistent key-value storage scoped to the trik.
  */
 export interface TrikStorageContext {
-  /**
-   * Get a value by key.
-   * Returns null if the key doesn't exist.
-   */
   get(key: string): Promise<unknown | null>;
-
-  /**
-   * Set a value by key.
-   * @param key - The key to store
-   * @param value - The value to store (must be JSON-serializable)
-   * @param ttl - Optional time-to-live in milliseconds
-   */
   set(key: string, value: unknown, ttl?: number): Promise<void>;
-
-  /**
-   * Delete a key.
-   * Returns true if the key existed and was deleted.
-   */
   delete(key: string): Promise<boolean>;
-
-  /**
-   * List all keys, optionally filtered by prefix.
-   */
   list(prefix?: string): Promise<string[]>;
-
-  /**
-   * Get multiple values at once.
-   */
   getMany(keys: string[]): Promise<Map<string, unknown>>;
-
-  /**
-   * Set multiple values at once.
-   */
   setMany(entries: Record<string, unknown>): Promise<void>;
+}
+
+/**
+ * Context passed to a trik agent on each message.
+ */
+export interface TrikContext {
+  sessionId: string;
+  config: TrikConfigContext;
+  storage: TrikStorageContext;
+}
+
+/**
+ * Record of a tool call made by the agent during message processing.
+ */
+export interface ToolCallRecord {
+  /** Tool name */
+  tool: string;
+  /** Input passed to the tool */
+  input: Record<string, unknown>;
+  /** Output returned by the tool */
+  output: Record<string, unknown>;
+}
+
+/**
+ * Response from a trik agent after processing a message.
+ */
+export interface TrikResponse {
+  /** The agent's response message to show to the user */
+  message: string;
+  /** Whether to transfer the conversation back to the main agent */
+  transferBack: boolean;
+  /** Tool calls made during processing (for log template filling) */
+  toolCalls?: ToolCallRecord[];
+}
+
+/**
+ * The contract a trik agent must implement.
+ * This is what the gateway calls to process messages.
+ */
+export interface TrikAgent {
+  processMessage(message: string, context: TrikContext): Promise<TrikResponse>;
+}
+
+// ============================================================================
+// Gateway Session Types
+// ============================================================================
+
+/**
+ * Type of handoff log entry
+ */
+export type HandoffLogType = 'handoff_start' | 'tool_execution' | 'handoff_end';
+
+/**
+ * A single log entry in a handoff session.
+ * Built from tool call data + manifest logTemplates.
+ */
+export interface HandoffLogEntry {
+  timestamp: number;
+  type: HandoffLogType;
+  summary: string;
+}
+
+/**
+ * A handoff session tracks a conversation with a trik agent.
+ */
+export interface HandoffSession {
+  sessionId: string;
+  trikId: string;
+  log: HandoffLogEntry[];
+  createdAt: number;
+  lastActivityAt: number;
 }

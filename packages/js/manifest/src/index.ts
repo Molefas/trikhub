@@ -1,25 +1,40 @@
-// Types
+// Core manifest types
 export type {
   JSONSchema,
   TrikManifest,
+  // Agent types
+  AgentMode,
+  AgentDefinition,
+  ModelPreferences,
+  ToolDeclaration,
+  // Capabilities
   TrikCapabilities,
   TrikLimits,
-  TrikEntry,
-  TrikRuntime,
-  // Session/Storage capabilities
   SessionCapabilities,
   StorageCapabilities,
-  // Configuration types
+  // Entry point
+  TrikEntry,
+  TrikRuntime,
+  // Configuration
   ConfigRequirement,
   TrikConfig,
+  // Runtime communication
   TrikConfigContext,
-  // Storage types
   TrikStorageContext,
+  TrikContext,
+  TrikAgent,
+  TrikResponse,
+  ToolCallRecord,
+  // Gateway session
+  HandoffLogType,
+  HandoffLogEntry,
+  HandoffSession,
 } from './types.js';
 
 // Validation
 export {
   validateManifest,
+  diagnoseError,
   validateData,
   createValidator,
   SchemaValidator,
