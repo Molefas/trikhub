@@ -7,15 +7,26 @@ import { createRequire } from 'node:module';
 import {
   type TrikManifest,
   type TrikRuntime,
+  type TrikAgent,
+  type TrikContext,
+  type TrikResponse,
+  type ToolCallRecord,
+  type ToolDeclaration,
+  type JSONSchema,
   validateManifest,
 } from '@trikhub/manifest';
 import { PythonWorker, type PythonWorkerConfig } from './python-worker.js';
 import { type ConfigStore, FileConfigStore } from './config-store.js';
 import { type StorageProvider, SqliteStorageProvider } from './storage-provider.js';
+import { type SessionStorage, InMemorySessionStorage } from './session-storage.js';
+
+// ============================================================================
+// Types
+// ============================================================================
 
 interface LoadedTrik {
   manifest: TrikManifest;
-  module: unknown;
+  agent: TrikAgent;
   path: string;
   runtime: TrikRuntime;
 }
@@ -40,6 +51,11 @@ export interface TrikGatewayConfig {
    */
   storageProvider?: StorageProvider;
   /**
+   * Session storage for handoff sessions.
+   * Defaults to InMemorySessionStorage.
+   */
+  sessionStorage?: SessionStorage;
+  /**
    * Whether to validate that all required config values are present when loading triks.
    * Defaults to true. Set to false to skip validation (e.g., for listing triks).
    */
@@ -49,6 +65,11 @@ export interface TrikGatewayConfig {
    * If not provided, defaults will be used when a Python trik is loaded.
    */
   pythonWorkerConfig?: PythonWorkerConfig;
+  /**
+   * Maximum turns per handoff session before auto-transfer-back.
+   * Defaults to 20.
+   */
+  maxTurnsPerHandoff?: number;
 }
 
 /**
@@ -66,21 +87,95 @@ export interface LoadFromConfigOptions {
   baseDir?: string;
 }
 
+// ============================================================================
+// Route Result Types
+// ============================================================================
+
+/**
+ * Result of routing a message through the gateway.
+ */
+export type RouteResult = RouteToMain | RouteToTrik | RouteTransferBack | RouteForceBack;
+
+/** No active handoff — caller should send to main agent with these handoff tools */
+export interface RouteToMain {
+  target: 'main';
+  handoffTools: HandoffToolDefinition[];
+}
+
+/** Active handoff — the gateway routed the message to the trik and got a response */
+export interface RouteToTrik {
+  target: 'trik';
+  trikId: string;
+  response: TrikResponse;
+  sessionId: string;
+}
+
+/** Trik signaled transfer-back — includes summary for the main agent */
+export interface RouteTransferBack {
+  target: 'transfer_back';
+  trikId: string;
+  summary: string;
+  sessionId: string;
+}
+
+/** User forced /back — includes summary for the main agent */
+export interface RouteForceBack {
+  target: 'force_back';
+  trikId: string;
+  summary: string;
+  sessionId: string;
+}
+
+/**
+ * A handoff tool definition — one per loaded trik.
+ * The main agent calls these to initiate a handoff.
+ */
+export interface HandoffToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: JSONSchema;
+}
+
+// ============================================================================
+// Active Handoff State
+// ============================================================================
+
+interface ActiveHandoff {
+  trikId: string;
+  sessionId: string;
+  turnCount: number;
+}
+
+// ============================================================================
+// Gateway
+// ============================================================================
+
 export class TrikGateway {
   private config: TrikGatewayConfig;
   private configStore: ConfigStore;
   private storageProvider: StorageProvider;
+  private sessionStorage: SessionStorage;
   private configLoaded = false;
   private pythonWorker: PythonWorker | null = null;
+  private maxTurnsPerHandoff: number;
 
   // Loaded triks (by trik ID)
   private triks = new Map<string, LoadedTrik>();
+
+  // Active handoff state (null = no active handoff)
+  private activeHandoff: ActiveHandoff | null = null;
 
   constructor(config: TrikGatewayConfig = {}) {
     this.config = config;
     this.configStore = config.configStore ?? new FileConfigStore();
     this.storageProvider = config.storageProvider ?? new SqliteStorageProvider();
+    this.sessionStorage = config.sessionStorage ?? new InMemorySessionStorage();
+    this.maxTurnsPerHandoff = config.maxTurnsPerHandoff ?? 20;
   }
+
+  // ==========================================================================
+  // Initialization
+  // ==========================================================================
 
   /**
    * Initialize the gateway by loading configuration.
@@ -107,6 +202,329 @@ export class TrikGateway {
     return this.storageProvider;
   }
 
+  /**
+   * Get the session storage
+   */
+  getSessionStorage(): SessionStorage {
+    return this.sessionStorage;
+  }
+
+  // ==========================================================================
+  // Message Routing (the heart of the handoff model)
+  // ==========================================================================
+
+  /**
+   * Route a user message through the gateway.
+   *
+   * - If no active handoff: returns RouteToMain with handoff tools
+   * - If active handoff + "/back": forces transfer-back
+   * - If active handoff: routes to trik, handles transfer-back and max turns
+   */
+  async routeMessage(message: string, sessionId: string): Promise<RouteResult> {
+    // /back escape — deterministic, always works
+    if (message.trim() === '/back' && this.activeHandoff) {
+      return this.forceTransferBack();
+    }
+
+    // Active handoff — route to trik
+    if (this.activeHandoff) {
+      return this.routeToTrik(message, sessionId);
+    }
+
+    // No handoff — return to main agent with handoff tools
+    return { target: 'main', handoffTools: this.getHandoffTools() };
+  }
+
+  /**
+   * Start a handoff to a trik. Called when the main agent invokes a talk_to_X tool.
+   *
+   * @param trikId - The trik to hand off to
+   * @param context - Context message from the main agent
+   * @param sessionId - Session ID for the conversation
+   */
+  async startHandoff(trikId: string, context: string, sessionId: string): Promise<RouteToTrik | RouteTransferBack> {
+    const loaded = this.triks.get(trikId);
+    if (!loaded) {
+      throw new Error(`Trik "${trikId}" is not loaded`);
+    }
+
+    // Create a handoff session
+    const handoffSession = this.sessionStorage.createSession(trikId);
+
+    // Set active handoff state
+    this.activeHandoff = {
+      trikId,
+      sessionId: handoffSession.sessionId,
+      turnCount: 0,
+    };
+
+    // Log handoff start
+    this.sessionStorage.appendLog(handoffSession.sessionId, {
+      timestamp: Date.now(),
+      type: 'handoff_start',
+      summary: `Handoff to ${loaded.manifest.name}`,
+    });
+
+    // Route the initial context message to the trik
+    return this.routeToTrik(context, sessionId);
+  }
+
+  /**
+   * Get the current active handoff state, if any.
+   */
+  getActiveHandoff(): { trikId: string; sessionId: string; turnCount: number } | null {
+    if (!this.activeHandoff) return null;
+    return { ...this.activeHandoff };
+  }
+
+  // ==========================================================================
+  // Handoff Tool Generation
+  // ==========================================================================
+
+  /**
+   * Generate handoff tool definitions — one per loaded trik.
+   * These get added to the main agent's tool set by enhance() (Phase 5).
+   */
+  getHandoffTools(): HandoffToolDefinition[] {
+    const tools: HandoffToolDefinition[] = [];
+
+    for (const [trikId, loaded] of this.triks) {
+      tools.push({
+        name: `talk_to_${trikId}`,
+        description: loaded.manifest.agent.handoffDescription,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            context: {
+              type: 'string',
+              description: 'Context about what the user needs from this agent',
+            },
+          },
+          required: ['context'],
+        },
+      });
+    }
+
+    return tools;
+  }
+
+  // ==========================================================================
+  // Internal Routing
+  // ==========================================================================
+
+  /**
+   * Route a message to the active trik agent.
+   */
+  private async routeToTrik(message: string, sessionId: string): Promise<RouteToTrik | RouteTransferBack> {
+    const handoff = this.activeHandoff!;
+    const loaded = this.triks.get(handoff.trikId)!;
+
+    // Build trik context
+    const trikContext = this.buildTrikContext(handoff.sessionId, loaded);
+
+    // Increment turn count
+    handoff.turnCount++;
+
+    // Check max turns safety net
+    if (handoff.turnCount > this.maxTurnsPerHandoff) {
+      return this.autoTransferBack(
+        `Maximum turns (${this.maxTurnsPerHandoff}) exceeded. Automatically transferring back.`
+      );
+    }
+
+    // Call the trik agent
+    let response: TrikResponse;
+    try {
+      response = await loaded.agent.processMessage(message, trikContext);
+    } catch (error) {
+      // Trik threw an error — transfer back with error summary
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      return this.autoTransferBack(`Trik "${loaded.manifest.name}" encountered an error: ${errorMsg}`);
+    }
+
+    // Process tool calls into log entries
+    if (response.toolCalls) {
+      this.processToolCalls(handoff.sessionId, loaded.manifest, response.toolCalls);
+    }
+
+    // Check if trik wants to transfer back
+    if (response.transferBack) {
+      // Log handoff end
+      this.sessionStorage.appendLog(handoff.sessionId, {
+        timestamp: Date.now(),
+        type: 'handoff_end',
+        summary: `Transferred back from ${loaded.manifest.name}`,
+      });
+
+      const summary = this.buildSessionSummary(handoff.sessionId, loaded.manifest);
+      const handoffSessionId = handoff.sessionId;
+      const trikId = handoff.trikId;
+
+      // Clear active handoff
+      this.activeHandoff = null;
+
+      return {
+        target: 'transfer_back',
+        trikId,
+        summary: `${response.message}\n\n---\nSession summary:\n${summary}`,
+        sessionId: handoffSessionId,
+      };
+    }
+
+    // Trik responded normally — stay in handoff
+    return {
+      target: 'trik',
+      trikId: handoff.trikId,
+      response,
+      sessionId: handoff.sessionId,
+    };
+  }
+
+  /**
+   * Force transfer-back via /back command.
+   */
+  private forceTransferBack(): RouteForceBack {
+    const handoff = this.activeHandoff!;
+    const loaded = this.triks.get(handoff.trikId)!;
+
+    // Log handoff end
+    this.sessionStorage.appendLog(handoff.sessionId, {
+      timestamp: Date.now(),
+      type: 'handoff_end',
+      summary: `Force transfer-back via /back`,
+    });
+
+    const summary = this.buildSessionSummary(handoff.sessionId, loaded.manifest);
+    const result: RouteForceBack = {
+      target: 'force_back',
+      trikId: handoff.trikId,
+      summary,
+      sessionId: handoff.sessionId,
+    };
+
+    // Clear active handoff
+    this.activeHandoff = null;
+
+    return result;
+  }
+
+  /**
+   * Auto transfer-back due to max turns or error.
+   */
+  private autoTransferBack(reason: string): RouteTransferBack {
+    const handoff = this.activeHandoff!;
+    const loaded = this.triks.get(handoff.trikId)!;
+
+    // Log handoff end with reason
+    this.sessionStorage.appendLog(handoff.sessionId, {
+      timestamp: Date.now(),
+      type: 'handoff_end',
+      summary: reason,
+    });
+
+    const summary = this.buildSessionSummary(handoff.sessionId, loaded.manifest);
+    const result: RouteTransferBack = {
+      target: 'transfer_back',
+      trikId: handoff.trikId,
+      summary: `${reason}\n\n---\nSession summary:\n${summary}`,
+      sessionId: handoff.sessionId,
+    };
+
+    // Clear active handoff
+    this.activeHandoff = null;
+
+    return result;
+  }
+
+  // ==========================================================================
+  // Conversation Log
+  // ==========================================================================
+
+  /**
+   * Process tool calls from a trik response into log entries.
+   * Matches tool calls against manifest logTemplate/logSchema definitions.
+   */
+  private processToolCalls(
+    sessionId: string,
+    manifest: TrikManifest,
+    toolCalls: ToolCallRecord[]
+  ): void {
+    for (const call of toolCalls) {
+      const toolDecl = manifest.tools?.[call.tool];
+      const summary = this.buildToolLogSummary(call, toolDecl);
+
+      this.sessionStorage.appendLog(sessionId, {
+        timestamp: Date.now(),
+        type: 'tool_execution',
+        summary,
+      });
+    }
+  }
+
+  /**
+   * Build a log summary string for a single tool call.
+   * Uses logTemplate if available, otherwise falls back to generic format.
+   */
+  private buildToolLogSummary(call: ToolCallRecord, toolDecl?: ToolDeclaration): string {
+    if (!toolDecl?.logTemplate) {
+      return `Called ${call.tool}`;
+    }
+
+    const template = toolDecl.logTemplate;
+
+    // Fill placeholders with output data
+    return template.replace(/\{\{(\w+)\}\}/g, (_match, field: string) => {
+      const value = call.output[field];
+      if (value === undefined || value === null) {
+        return `{{${field}}}`;
+      }
+      return String(value);
+    });
+  }
+
+  /**
+   * Build a summary of a handoff session from its log entries.
+   */
+  private buildSessionSummary(sessionId: string, manifest: TrikManifest): string {
+    const session = this.sessionStorage.getSession(sessionId);
+    if (!session || session.log.length === 0) {
+      return `Handoff to ${manifest.name} (no activity logged)`;
+    }
+
+    const toolEntries = session.log.filter((e) => e.type === 'tool_execution');
+    if (toolEntries.length === 0) {
+      return `Handoff to ${manifest.name} (conversation only, no tools used)`;
+    }
+
+    const lines = toolEntries.map((e) => `- ${e.summary}`);
+    return lines.join('\n');
+  }
+
+  // ==========================================================================
+  // Context Building
+  // ==========================================================================
+
+  /**
+   * Build the TrikContext passed to a trik agent on each message.
+   */
+  private buildTrikContext(sessionId: string, loaded: LoadedTrik): TrikContext {
+    const configContext = this.configStore.getForTrik(loaded.manifest.id);
+    const storageContext = this.storageProvider.forTrik(
+      loaded.manifest.id,
+      loaded.manifest.capabilities?.storage
+    );
+
+    return {
+      sessionId,
+      config: configContext,
+      storage: storageContext,
+    };
+  }
+
+  // ==========================================================================
+  // Trik Loading
+  // ==========================================================================
+
   async loadTrik(trikPath: string): Promise<TrikManifest> {
     const manifestPath = join(trikPath, 'manifest.json');
     const manifestContent = await readFile(manifestPath, 'utf-8');
@@ -126,16 +544,42 @@ export class TrikGateway {
     const runtime: TrikRuntime = manifest.entry.runtime ?? 'node';
 
     if (runtime === 'python') {
-      this.triks.set(manifest.id, { manifest, module: null, path: trikPath, runtime });
+      // Python triks use the worker protocol — create a proxy TrikAgent
       await this.ensurePythonWorker();
+      const agent = this.createPythonAgentProxy(manifest);
+      this.triks.set(manifest.id, { manifest, agent, path: trikPath, runtime });
     } else {
+      // Node triks — dynamic import and extract TrikAgent
       const modulePath = join(trikPath, manifest.entry.module);
       const moduleUrl = pathToFileURL(modulePath).href;
       const mod = await import(moduleUrl);
-      this.triks.set(manifest.id, { manifest, module: mod, path: trikPath, runtime });
+
+      const exportName = manifest.entry.export;
+      const agent = mod[exportName] ?? mod.default;
+
+      if (!agent || typeof agent.processMessage !== 'function') {
+        throw new Error(
+          `Trik "${manifest.id}" module does not export a valid TrikAgent ` +
+          `(expected export "${exportName}" with a processMessage method)`
+        );
+      }
+
+      this.triks.set(manifest.id, { manifest, agent: agent as TrikAgent, path: trikPath, runtime });
     }
 
     return manifest;
+  }
+
+  /**
+   * Create a proxy TrikAgent for Python triks that delegates to the worker protocol.
+   */
+  private createPythonAgentProxy(manifest: TrikManifest): TrikAgent {
+    return {
+      processMessage: async (_message: string, _context: TrikContext): Promise<TrikResponse> => {
+        // Python worker integration deferred — types prepared now
+        throw new Error(`Python trik "${manifest.id}" execution not yet implemented`);
+      },
+    };
   }
 
   /**
@@ -370,6 +814,10 @@ export class TrikGateway {
 
     return manifests;
   }
+
+  // ==========================================================================
+  // Trik Queries
+  // ==========================================================================
 
   getManifest(trikId: string): TrikManifest | undefined {
     return this.triks.get(trikId)?.manifest;

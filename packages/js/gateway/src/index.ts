@@ -4,6 +4,13 @@ export {
   type TrikGatewayConfig,
   type TrikHubConfig,
   type LoadFromConfigOptions,
+  // Route result types
+  type RouteResult,
+  type RouteToMain,
+  type RouteToTrik,
+  type RouteTransferBack,
+  type RouteForceBack,
+  type HandoffToolDefinition,
 } from './gateway.js';
 
 // Session storage
@@ -42,6 +49,9 @@ export {
   type JsonRpcError,
   // Worker methods
   type WorkerMethod,
+  // v2 protocol types
+  type ProcessMessageInput,
+  type ProcessMessageResult,
   type HealthParams,
   type ShutdownParams,
   // Response types
@@ -58,6 +68,7 @@ export {
   WorkerErrorCodes,
   // Message builders
   createRequest,
+  createProcessMessageRequest,
   createHealthRequest,
   createShutdownRequest,
   createStorageRequest,
@@ -73,6 +84,10 @@ export {
 // Re-export types from trik-manifest for convenience
 export type {
   TrikManifest,
+  TrikAgent,
+  TrikContext,
+  TrikResponse,
+  ToolCallRecord,
   JSONSchema,
   SessionCapabilities,
   ConfigRequirement,
@@ -80,4 +95,6 @@ export type {
   TrikConfigContext,
   StorageCapabilities,
   TrikStorageContext,
+  HandoffLogEntry,
+  HandoffSession,
 } from '@trikhub/manifest';

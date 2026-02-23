@@ -8,6 +8,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
+import type { ToolCallRecord } from '@trikhub/manifest';
 
 // ============================================================================
 // JSON-RPC 2.0 Base Types
@@ -37,9 +38,35 @@ export interface JsonRpcError {
 // Worker Request Types
 // ============================================================================
 
-export type WorkerMethod = 'invoke' | 'health' | 'shutdown';
+export type WorkerMethod = 'processMessage' | 'health' | 'shutdown';
 
-// InvokeParams stub — v2 protocol (processMessage) defined in P3.
+/**
+ * Input for processMessage — the v2 protocol.
+ * Replaces v1's InvokeParams (action-based execution).
+ */
+export interface ProcessMessageInput {
+  /** The user's message to process */
+  message: string;
+  /** Session identifier for conversation continuity */
+  sessionId: string;
+  /** Configuration context (API keys, tokens) */
+  config: Record<string, string>;
+  /** Storage namespace for the trik */
+  storageNamespace: string;
+}
+
+/**
+ * Result from processMessage — the v2 protocol.
+ * Replaces v1's InvokeResult (action-based results).
+ */
+export interface ProcessMessageResult {
+  /** The agent's response message */
+  message: string;
+  /** Whether to transfer back to the main agent */
+  transferBack: boolean;
+  /** Tool calls made during processing (for log template filling) */
+  toolCalls?: ToolCallRecord[];
+}
 
 export interface HealthParams {
   /** Optional timeout in ms */
@@ -54,8 +81,6 @@ export interface ShutdownParams {
 // ============================================================================
 // Worker Response Types
 // ============================================================================
-
-// InvokeResult stub — v2 protocol (ProcessMessageResult) defined in P3.
 
 export interface HealthResult {
   status: 'ok' | 'error';
@@ -135,6 +160,12 @@ export function createRequest(
     method,
     params,
   };
+}
+
+export function createProcessMessageRequest(
+  input: ProcessMessageInput
+): JsonRpcRequest {
+  return createRequest('processMessage', input);
 }
 
 export function createHealthRequest(): JsonRpcRequest {
