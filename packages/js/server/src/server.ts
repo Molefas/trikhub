@@ -5,6 +5,8 @@ import { createRequire } from 'module';
 import type { TrikGateway } from '@trikhub/gateway';
 import type { ServerConfig } from './config.js';
 import { healthRoutes } from './routes/health.js';
+import { messageRoutes } from './routes/message.js';
+import { toolsRoutes } from './routes/tools.js';
 import { triksRoutes } from './routes/triks.js';
 
 // Read version from package.json
@@ -61,6 +63,8 @@ export async function createServer(config: ServerConfig, gateway: TrikGateway): 
       security: config.authToken ? [{ bearerAuth: [] }] : [],
       tags: [
         { name: 'health', description: 'Health check endpoints' },
+        { name: 'messages', description: 'Message routing and handoff management' },
+        { name: 'tools', description: 'Handoff tool definitions' },
         { name: 'triks', description: 'Trik package management' },
       ],
     },
@@ -102,6 +106,8 @@ export async function createServer(config: ServerConfig, gateway: TrikGateway): 
 
   // Register routes
   await healthRoutes(fastify, gateway);
+  await messageRoutes(fastify, gateway);
+  await toolsRoutes(fastify, gateway);
   await triksRoutes(fastify, gateway, config.configPath, config.baseDir);
 
   return fastify;

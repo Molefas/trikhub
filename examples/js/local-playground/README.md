@@ -1,15 +1,10 @@
 # TrikHub Local Playground
-This demo is meant to simulate an existing LangGraph Agent ready to consume Triks and the process of finding, installing and running these.
-
-## Disclaimer
-There is a significant portion of boilerplate that would ideally not be added to the main Agent, however, I needed to make sure that the basic example is ready to run with one command AND that it supports the main LLMs (OpenAI, Anthropic and Google).
+This demo shows how to enhance an existing LangGraph agent with TrikHub handoff support using the v2 `enhance()` API. The agent gains the ability to hand off conversations to specialist trik agents and receive control back seamlessly.
 
 ## What You'll Learn
-- How to load triks using `@trikhub/gateway` and exposing env variables to them
-- How template responses keep agents safe from prompt injection
-- How passthrough content is delivered directly to users
-- How to expose Environment variables per Trik
-- How to interact with persistent storage
+- How to enhance an agent with TrikHub handoff support using `enhance()`
+- How the handoff routing model works (`talk_to_X` tools, `transfer_back`)
+- How to use `/back` to force a transfer-back from any trik handoff
 
 ## Architecture
 
@@ -17,7 +12,7 @@ There is a significant portion of boilerplate that would ideally not be added to
 ┌─────────────────────────────────────────────────────────┐
 │                    Node.js Process                      │
 │  ┌──────────────┐    ┌──────────────┐    ┌───────────┐  │
-│  │   CLI (You)  │◄──►│  LangGraph   │◄──►│  Gateway  │  │
+│  │   CLI (You)  │◄──►│  Enhanced    │◄──►│  Gateway  │  │
 │  │              │    │    Agent     │    │  (triks)  │  │
 │  └──────────────┘    └──────────────┘    └───────────┘  │
 └─────────────────────────────────────────────────────────┘
@@ -29,7 +24,7 @@ There is a significant portion of boilerplate that would ideally not be added to
 
 - Node.js 18+
 - pnpm (or npm)
-- OpenAI / Anthropic / Googel API key
+- OpenAI / Anthropic / Google API key
 
 ## Quick Start
 
@@ -78,12 +73,10 @@ pnpm dev
 You should see:
 
 ```
-[TrikGateway] No config file found at /../config.json
-[Triks] No triks configured
-LLM: ... // Your LLM if you've added the details on the .env
-Built-in tools: get_weather, calculate, search_web
-Total tools: 3
-Type "/tools" to list all, "exit" to quit.
+LangGraph Agent CLI with TrikHub Handoff Support
+
+Loaded 1 trik(s).
+Type your message, /back to return from handoff, or "exit" to quit.
 
 You:
 ```
@@ -93,12 +86,25 @@ You:
 
 ```
 You: Can you tell me the weather in Lisbon, Portugal?
-Agent: The weather in Lisbon is currently rainy with a temperature of 30°C (86 F). It's quite warm despite the rain!
+Agent: The weather in Lisbon is currently rainy with a temperature of 30C (86 F). It's quite warm despite the rain!
+```
 
+### Handoff to a Trik
+
+```
+You: I want to create an article about AI trends
+
+[Handoff to content-hoarder]
+
+Content-Hoarder: I'll help you create an article about AI trends...
+
+You: /back
+
+[Transferred back to main agent]
 ```
 
 ### Install new Triks
-You can now search and install existing Triks to test. 
+You can search and install existing Triks to test.
 ```bash
 # This will help you find triks by keywords
 trik search {keyword}
@@ -122,30 +128,25 @@ I've shipped a few basic Triks for this example:
 You can find more details on how to interact with each Trik in their documentations.
 Find more about these on [Trikhub.com](https://trikhub.com).
 
-## How It Works
+## Handoff Model
 
-### Template Mode (Safe for Agent)
+The v2 architecture uses a handoff routing model instead of the v1 template/passthrough modes.
 
-```
-Trik returns: { template: "success", count: 3 }
-Agent sees:   "I found 3 articles about AI."
-```
+### talk_to_X tools
 
-The agent only sees structured data (enums, numbers, IDs) - never free-form text that could contain prompt injection.
+When triks are loaded, the gateway generates a `talk_to_<trik-name>` tool for each trik. The main agent calls these tools to hand off the conversation to a specialist trik agent. For example, installing a content-hoarder trik creates a `talk_to_content_hoarder` tool.
 
-### Passthrough Mode (Direct to User)
+### transfer_back
 
-```
-Trik returns: { content: "# Article Title\n\nFull article text..." }
-Agent sees:   "[Content delivered directly]"
-You see:      The full article
-```
+Each trik agent has a `transfer_back` tool it can call when it has finished its task. This returns control to the main agent with the trik's response.
 
-Content that might contain untrusted text bypasses the agent entirely.
+### /back command
+
+If a trik agent does not transfer back on its own, the user can type `/back` in the CLI to force a transfer-back. This is useful when the trik enters a loop or you simply want to return to the main agent.
 
 ### Session State
 
-Triks remember context. When you say "the healthcare one", the trik resolves this reference using the history of your conversation.
+Triks remember context within a session. When you say "the healthcare one", the trik resolves this reference using the history of your conversation.
 
 ## Project Structure
 
@@ -153,31 +154,30 @@ Triks remember context. When you say "the healthcare one", the trik resolves thi
 local-playground/
 ├── src/
 │   ├── cli.ts          # Interactive REPL
-│   ├── agent.ts        # LangGraph workflow with validation
+│   ├── agent.ts        # LangGraph workflow with enhance()
 │   └── tools.ts        # Built-in tools + trik loader
-│   └── llm.ts          # Langgraph Model selection based on key provided
+│   └── llm.ts          # LangGraph model selection based on key provided
 ├── .trikhub/
 │   └── config.json     # Installed triks (once there are Triks installed)
 │   └── secrets.json    # Secrets segregation per Trik
 ├── .env.example        # Environment template
 └── package.json
-└── langgraph.json
 ```
 
 ## Troubleshooting
 
 **"Cannot find module '@trikhub/gateway'"**
 
-→ Run `pnpm build` from the monorepo root first
+> Run `pnpm build` from the monorepo root first
 
 **"OPENAI_API_KEY is not set"**
 
-→ Copy `.env.example` to `.env` and add your key
+> Copy `.env.example` to `.env` and add your key
 
 **Trik not loading**
 
-→ Check `.trikhub/config.json` has the trik listed
-→ If you're running Python Triks you need to have an available Python environment regardless (see below)
+> Check `.trikhub/config.json` has the trik listed
+> If you're running Python Triks you need to have an available Python environment regardless (see below)
 
 ## Using Python Triks
 

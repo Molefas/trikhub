@@ -20,6 +20,7 @@ import { execSync } from 'node:child_process';
 import chalk from 'chalk';
 import ora from 'ora';
 import { TrikLinter, findManifestPath } from '@trikhub/linter';
+import type { TrikManifest } from '@trikhub/manifest';
 import { TrikHubMetadata } from '../types.js';
 import { RegistryClient } from '../lib/registry.js';
 import { loadConfig } from '../lib/storage.js';
@@ -27,21 +28,6 @@ import { loadConfig } from '../lib/storage.js';
 interface PublishOptions {
   directory?: string;
   tag?: string;
-}
-
-interface TrikManifest {
-  id: string;
-  name: string;
-  version: string;
-  description: string;
-  entry: {
-    module: string;
-    export: string;
-    runtime?: 'node' | 'python';
-  };
-  actions: Record<string, unknown>;
-  capabilities?: unknown;
-  limits?: unknown;
 }
 
 /**

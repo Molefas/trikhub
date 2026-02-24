@@ -23,6 +23,7 @@ interface TrikInfo {
   name: string;
   version: string;
   description?: string;
+  agentMode?: string;
   exists: boolean;
   /** Whether this is a cross-language trik (stored in .trikhub/triks/) */
   crossLanguage?: boolean;
@@ -105,6 +106,18 @@ async function getTrikInfo(
       }
     }
 
+    // Get agent mode from manifest.json
+    const manifestJsonPath = join(nodeModulesPath, 'manifest.json');
+    if (existsSync(manifestJsonPath)) {
+      try {
+        const content = await readFile(manifestJsonPath, 'utf-8');
+        const manifest = JSON.parse(content);
+        info.agentMode = manifest.agent?.mode;
+      } catch {
+        // Ignore errors reading manifest.json
+      }
+    }
+
     return info;
   }
 
@@ -119,13 +132,14 @@ async function getTrikInfo(
       crossLanguage: true,
     };
 
-    // Try to find manifest.json for description (may be in subdirectory for Python packages)
+    // Try to find manifest.json for description and agent mode (may be in subdirectory for Python packages)
     const manifestPath = join(triksPath, 'manifest.json');
     if (existsSync(manifestPath)) {
       try {
         const content = await readFile(manifestPath, 'utf-8');
         const manifest = JSON.parse(content);
         info.description = manifest.description;
+        info.agentMode = manifest.agent?.mode;
       } catch {
         // Ignore errors
       }
@@ -141,6 +155,7 @@ async function getTrikInfo(
               const content = await readFile(subManifest, 'utf-8');
               const manifest = JSON.parse(content);
               info.description = manifest.description;
+              info.agentMode = manifest.agent?.mode;
               break;
             }
           }
@@ -200,6 +215,10 @@ export async function listCommand(options: ListOptions): Promise<void> {
 
     if (info.description) {
       console.log(chalk.dim(`      ${info.description}`));
+    }
+
+    if (info.agentMode) {
+      console.log(chalk.dim(`      [${info.agentMode}]`));
     }
 
     if (info.crossLanguage && info.exists) {
