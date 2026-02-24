@@ -33,6 +33,7 @@ export async function messageRoutes(fastify: FastifyInstance, gateway: TrikGatew
             properties: {
               target: { type: 'string', enum: ['main', 'trik', 'transfer_back', 'force_back'] },
               trikId: { type: 'string' },
+              message: { type: 'string' },
               response: {
                 type: 'object',
                 properties: {

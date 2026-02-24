@@ -110,19 +110,21 @@ export interface RouteToTrik {
   sessionId: string;
 }
 
-/** Trik signaled transfer-back — includes summary for the main agent */
+/** Trik signaled transfer-back — message shown to user, summary injected into history */
 export interface RouteTransferBack {
   target: 'transfer_back';
   trikId: string;
-  summary: string;
+  message: string;   // trik's response → shown to user
+  summary: string;   // session log → injected into main history
   sessionId: string;
 }
 
-/** User forced /back — includes summary for the main agent */
+/** User forced /back — message shown to user, summary injected into history */
 export interface RouteForceBack {
   target: 'force_back';
   trikId: string;
-  summary: string;
+  message: string;   // empty string (adapter generates system message)
+  summary: string;   // session log → injected into main history
   sessionId: string;
 }
 
@@ -366,7 +368,8 @@ export class TrikGateway {
       return {
         target: 'transfer_back',
         trikId,
-        summary: `${response.message}\n\n---\nSession summary:\n${summary}`,
+        message: response.message,
+        summary,
         sessionId: handoffSessionId,
       };
     }
@@ -398,6 +401,7 @@ export class TrikGateway {
     const result: RouteForceBack = {
       target: 'force_back',
       trikId: handoff.trikId,
+      message: '',
       summary,
       sessionId: handoff.sessionId,
     };
@@ -426,7 +430,8 @@ export class TrikGateway {
     const result: RouteTransferBack = {
       target: 'transfer_back',
       trikId: handoff.trikId,
-      summary: `${reason}\n\n---\nSession summary:\n${summary}`,
+      message: reason,
+      summary,
       sessionId: handoff.sessionId,
     };
 

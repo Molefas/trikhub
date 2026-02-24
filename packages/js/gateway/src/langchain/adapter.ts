@@ -33,6 +33,10 @@ export interface EnhanceOptions {
   config?: LoadFromConfigOptions;
   /** Pre-built TrikGateway instance (skips creating a new one) */
   gatewayInstance?: TrikGateway;
+  /** Enable debug logging for handoff events */
+  debug?: boolean;
+  /** Enable verbose logging — dumps full message history on each agent invocation */
+  verbose?: boolean;
 }
 
 /**
@@ -41,7 +45,7 @@ export interface EnhanceOptions {
 export interface EnhancedResponse {
   /** The message to show the user */
   message: string;
-  /** Where the response came from: "main" or a trik ID */
+  /** Where the response came from: "main", a trik ID, or "system" */
   source: string;
 }
 
@@ -55,6 +59,49 @@ export interface EnhancedAgent {
   gateway: TrikGateway;
   /** Get the list of loaded trik IDs */
   getLoadedTriks(): string[];
+}
+
+// ============================================================================
+// Debug & Verbose Loggers
+// ============================================================================
+
+type LogFn = (...args: unknown[]) => void;
+
+function createDebugLogger(enabled: boolean): LogFn {
+  if (!enabled) return (..._args: unknown[]) => {};
+  return (...args: unknown[]) => {
+    console.log('\x1b[36m[trikhub]\x1b[0m', ...args);
+  };
+}
+
+function createVerboseLogger(enabled: boolean): LogFn {
+  if (!enabled) return (..._args: unknown[]) => {};
+  return (...args: unknown[]) => {
+    console.log('\x1b[35m[trikhub:verbose]\x1b[0m', ...args);
+  };
+}
+
+/**
+ * Dump a message list in a human-readable format.
+ */
+function dumpMessages(verbose: LogFn, label: string, messages: BaseMessage[]): void {
+  verbose(`--- ${label} (${messages.length} messages) ---`);
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    const type = msg._getType();
+    const text = extractTextContent(msg.content as string | Array<Record<string, unknown>>);
+    const truncated = text.length > 200 ? text.slice(0, 200) + '...' : text;
+
+    // Show tool calls if present
+    const toolCalls = (msg as AIMessage).tool_calls;
+    if (toolCalls && toolCalls.length > 0) {
+      const calls = toolCalls.map((tc: { name: string }) => tc.name).join(', ');
+      verbose(`  [${i}] ${type}: "${truncated}" [tool_calls: ${calls}]`);
+    } else {
+      verbose(`  [${i}] ${type}: "${truncated}"`);
+    }
+  }
+  verbose(`--- end ${label} ---`);
 }
 
 // ============================================================================
@@ -94,12 +141,17 @@ export async function enhance(
   agent: InvokableAgent,
   options: EnhanceOptions = {}
 ): Promise<EnhancedAgent> {
+  const debug = createDebugLogger(options.debug ?? options.verbose ?? false);
+  const verbose = createVerboseLogger(options.verbose ?? false);
+
   // Set up gateway
   const gateway = options.gatewayInstance ?? new TrikGateway(options.gateway);
   await gateway.initialize();
 
-  // Load triks from config
-  await gateway.loadTriksFromConfig(options.config);
+  // Load triks from config (skip if a pre-built gateway was provided — caller already loaded triks)
+  if (!options.gatewayInstance) {
+    await gateway.loadTriksFromConfig(options.config);
+  }
 
   // Per-session message history for the main agent
   const mainMessages = new Map<string, BaseMessage[]>();
@@ -123,34 +175,51 @@ export async function enhance(
 
       switch (route.target) {
         case 'trik': {
-          // Active handoff — trik responded normally
+          debug(`Routed to trik: ${route.trikId} (turn in progress)`);
           return {
             message: route.response.message,
             source: route.trikId,
           };
         }
 
-        case 'transfer_back':
+        case 'transfer_back': {
+          debug(`Transfer back from: ${route.trikId}`);
+          debug(`Transfer-back summary:\n${route.summary}`);
+          injectSummaryIntoHistory(mainMessages, sessionId, route.summary, debug);
+          // If the trik provided a farewell message, show it; otherwise show a system message
+          if (route.message.trim()) {
+            return {
+              message: route.message,
+              source: route.trikId,
+            };
+          }
+          return {
+            message: '[Returned to main agent]',
+            source: 'system',
+          };
+        }
+
         case 'force_back': {
-          // Transfer-back — feed summary to main agent so it can respond
-          return await invokeMainWithSummary(
-            agent,
-            mainMessages,
-            sessionId,
-            route.summary,
-            handoffTools
-          );
+          debug(`Force /back from: ${route.trikId}`);
+          debug(`Force-back summary:\n${route.summary}`);
+          injectSummaryIntoHistory(mainMessages, sessionId, route.summary, debug);
+          return {
+            message: '[Returned to main agent]',
+            source: 'system',
+          };
         }
 
         case 'main': {
-          // No active handoff — run main agent
+          debug('Routing to main agent');
           return await invokeMainAgent(
             agent,
             gateway,
             mainMessages,
             sessionId,
             message,
-            handoffTools
+            handoffTools,
+            debug,
+            verbose
           );
         }
       }
@@ -172,7 +241,9 @@ async function invokeMainAgent(
   mainMessages: Map<string, BaseMessage[]>,
   sessionId: string,
   message: string,
-  handoffTools: DynamicStructuredTool[]
+  handoffTools: DynamicStructuredTool[],
+  debug: LogFn,
+  verbose: LogFn
 ): Promise<EnhancedResponse> {
   // Get or create session message history
   let messages = mainMessages.get(sessionId);
@@ -184,38 +255,39 @@ async function invokeMainAgent(
   // Add user message
   messages.push(new HumanMessage(message));
 
-  // Invoke agent — we need to inject handoff tools into the agent
-  // The agent should already have been created with bindTools including handoff tools,
-  // but since we can't modify a compiled graph's tools, we add tool definitions
-  // and handle tool calls ourselves.
+  verbose(`Main agent input (session: ${sessionId})`);
+  dumpMessages(verbose, 'main agent messages', messages);
+
+  // Invoke agent
   const result = await agent.invoke({ messages });
   const newMessages = result.messages;
+
+  verbose('Main agent output');
+  dumpMessages(verbose, 'main agent result', newMessages);
 
   // Check for handoff tool calls in the response
   const handoffCall = findHandoffToolCall(newMessages, messages.length - 1);
 
   if (handoffCall) {
-    // Intercept the handoff tool call — don't let the agent see the tool result
-    // Instead, start a handoff session and route the first message to the trik
     const trikId = handoffCall.toolName.slice(HANDOFF_TOOL_PREFIX.length);
     const context = handoffCall.context;
+
+    debug(`Handoff detected → ${trikId} (context: "${context.slice(0, 80)}${context.length > 80 ? '...' : ''}")`);
 
     const handoffResult = await gateway.startHandoff(trikId, context, sessionId);
 
     if (handoffResult.target === 'transfer_back') {
-      // Trik transferred back immediately — feed summary to main agent
-      // Update main messages with what happened
+      debug(`Immediate transfer back from: ${trikId}`);
+      debug(`Transfer-back summary:\n${handoffResult.summary}`);
       mainMessages.set(sessionId, newMessages);
-      return await invokeMainWithSummary(
-        agent,
-        mainMessages,
-        sessionId,
-        handoffResult.summary,
-        handoffTools
-      );
+      injectSummaryIntoHistory(mainMessages, sessionId, handoffResult.summary, debug);
+      return {
+        message: handoffResult.message,
+        source: handoffResult.trikId,
+      };
     }
 
-    // Trik responded — save main agent state and return trik response
+    debug(`Handoff active → ${trikId}`);
     mainMessages.set(sessionId, newMessages);
     return {
       message: handoffResult.response.message,
@@ -226,7 +298,6 @@ async function invokeMainAgent(
   // No handoff — normal main agent response
   mainMessages.set(sessionId, newMessages);
 
-  // Extract the last AI message text
   const responseText = extractLastAIMessage(newMessages);
   return {
     message: responseText,
@@ -235,36 +306,26 @@ async function invokeMainAgent(
 }
 
 /**
- * Feed a transfer-back summary into the main agent as a system-level context message,
- * so it can craft a response for the user.
+ * Inject a handoff session summary into the main agent's message history
+ * so it has context for future turns, without invoking the main agent.
  */
-async function invokeMainWithSummary(
-  agent: InvokableAgent,
+function injectSummaryIntoHistory(
   mainMessages: Map<string, BaseMessage[]>,
   sessionId: string,
   summary: string,
-  _handoffTools: DynamicStructuredTool[]
-): Promise<EnhancedResponse> {
+  debug: LogFn
+): void {
   let messages = mainMessages.get(sessionId);
   if (!messages) {
     messages = [];
     mainMessages.set(sessionId, messages);
   }
 
-  // Add the transfer-back summary as a tool result message
-  // This lets the main agent see what the trik accomplished
   messages.push(new HumanMessage(
-    `[Trik handoff completed]\n\n${summary}\n\nPlease summarize the result for the user.`
+    `[System: Trik handoff completed. Session summary:\n${summary}]`
   ));
 
-  const result = await agent.invoke({ messages });
-  mainMessages.set(sessionId, result.messages);
-
-  const responseText = extractLastAIMessage(result.messages);
-  return {
-    message: responseText,
-    source: 'main',
-  };
+  debug('Injected transfer-back summary into main agent history');
 }
 
 // ============================================================================
@@ -311,6 +372,14 @@ interface HandoffToolCall {
 }
 
 /**
+ * Check if a message is an AI message using duck typing.
+ * Avoids instanceof failures when multiple copies of @langchain/core exist.
+ */
+function isAIMessage(msg: BaseMessage): boolean {
+  return msg._getType() === 'ai';
+}
+
+/**
  * Find a handoff tool call (talk_to_X) in new messages.
  */
 function findHandoffToolCall(
@@ -319,10 +388,11 @@ function findHandoffToolCall(
 ): HandoffToolCall | null {
   for (let i = startIndex; i < messages.length; i++) {
     const msg = messages[i];
-    if (!(msg instanceof AIMessage)) continue;
+    if (!isAIMessage(msg)) continue;
 
-    if (msg.tool_calls && msg.tool_calls.length > 0) {
-      for (const tc of msg.tool_calls) {
+    const toolCalls = (msg as AIMessage).tool_calls;
+    if (toolCalls && toolCalls.length > 0) {
+      for (const tc of toolCalls) {
         if (tc.name.startsWith(HANDOFF_TOOL_PREFIX)) {
           return {
             toolName: tc.name,
@@ -337,17 +407,34 @@ function findHandoffToolCall(
 }
 
 /**
+ * Extract text from message content, handling both string and array-of-blocks formats.
+ */
+function extractTextContent(content: string | Array<Record<string, unknown>>): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .filter((block): block is { type: 'text'; text: string } =>
+        typeof block === 'object' && block !== null && block.type === 'text' && typeof block.text === 'string'
+      )
+      .map((block) => block.text)
+      .join('');
+  }
+  return '';
+}
+
+/**
  * Extract the text content from the last AI message in a message list.
+ * Uses duck typing to avoid instanceof issues with duplicate @langchain/core packages.
  */
 function extractLastAIMessage(messages: BaseMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    if (msg instanceof AIMessage) {
-      const content = msg.content;
-      if (typeof content === 'string' && content.length > 0) {
-        return content;
-      }
-    }
+    if (!isAIMessage(msg)) continue;
+
+    const text = extractTextContent(msg.content as string | Array<Record<string, unknown>>);
+    if (text.length > 0) return text;
   }
   return '';
 }

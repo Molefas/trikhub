@@ -31,7 +31,11 @@ export async function initializeAgent() {
 
   // Enhance with handoff routing
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- same v0.3→v1 type mismatch
-  const app = await enhance(agent as any, { gatewayInstance: gateway });
+  const app = await enhance(agent as any, {
+    gatewayInstance: gateway,
+    debug: !!process.env.TRIKHUB_DEBUG || !!process.env.TRIKHUB_VERBOSE,
+    verbose: !!process.env.TRIKHUB_VERBOSE,
+  });
 
   return {
     app,

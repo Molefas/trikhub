@@ -49,7 +49,9 @@ async function main() {
       const result = await app.processMessage(userInput, sessionId);
 
       // Show source indicator when in a trik handoff
-      if (result.source !== 'main') {
+      if (result.source === 'system') {
+        console.log(`\n\x1b[2m${result.message}\x1b[0m\n`);
+      } else if (result.source !== 'main') {
         console.log(`\n[${result.source}] ${result.message}\n`);
       } else {
         console.log(`\nAssistant: ${result.message}\n`);
