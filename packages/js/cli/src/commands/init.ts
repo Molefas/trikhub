@@ -12,9 +12,8 @@ import ora from 'ora';
 import { input, select, confirm } from '@inquirer/prompts';
 import { TrikCategory } from '../types.js';
 import { loadDefaults, saveDefaults } from '../lib/storage.js';
-// v1 template generators removed in P1, v2 templates in P8
-// import { generateTypescriptProject } from '../templates/typescript.js';
-// import { generatePythonProject } from '../templates/python.js';
+import { generateTypescriptProject } from '../templates/typescript.js';
+import type { InitConfig } from '../templates/typescript.js';
 
 type Language = 'ts' | 'py';
 
@@ -129,6 +128,36 @@ export async function initCommand(languageArg: string): Promise<void> {
       default: false,
     });
 
+    // v2 agent prompts
+    const agentMode = await select<'conversational' | 'one-shot'>({
+      message: 'Agent mode:',
+      choices: [
+        { value: 'conversational', name: 'Conversational (multi-turn ReAct agent)' },
+        { value: 'one-shot', name: 'One-shot (single request/response)' },
+      ],
+      default: 'conversational',
+    });
+
+    const handoffDescription = await input({
+      message: 'Handoff description (how should the main agent describe this trik?):',
+      validate: (value: string) => {
+        if (value.length < 10) return 'Description must be at least 10 characters';
+        if (value.length > 500) return 'Description must be at most 500 characters';
+        return true;
+      },
+    });
+
+    const domainTagsRaw = await input({
+      message: 'Domain tags (comma-separated, e.g. "content curation, article writing"):',
+      validate: (value: string) => {
+        const tags = value.split(',').map((t) => t.trim()).filter(Boolean);
+        if (tags.length === 0) return 'At least one domain tag is required';
+        return true;
+      },
+    });
+
+    const domainTags = domainTagsRaw.split(',').map((t) => t.trim()).filter(Boolean);
+
     // Path selection
     const pathChoice = await select<'current' | 'other'>({
       message: 'Where to create the trik?',
@@ -159,8 +188,8 @@ export async function initCommand(languageArg: string): Promise<void> {
     console.log();
     spinner.start('Creating trik...');
 
-    // Generate files
-    const config = {
+    // Build full config
+    const config: InitConfig = {
       name,
       displayName,
       description,
@@ -169,12 +198,69 @@ export async function initCommand(languageArg: string): Promise<void> {
       category,
       enableStorage,
       enableConfig,
+      agentMode,
+      handoffDescription,
+      domainTags,
     };
 
-    // v1 template generators removed in P1, v2 templates in P8
-    spinner.stop();
-    console.log(chalk.yellow('\n  trik init is not yet available for v2. Coming soon.\n'));
-    return;
+    // Only TypeScript is supported for now
+    if (language === 'py') {
+      spinner.stop();
+      console.log(chalk.yellow('\n  Python trik init is not yet supported. Use TypeScript for now.\n'));
+      return;
+    }
+
+    // Generate project files
+    const files = generateTypescriptProject(config);
+
+    // Create target directory and write all files
+    await mkdir(targetDir, { recursive: true });
+
+    for (const [relativePath, content] of Object.entries(files)) {
+      const filePath = join(targetDir, relativePath);
+      const fileDir = join(filePath, '..');
+      await mkdir(fileDir, { recursive: true });
+      await writeFile(filePath, content, 'utf-8');
+    }
+
+    spinner.succeed('Trik created');
+
+    // Install dependencies
+    const { execSync } = await import('node:child_process');
+    let packageManager = 'npm';
+    try {
+      execSync('pnpm --version', { stdio: 'ignore' });
+      packageManager = 'pnpm';
+    } catch {
+      // pnpm not available, use npm
+    }
+
+    spinner.start(`Installing dependencies with ${packageManager}...`);
+    try {
+      execSync(`${packageManager} install`, { cwd: targetDir, stdio: 'ignore' });
+      spinner.succeed('Dependencies installed');
+    } catch {
+      spinner.warn(`Failed to install dependencies. Run \`${packageManager} install\` manually.`);
+    }
+
+    // Save author defaults for reuse
+    saveDefaults({ authorName, authorGithub });
+
+    // Show success message
+    console.log();
+    console.log(chalk.green.bold('  Your trik is ready!'));
+    console.log();
+    console.log(chalk.dim('  Next steps:'));
+    console.log(`    cd ${name}`);
+    console.log('    Edit src/agent.ts to implement your agent logic');
+    console.log('    Add tools in src/tools/');
+    if (agentMode === 'conversational') {
+      console.log('    Customize src/prompts/system.md');
+    }
+    console.log(`    ${packageManager === 'pnpm' ? 'pnpm' : 'npm run'} build`);
+    console.log('    trik lint .');
+    console.log('    trik publish');
+    console.log();
   } catch (error) {
     spinner.fail('Failed to create trik');
     if (error instanceof Error) {
