@@ -1,1 +1,8 @@
-// LangChain integration cleared for P1 — will be rewritten as enhance() in P5.
+export {
+  enhance,
+  getHandoffToolsForAgent,
+  type InvokableAgent,
+  type EnhanceOptions,
+  type EnhancedAgent,
+  type EnhancedResponse,
+} from './adapter.js';
