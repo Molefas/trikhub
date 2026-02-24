@@ -7,6 +7,7 @@
     { "path": "packages/js/linter" },
     { "path": "packages/js/server" },
     { "path": "packages/js/cli" },
-    { "path": "packages/js/worker" }
+    { "path": "packages/js/worker" },
+    { "path": "packages/js/mcp" }
   ]
 }
