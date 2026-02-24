@@ -1,6 +1,6 @@
 # TrikHub CLI
 
-The official command-line tool for [TrikHub](https://trikhub.com) - install and manage AI skills (triks) for your applications.
+The official command-line tool for [TrikHub](https://trikhub.com) - install and manage AI agent triks for your applications.
 
 ## Installation
 
@@ -13,7 +13,7 @@ npm install -g @trikhub/cli
 ```bash
 # Create a new trik
 trik init ts   # TypeScript
-trik init py   # Python
+trik init py   # Python (coming soon)
 
 # Search for triks
 trik search article
@@ -27,6 +27,9 @@ trik list
 # Get trik info
 trik info @acme/article-search
 
+# Validate a trik
+trik lint .
+
 # Upgrade a trik
 trik upgrade @acme/article-search
 
@@ -38,14 +41,11 @@ trik uninstall @acme/article-search
 
 ### `trik init <language>`
 
-Create a new trik project with boilerplate code.
+Create a new trik project with v2 handoff architecture boilerplate.
 
 ```bash
 # Create a TypeScript trik
 trik init ts
-
-# Create a Python trik
-trik init py
 ```
 
 The interactive wizard will prompt for:
@@ -58,6 +58,9 @@ The interactive wizard will prompt for:
 - **Category** - utilities, productivity, developer, etc.
 - **Storage** - Enable persistent key-value storage
 - **Configuration** - Enable environment variables (API keys, etc.)
+- **Agent mode** - `conversational` (LLM-powered, multi-turn) or `one-shot` (deterministic)
+- **Handoff description** - What the trik does (used to generate the handoff tool)
+- **Domain tags** - Expertise areas for routing (e.g., "content curation, article writing")
 - **Location** - Where to create the project
 
 #### Generated Structure
@@ -66,44 +69,50 @@ The interactive wizard will prompt for:
 
 ```text
 my-trik/
-├── manifest.json      # Trik definition
-├── trikhub.json       # Registry metadata
+├── manifest.json        # v2 trik manifest with agent block
+├── trikhub.json         # Registry metadata
 ├── package.json
 ├── tsconfig.json
 ├── src/
-│   └── index.ts       # Main entry point
-├── test.ts            # Local test script
+│   ├── agent.ts         # Agent entry point using wrapAgent()
+│   ├── tools/
+│   │   └── example.ts   # Example tool with zod schema
+│   └── prompts/
+│       └── system.md    # System prompt (conversational mode)
 ├── README.md
 └── .gitignore
-```
-
-**Python:**
-
-```text
-my-trik/
-├── trikhub.json       # Registry metadata
-├── pyproject.toml
-├── test.py            # Local test script
-├── README.md
-├── .gitignore
-└── my_trik/           # Package directory
-    ├── __init__.py
-    ├── manifest.json  # Trik definition
-    └── graph.py       # Main entry point
 ```
 
 #### Testing Your Trik
 
 ```bash
-# TypeScript
 cd my-trik
 npm install
-npm test
-
-# Python
-cd my-trik
-python test.py
+npm run build
+trik lint .   # Validate manifest and quality score
 ```
+
+### `trik lint <path>`
+
+Validate a trik's manifest and source files. Shows errors, warnings, and a quality score.
+
+```bash
+trik lint .
+trik lint /path/to/my-trik
+
+# Treat warnings as errors
+trik lint . --warnings-as-errors
+
+# Skip specific rules
+trik lint . --skip manifest-completeness
+```
+
+The quality score (0-100) evaluates:
+- Handoff description quality
+- Domain tag specificity
+- System prompt presence (conversational mode)
+- Tool log template coverage
+- Log schema constraint safety
 
 ### `trik install <name>`
 
@@ -123,13 +132,10 @@ trik install @scope/trik-name --version 1.2.3
 The install process:
 
 1. **Tries npm registry first** - If the package is published to npm, installs via your package manager (npm/pnpm/yarn)
-2. **Falls back to TrikHub registry** - For GitHub-only packages, downloads the tarball from GitHub Releases
-3. Adds the dependency to `package.json` (npm packages use version, TrikHub packages use tarball URL)
-4. Extracts to `node_modules/`
-5. **Validates** the trik (manifest structure, security rules)
-6. Registers the trik in `.trikhub/config.json`
-
-This hybrid approach means triks work like regular npm packages while supporting GitHub-only distributions.
+2. **Falls back to TrikHub registry** - For GitHub-only packages, downloads from GitHub
+3. Adds the dependency to `package.json`
+4. **Validates** the trik (manifest structure, security rules)
+5. Registers the trik in `.trikhub/config.json`
 
 ### `trik search <query>`
 
@@ -142,21 +148,29 @@ trik search "web scraping"
 
 ### `trik list`
 
-List all installed triks.
+List all installed triks with their agent mode.
 
 ```bash
 trik list
 trik list --json  # Output as JSON
 ```
 
+Output shows each trik's name, version, description, and agent mode (`[conversational]` or `[one-shot]`).
+
 ### `trik info <name>`
 
-Show detailed information about a trik.
+Show detailed information about a trik, including v2 agent info for locally installed triks.
 
 ```bash
 trik info @acme/article-search
 trik info @acme/article-search --json  # Output as JSON
 ```
+
+For installed triks, displays:
+- **Agent mode** - conversational or one-shot
+- **Domain tags** - areas of expertise
+- **Tools** - declared tool names
+- **Quality score** - manifest quality (0-100)
 
 ### `trik uninstall <name>`
 
@@ -191,12 +205,55 @@ trik sync
 
 # Preview what would be synced
 trik sync --dry-run
-
-# Output as JSON
-trik sync --json
 ```
 
-This is useful when you manually add a trik to `package.json` and run `npm install`. The sync command will detect the trik and register it.
+### `trik publish`
+
+Publish a trik to the TrikHub registry.
+
+```bash
+# From inside your trik directory
+trik publish
+
+# Or specify a directory
+trik publish --directory /path/to/my-trik
+
+# Publish a specific version tag
+trik publish --tag 1.2.0
+```
+
+**Prerequisites:**
+
+- Logged in with `trik login`
+- Git tag pushed to remote matching the manifest version
+- `dist/` directory committed (for TypeScript triks)
+
+**Publishing flow:**
+
+1. Validate trik structure (manifest.json, trikhub.json)
+2. Verify git tag exists on remote
+3. Check `dist/` is committed
+4. Register with the TrikHub registry
+
+### Required Files
+
+```
+your-trik/
+├── manifest.json      # v2 trik manifest (required)
+├── trikhub.json       # Registry metadata (required)
+├── package.json       # npm package definition (required)
+└── dist/
+    └── agent.js       # Compiled entry point (required)
+```
+
+### Manifest Requirements
+
+Your `manifest.json` must pass v2 validation:
+
+- `schemaVersion: 2` required
+- `agent` block with `mode`, `handoffDescription`, and `domain` required
+- Conversational mode requires `systemPrompt` or `systemPromptFile`
+- Log schema strings must be constrained (enum, format, pattern, or maxLength)
 
 ## Authentication
 
@@ -207,11 +264,6 @@ Authenticate with TrikHub using your GitHub account.
 ```bash
 trik login
 ```
-
-This starts a device authorization flow:
-1. Opens a browser to GitHub
-2. Displays a code to enter
-3. After authorization, your session is saved locally
 
 ### `trik logout`
 
@@ -229,66 +281,6 @@ Show the currently authenticated user.
 trik whoami
 ```
 
-## Publishing
-
-### `trik publish`
-
-Publish a trik to the TrikHub registry.
-
-```bash
-# From inside your trik directory
-trik publish
-
-# Or specify a directory
-trik publish --directory /path/to/my-trik
-
-# Publish a specific version
-trik publish --tag 1.2.0
-
-# Skip GitHub release creation (create it manually)
-trik publish --skip-release
-```
-
-**Prerequisites:**
-
-- Logged in with `trik login`
-- GitHub CLI (`gh`) installed and authenticated
-- Write access to the GitHub repository
-
-### Publishing Flow
-
-The CLI will:
-
-1. Validate your trik structure (manifest.json, trikhub.json, package.json, dist/)
-2. Create an **npm-compatible tarball** with files inside a `package/` directory
-3. Compute SHA-256 hash for integrity verification
-4. Create a GitHub Release with the tarball attached
-5. Register the trik with the TrikHub registry
-
-The tarball format is compatible with npm, so users can install directly via the tarball URL.
-
-### Required Files
-
-```
-your-trik/
-├── package.json       # npm package definition (required)
-├── manifest.json      # Trik manifest (required)
-├── trikhub.json       # Registry metadata (required)
-├── dist/
-│   └── graph.js       # Compiled entry point (required)
-└── README.md          # Documentation (recommended)
-```
-
-### Manifest Requirements
-
-Your `manifest.json` must pass validation:
-
-- Use `enum`, `const`, or `pattern` to constrain strings in `agentDataSchema`
-- Template mode requires `responseTemplates`
-- Passthrough mode requires `userContentSchema`
-
-See the [Trikhub Manifest Schema](https://trikhub.com/docs/reference/manifest-schema) for manifest schema details.
-
 ## Trik Names
 
 Triks use scoped names similar to npm:
@@ -302,7 +294,7 @@ Triks use scoped names similar to npm:
 - **Name**: The trik name (e.g., `article-search`)
 - **Version**: Optional semver version (e.g., `1.2.3`)
 
-**Note:** All trik names are normalized to lowercase. `@Acme/Article-Search` becomes `@acme/article-search`.
+All trik names are normalized to lowercase.
 
 ## How Triks Work with npm
 
@@ -331,24 +323,6 @@ Triks are installed as regular npm packages in your project's `node_modules/`. T
 
 This file is used by the TrikHub Gateway to know which packages to load as triks.
 
-### TrikHub Registry Packages
-
-For packages not published to npm (GitHub-only), the CLI:
-
-1. Downloads the tarball from GitHub Releases
-2. Extracts to `node_modules/`
-3. Adds the tarball URL to `package.json`
-
-```json
-{
-  "dependencies": {
-    "@acme/article-search": "https://github.com/acme/article-search/releases/download/v1.0.0/article-search-1.0.0.tar.gz"
-  }
-}
-```
-
-This means `npm install` works natively - npm fetches from the tarball URL.
-
 ## File Locations
 
 | Path | Description |
@@ -358,105 +332,32 @@ This means `npm install` works natively - npm fetches from the tarball URL.
 | `./package.json` | Trik dependencies (managed by npm) |
 | `./node_modules/` | Installed triks (managed by npm) |
 
-## Validation
-
-Every installed trik is validated to ensure security:
-
-- **Manifest structure** - Required fields, valid schemas
-- **Privilege separation** - No unconstrained strings in `agentDataSchema`
-- **Entry point** - Compiled code exists at specified path
-- **Response mode compliance** - Template mode has templates, passthrough has userContentSchema
-
-Triks that fail validation are rejected to prevent prompt injection vulnerabilities.
-
 ## Configuration
 
 ### Registry URL
-
-The registry URL is determined by environment:
 
 | Environment | Registry URL |
 | ----------- | ------------ |
 | Production (default) | `https://api.trikhub.com` |
 | Development (`--dev` flag) | `http://localhost:3001` |
 
-Use the `--dev` flag for local development:
-
 ```bash
 trik --dev search article
 trik --dev install @scope/name
 ```
 
-Alternatively, set `NODE_ENV=development`:
-
-```bash
-export NODE_ENV=development
-trik search article
-```
-
-You can also override the registry URL with an environment variable:
+Override with environment variable:
 
 ```bash
 export TRIKHUB_REGISTRY=http://localhost:3000
 ```
 
-### Global Config File (`~/.trikhub/config.json`)
+## See Also
 
-Stores authentication and CLI settings:
-
-```json
-{
-  "analytics": true,
-  "authToken": "...",
-  "authExpiresAt": "2026-03-09T11:24:12.401Z",
-  "publisherUsername": "your-github-username"
-}
-```
-
-| Field | Description |
-| ----- | ----------- |
-| `analytics` | Whether to send anonymous download analytics |
-| `authToken` | Authentication token (set by `trik login`) |
-| `authExpiresAt` | Token expiration timestamp |
-| `publisherUsername` | Authenticated GitHub username |
-
-### Project Config File (`.trikhub/config.json`)
-
-Tracks which npm packages are triks:
-
-```json
-{
-  "triks": ["@acme/article-search", "@acme/web-scraper"],
-  "trikhub": {
-    "@acme/article-search": "1.0.0"
-  }
-}
-```
-
-| Field | Description |
-| ----- | ----------- |
-| `triks` | List of npm package names that are triks |
-| `trikhub` | Packages installed from TrikHub registry (version tracking) |
-
-## Development
-
-```bash
-# Clone the repo
-git clone https://github.com/trikhub/cli
-cd cli
-
-# Install dependencies
-pnpm install
-
-# Build
-pnpm build
-
-# Run locally
-node dist/cli.js --help
-
-# With local registry
-TRIKHUB_REGISTRY=http://localhost:3000 node dist/cli.js search article
-```
+- [@trikhub/gateway](../gateway) - Core gateway library with handoff routing
+- [@trikhub/server](../server) - HTTP server for remote gateway
+- [@trikhub/manifest](../manifest) - Manifest types and validation
+- [@trikhub/sdk](../sdk) - SDK for building triks (`wrapAgent()`, `transferBackTool`)
 
 ## License
 
