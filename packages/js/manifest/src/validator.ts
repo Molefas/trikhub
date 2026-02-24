@@ -79,6 +79,7 @@ const manifestSchema = {
           },
           inputSchema: { type: 'object' },
           outputSchema: { type: 'object' },
+          outputTemplate: { type: 'string' },
         },
         required: ['description'],
         additionalProperties: false,
@@ -208,6 +209,32 @@ function isConstrainedType(schema: JSONSchema): boolean {
 }
 
 // ============================================================================
+// Agent-Safe Type Validation (tool-mode outputSchema)
+// ============================================================================
+
+/**
+ * Check if a JSON Schema value type is agent-safe (suitable for outputSchema).
+ *
+ * Agent-safe types follow v1 agentDataSchema rules:
+ * - Safe: integers, numbers, booleans
+ * - Safe: strings with enum, format, or pattern
+ * - REJECTED: strings with only maxLength (still free-form)
+ * - REJECTED: unconstrained strings
+ *
+ * This is stricter than isConstrainedType() which accepts maxLength for logSchema.
+ */
+function isAgentSafeType(schema: JSONSchema): boolean {
+  const type = schema.type;
+  if (type === 'integer' || type === 'number' || type === 'boolean') return true;
+  if (schema.enum) return true;
+  if (type === 'string') {
+    return !!(schema.enum || schema.format || schema.pattern);
+    // NOTE: maxLength alone is NOT sufficient — that's still a free-form string
+  }
+  return false;
+}
+
+// ============================================================================
 // Output Schema Constraint Validation (tool mode)
 // ============================================================================
 
@@ -231,10 +258,10 @@ function validateOutputSchemaConstraints(
       // Recurse into nested objects
       validateOutputSchemaConstraints(toolName, propSchema as Record<string, unknown>, issues, propPath);
     } else if (propSchema.type === 'string') {
-      if (!isConstrainedType(propSchema as JSONSchema)) {
+      if (!isAgentSafeType(propSchema as JSONSchema)) {
         issues.push({
           type: 'error',
-          message: `${propPath}: unconstrained string in outputSchema — add enum, format, pattern, or maxLength`,
+          message: `${propPath}: string with only maxLength is not agent-safe — use enum, format, or pattern`,
         });
       }
     }
@@ -294,7 +321,7 @@ function validateSemantics(manifest: Record<string, unknown>): SemanticIssue[] {
       });
     }
 
-    // Every tool must have inputSchema and outputSchema
+    // Every tool must have inputSchema, outputSchema, and outputTemplate
     if (tools) {
       for (const [toolName, toolDef] of Object.entries(tools)) {
         if (!toolDef.inputSchema) {
@@ -309,11 +336,47 @@ function validateSemantics(manifest: Record<string, unknown>): SemanticIssue[] {
             message: `tools.${toolName}: tool mode requires outputSchema`,
           });
         }
+        if (!toolDef.outputTemplate) {
+          issues.push({
+            type: 'error',
+            message: `tools.${toolName}: tool mode requires outputTemplate`,
+          });
+        }
 
-        // Validate outputSchema strings are constrained
+        // Validate outputSchema strings are agent-safe (stricter than logSchema)
         if (toolDef.outputSchema) {
           const outputSchema = toolDef.outputSchema as Record<string, unknown>;
           validateOutputSchemaConstraints(toolName, outputSchema, issues);
+        }
+
+        // Cross-reference outputTemplate placeholders with outputSchema properties
+        if (toolDef.outputTemplate && toolDef.outputSchema) {
+          const template = toolDef.outputTemplate as string;
+          const placeholders = extractPlaceholders(template);
+          const outputProps = (toolDef.outputSchema as Record<string, unknown>).properties as
+            | Record<string, unknown>
+            | undefined;
+
+          for (const ph of placeholders) {
+            if (!outputProps || !(ph in outputProps)) {
+              issues.push({
+                type: 'error',
+                message: `tools.${toolName}: outputTemplate placeholder "{{${ph}}}" has no entry in outputSchema.properties`,
+              });
+            }
+          }
+
+          // Warn about outputSchema properties not referenced in outputTemplate
+          if (outputProps) {
+            for (const prop of Object.keys(outputProps)) {
+              if (!placeholders.includes(prop)) {
+                issues.push({
+                  type: 'warning',
+                  message: `tools.${toolName}: outputSchema property "${prop}" is not referenced in outputTemplate`,
+                });
+              }
+            }
+          }
         }
       }
     }
@@ -449,6 +512,7 @@ function calculateQualityScore(manifest: Record<string, unknown>): number {
         if (!toolDef.description) score -= 5;
         if (!toolDef.inputSchema) score -= 10;
         if (!toolDef.outputSchema) score -= 10;
+        if (!toolDef.outputTemplate) score -= 10;
       }
     }
   } else {
@@ -618,6 +682,27 @@ const ERROR_PATTERNS: Array<{ pattern: RegExp; diagnosis: DiagnosisResult }> = [
     diagnosis: {
       explanation: 'Every {{placeholder}} in logTemplate must have a matching entry in logSchema.',
       suggestion: 'Add the missing field to logSchema with a constrained type definition.',
+    },
+  },
+  {
+    pattern: /outputTemplate.*required|requires.*outputTemplate/i,
+    diagnosis: {
+      explanation: 'Tool-mode triks require an outputTemplate to control what the main LLM sees.',
+      suggestion: 'Add an outputTemplate string with {{placeholders}} matching your outputSchema properties.',
+    },
+  },
+  {
+    pattern: /agent-safe|not agent-safe/i,
+    diagnosis: {
+      explanation: 'outputSchema strings must use enum, format, or pattern — maxLength alone is not agent-safe.',
+      suggestion: 'Replace maxLength-only strings with enum (fixed values), format (id/date/uuid), or pattern (regex).',
+    },
+  },
+  {
+    pattern: /outputTemplate.*placeholder.*outputSchema|outputSchema.*outputTemplate/i,
+    diagnosis: {
+      explanation: 'Every {{placeholder}} in outputTemplate must match a property in outputSchema.',
+      suggestion: 'Add the missing property to outputSchema.properties or fix the placeholder name in outputTemplate.',
     },
   },
 ];

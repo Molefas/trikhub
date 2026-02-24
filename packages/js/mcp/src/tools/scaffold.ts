@@ -22,6 +22,7 @@ interface ToolDef {
   logSchema?: Record<string, unknown>;
   inputSchema?: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
+  outputTemplate?: string;
 }
 
 interface ScaffoldInput {
@@ -87,6 +88,9 @@ function generateManifest(input: ScaffoldInput): string {
       if (tool.outputSchema) {
         toolDef.outputSchema = tool.outputSchema;
       }
+      if (tool.outputTemplate) {
+        toolDef.outputTemplate = tool.outputTemplate;
+      }
       // For tool-mode, add default schemas if not provided
       if (input.mode === 'tool' && !tool.inputSchema) {
         toolDef.inputSchema = {
@@ -98,9 +102,15 @@ function generateManifest(input: ScaffoldInput): string {
       if (input.mode === 'tool' && !tool.outputSchema) {
         toolDef.outputSchema = {
           type: 'object',
-          properties: { result: { type: 'string', maxLength: 500 } },
-          required: ['result'],
+          properties: {
+            status: { type: 'string', enum: ['success', 'error'] },
+            resultId: { type: 'string', format: 'id' },
+          },
+          required: ['status'],
         };
+      }
+      if (input.mode === 'tool' && !tool.outputTemplate) {
+        toolDef.outputTemplate = `${tool.name}: {{status}} ({{resultId}})`;
       }
       tools[tool.name] = toolDef;
     }

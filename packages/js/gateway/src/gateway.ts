@@ -150,6 +150,7 @@ export interface ExposedToolDefinition {
   description: string;
   inputSchema: JSONSchema;
   outputSchema: JSONSchema;
+  outputTemplate: string;
 }
 
 // ============================================================================
@@ -338,7 +339,7 @@ export class TrikGateway {
       if (!loaded.manifest.tools) continue;
 
       for (const [toolName, toolDecl] of Object.entries(loaded.manifest.tools)) {
-        if (!toolDecl.inputSchema || !toolDecl.outputSchema) continue;
+        if (!toolDecl.inputSchema || !toolDecl.outputSchema || !toolDecl.outputTemplate) continue;
 
         tools.push({
           trikId,
@@ -346,6 +347,7 @@ export class TrikGateway {
           description: toolDecl.description,
           inputSchema: toolDecl.inputSchema,
           outputSchema: toolDecl.outputSchema,
+          outputTemplate: toolDecl.outputTemplate,
         });
       }
     }
@@ -361,7 +363,7 @@ export class TrikGateway {
     trikId: string,
     toolName: string,
     input: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> {
+  ): Promise<string> {
     const loaded = this.triks.get(trikId);
     if (!loaded) {
       throw new Error(`Trik "${trikId}" is not loaded`);
@@ -372,7 +374,7 @@ export class TrikGateway {
     }
 
     const toolDecl = loaded.manifest.tools?.[toolName];
-    if (!toolDecl || !toolDecl.inputSchema || !toolDecl.outputSchema) {
+    if (!toolDecl || !toolDecl.inputSchema || !toolDecl.outputSchema || !toolDecl.outputTemplate) {
       throw new Error(`Tool "${toolName}" not found in trik "${trikId}"`);
     }
 
@@ -401,7 +403,21 @@ export class TrikGateway {
       );
     }
 
-    return result.output;
+    // Strip to declared outputSchema properties only
+    const declaredProps = Object.keys(
+      (toolDecl.outputSchema as Record<string, unknown>).properties ?? {}
+    );
+    const stripped: Record<string, unknown> = {};
+    for (const key of declaredProps) {
+      if (key in result.output) stripped[key] = result.output[key];
+    }
+
+    // Fill outputTemplate
+    return toolDecl.outputTemplate.replace(/\{\{(\w+)\}\}/g, (_match, field: string) => {
+      const value = stripped[field];
+      if (value === undefined || value === null) return `{{${field}}}`;
+      return String(value);
+    });
   }
 
   // ==========================================================================

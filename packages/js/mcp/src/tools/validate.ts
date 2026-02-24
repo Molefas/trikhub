@@ -66,6 +66,18 @@ const FIX_MAP: Array<{ pattern: RegExp; fix: string }> = [
     fix: 'Output schema strings must be constrained (enum, maxLength, pattern, or format) for security.',
   },
   {
+    pattern: /outputTemplate.*required|required.*outputTemplate/i,
+    fix: 'Tool-mode tools need an "outputTemplate" with {{placeholders}} for each outputSchema field. Example: "{{status}} ({{resultId}})".',
+  },
+  {
+    pattern: /agent-safe|not agent-safe|maxLength.*not.*agent/i,
+    fix: 'outputSchema strings must use enum, format, or pattern — maxLength alone is not agent-safe. If your tool returns free-form text, use conversational mode instead.',
+  },
+  {
+    pattern: /outputTemplate.*placeholder.*outputSchema|placeholder.*not.*outputSchema/i,
+    fix: 'Every {{placeholder}} in outputTemplate must match a property in outputSchema. Check for typos.',
+  },
+  {
     pattern: /entry.*required|entry.*module/i,
     fix: 'Add an "entry" object with "module" (path to compiled file) and "export" (export name).',
   },

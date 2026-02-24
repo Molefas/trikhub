@@ -68,10 +68,12 @@ function generateManifest(config: InitConfig): string {
         outputSchema: {
           type: 'object',
           properties: {
-            result: { type: 'string', maxLength: 500 },
+            status: { type: 'string', enum: ['success', 'error'] },
+            resultId: { type: 'string', format: 'id' },
           },
-          required: ['result'],
+          required: ['status'],
         },
+        outputTemplate: `${toolName}: {{status}} ({{resultId}})`,
       };
     }
     manifest.tools = tools;

@@ -146,6 +146,7 @@ server.tool(
           description: z.string(),
           logTemplate: z.string().optional(),
           logSchema: z.record(z.unknown()).optional(),
+          outputTemplate: z.string().optional().describe('Template for tool output sent to main LLM. Placeholders: {{field}}. Required for tool-mode.'),
         }),
       )
       .optional()
@@ -261,16 +262,29 @@ const MANIFEST_SCHEMA_DOC = `# TrikHub v2 Manifest Schema
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | description | string | Yes | What the tool does |
-| logTemplate | string | No | Template with {{placeholders}} |
-| logSchema | Record<string, JSONSchema> | No | Types for placeholders |
+| logTemplate | string | No | Template with {{placeholders}} for log entries |
+| logSchema | Record<string, JSONSchema> | No | Types for log placeholders |
+| inputSchema | JSONSchema | Tool-mode only | JSON Schema for tool input |
+| outputSchema | JSONSchema | Tool-mode only | JSON Schema for tool output (agent-safe types) |
+| outputTemplate | string | Tool-mode only | Template with {{placeholders}} for output sent to LLM |
 
-### Log Schema Constraints
+### Log Schema Constraints (conversational mode)
 
 String fields in logSchema MUST be constrained:
 - \`enum\`: list of allowed values
 - \`maxLength\`: maximum character count
 - \`pattern\`: regex pattern
 - \`format\`: "id", "date", "date-time", "uuid", "email", "url"
+
+### Output Schema Constraints (tool mode — stricter)
+
+String fields in outputSchema must be **agent-safe**:
+- \`enum\`: list of allowed values
+- \`pattern\`: regex pattern
+- \`format\`: "id", "date", "date-time", "uuid", "email", "url"
+- **NOT** \`maxLength\` alone (still free-form text, rejected)
+
+If your tool returns user-provided content (titles, free text), use conversational mode instead.
 
 Integer, number, and boolean fields are always safe.
 

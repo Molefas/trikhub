@@ -156,17 +156,30 @@ export function designTool(
     inputSchema = buildObjectSchemaFromFields(inputFields);
   }
 
+  let outputTemplate: string | undefined;
+
   if (outputFields && outputFields.length > 0) {
     const schema = buildObjectSchemaFromFields(outputFields);
-    // Validate output fields are constrained (same rules as logSchema)
+    // Validate output fields are agent-safe (stricter than logSchema — no maxLength-only strings)
     for (const field of outputFields) {
-      if (field.type === 'string' && !field.values && !field.maxLength) {
-        warnings.push(
-          `Output field "${field.name}": unconstrained string. Add enum (values), maxLength, or pattern for security.`,
-        );
+      if (field.type === 'string' && !field.values) {
+        if (!field.maxLength) {
+          warnings.push(
+            `Output field "${field.name}": unconstrained string is not agent-safe. Use enum (values), format, or pattern.`,
+          );
+        } else {
+          warnings.push(
+            `Output field "${field.name}": string with only maxLength is not agent-safe — use enum, format, or pattern. maxLength alone is only accepted in logSchema.`,
+          );
+        }
       }
     }
     outputSchema = schema;
+
+    // Generate outputTemplate from field names
+    const action = toolName.replace(/([A-Z])/g, ' $1').trim().toLowerCase();
+    const placeholders = outputFields.map((f) => `{{${f.name}}}`);
+    outputTemplate = `${action.charAt(0).toUpperCase() + action.slice(1)}: ${placeholders.join(', ')}`;
   }
 
   if (inputFields && !outputFields) {
@@ -187,6 +200,7 @@ export function designTool(
       logSchema,
       inputSchema,
       outputSchema,
+      outputTemplate,
     },
     warnings,
     suggestions,

@@ -372,7 +372,7 @@ export function getHandoffToolsForAgent(gateway: TrikGateway): DynamicStructured
 
 /**
  * Convert gateway ExposedToolDefinitions into LangChain DynamicStructuredTools.
- * These tools call gateway.executeExposedTool() and return JSON.stringify(output).
+ * These tools call gateway.executeExposedTool() which returns a template-filled string.
  */
 function buildExposedTools(gateway: TrikGateway): DynamicStructuredTool[] {
   const definitions = gateway.getExposedTools();
@@ -383,8 +383,7 @@ function buildExposedTools(gateway: TrikGateway): DynamicStructuredTool[] {
       description: def.description,
       schema: jsonSchemaToZod(def.inputSchema) as z.ZodObject<z.ZodRawShape>,
       func: async (input: Record<string, unknown>) => {
-        const output = await gateway.executeExposedTool(def.trikId, def.toolName, input);
-        return JSON.stringify(output);
+        return await gateway.executeExposedTool(def.trikId, def.toolName, input);
       },
     })
   );

@@ -37,6 +37,7 @@ export interface DesignToolResult {
     logSchema?: Record<string, JSONSchema>;
     inputSchema?: JSONSchema;
     outputSchema?: JSONSchema;
+    outputTemplate?: string;
   };
   warnings: string[];
   suggestions: string[];

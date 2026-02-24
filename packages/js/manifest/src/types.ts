@@ -80,6 +80,9 @@ export interface ToolDeclaration {
   inputSchema?: JSONSchema;
   /** Output schema for tool-mode triks (JSON Schema for the tool's output, constrained types) */
   outputSchema?: JSONSchema;
+  /** Template for output sent to the main LLM. Placeholders: {{field}}.
+   *  Required for tool-mode triks. Only agent-safe fields allowed. */
+  outputTemplate?: string;
 }
 
 /**
