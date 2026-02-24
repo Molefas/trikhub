@@ -58,7 +58,7 @@ The interactive wizard will prompt for:
 - **Category** - utilities, productivity, developer, etc.
 - **Storage** - Enable persistent key-value storage
 - **Configuration** - Enable environment variables (API keys, etc.)
-- **Agent mode** - `conversational` (LLM-powered, multi-turn) or `one-shot` (deterministic)
+- **Agent mode** - `conversational` (LLM-powered, multi-turn) or `tool` (export native tools)
 - **Handoff description** - What the trik does (used to generate the handoff tool)
 - **Domain tags** - Expertise areas for routing (e.g., "content curation, article writing")
 - **Location** - Where to create the project
@@ -155,7 +155,7 @@ trik list
 trik list --json  # Output as JSON
 ```
 
-Output shows each trik's name, version, description, and agent mode (`[conversational]` or `[one-shot]`).
+Output shows each trik's name, version, description, and agent mode (`[conversational]` or `[tool]`).
 
 ### `trik info <name>`
 
@@ -167,7 +167,7 @@ trik info @acme/article-search --json  # Output as JSON
 ```
 
 For installed triks, displays:
-- **Agent mode** - conversational or one-shot
+- **Agent mode** - conversational or tool
 - **Domain tags** - areas of expertise
 - **Tools** - declared tool names
 - **Quality score** - manifest quality (0-100)

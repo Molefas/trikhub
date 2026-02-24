@@ -28,10 +28,10 @@ export interface JSONSchema {
 
 /**
  * Agent mode determines how the trik interacts with users.
- * - "conversational": Agent with LLM, handles multi-turn conversations
- * - "one-shot": Deterministic, no LLM, processes a single request
+ * - "conversational": Agent with LLM, handles multi-turn conversations via handoff
+ * - "tool": Exports native tools to the main agent (no handoff, no session)
  */
-export type AgentMode = 'conversational' | 'one-shot';
+export type AgentMode = 'conversational' | 'tool';
 
 /**
  * Model preferences for the agent's LLM.
@@ -52,8 +52,8 @@ export interface ModelPreferences {
 export interface AgentDefinition {
   /** How this agent operates */
   mode: AgentMode;
-  /** Description used to generate the handoff tool for the main agent */
-  handoffDescription: string;
+  /** Description used to generate the handoff tool for the main agent (required for conversational mode) */
+  handoffDescription?: string;
   /** Inline system prompt (conversational mode) */
   systemPrompt?: string;
   /** Path to system prompt file, relative to manifest (conversational mode) */
@@ -76,6 +76,10 @@ export interface ToolDeclaration {
   logTemplate?: string;
   /** Schema for log template placeholder values. Must use constrained types. */
   logSchema?: Record<string, JSONSchema>;
+  /** Input schema for tool-mode triks (JSON Schema for the tool's input) */
+  inputSchema?: JSONSchema;
+  /** Output schema for tool-mode triks (JSON Schema for the tool's output, constrained types) */
+  outputSchema?: JSONSchema;
 }
 
 /**
@@ -269,11 +273,20 @@ export interface TrikResponse {
 }
 
 /**
+ * Result from executing a tool-mode trik tool.
+ */
+export interface ToolExecutionResult {
+  output: Record<string, unknown>;
+}
+
+/**
  * The contract a trik agent must implement.
- * This is what the gateway calls to process messages.
+ * Conversational triks implement processMessage().
+ * Tool-mode triks implement executeTool().
  */
 export interface TrikAgent {
-  processMessage(message: string, context: TrikContext): Promise<TrikResponse>;
+  processMessage?(message: string, context: TrikContext): Promise<TrikResponse>;
+  executeTool?(toolName: string, input: Record<string, unknown>, context: TrikContext): Promise<ToolExecutionResult>;
 }
 
 // ============================================================================

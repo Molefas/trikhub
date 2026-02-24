@@ -9,7 +9,7 @@ import type { JSONSchema } from '@trikhub/manifest';
 // ============================================================================
 
 export interface AnalyzeResult {
-  suggestedMode: 'conversational' | 'one-shot';
+  suggestedMode: 'conversational' | 'tool';
   modeReason: string;
   suggestedHandoffDescription: string;
   suggestedDomain: string[];
@@ -35,6 +35,8 @@ export interface DesignToolResult {
     description: string;
     logTemplate?: string;
     logSchema?: Record<string, JSONSchema>;
+    inputSchema?: JSONSchema;
+    outputSchema?: JSONSchema;
   };
   warnings: string[];
   suggestions: string[];

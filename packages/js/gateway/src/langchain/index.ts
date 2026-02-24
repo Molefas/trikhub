@@ -1,6 +1,7 @@
 export {
   enhance,
   getHandoffToolsForAgent,
+  getExposedToolsForAgent,
   type InvokableAgent,
   type EnhanceOptions,
   type EnhancedAgent,

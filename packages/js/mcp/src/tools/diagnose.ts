@@ -26,7 +26,7 @@ const ERROR_PATTERNS: ErrorPattern[] = [
         'v2 manifests require an "agent" block that declares how your trik operates as an agent.',
       rootCause: 'The manifest is missing the required "agent" object.',
       suggestedFix:
-        'Add an "agent" object with "mode" ("conversational" or "one-shot"), "handoffDescription" (10-500 chars), and "domain" (array of specific tags).',
+        'Add an "agent" object with "mode" ("conversational" or "tool"), "handoffDescription" (required for conversational), and "domain" (array of specific tags).',
       relatedDocs: ['https://trikhub.dev/docs/manifest#agent'],
     },
   },
@@ -74,10 +74,10 @@ const ERROR_PATTERNS: ErrorPattern[] = [
     pattern: /mode.*invalid|invalid.*mode|mode.*enum/i,
     diagnosis: {
       explanation:
-        'Agent mode must be "conversational" (agent with LLM for multi-turn conversations) or "one-shot" (deterministic, no LLM).',
+        'Agent mode must be "conversational" (agent with LLM for multi-turn conversations) or "tool" (export native tools to main agent).',
       rootCause: 'agent.mode has an invalid value.',
       suggestedFix:
-        'Set agent.mode to "conversational" or "one-shot".',
+        'Set agent.mode to "conversational" or "tool".',
       relatedDocs: ['https://trikhub.dev/docs/manifest#agent-mode'],
     },
   },

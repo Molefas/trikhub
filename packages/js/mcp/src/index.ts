@@ -131,8 +131,8 @@ server.tool(
       ])
       .describe('Category for the trik'),
     mode: z
-      .enum(['conversational', 'one-shot'])
-      .describe('Agent mode: conversational (LLM agent) or one-shot (deterministic)'),
+      .enum(['conversational', 'tool'])
+      .describe('Agent mode: conversational (LLM agent) or tool (export native tools)'),
     handoffDescription: z
       .string()
       .describe('Description used for handoff routing (10-500 chars)'),
@@ -247,7 +247,7 @@ const MANIFEST_SCHEMA_DOC = `# TrikHub v2 Manifest Schema
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| mode | "conversational" \\| "one-shot" | Yes | How the agent operates |
+| mode | "conversational" \\| "tool" | Yes | How the agent operates |
 | handoffDescription | string (10-500 chars) | Yes | Routing description |
 | systemPrompt | string | No* | Inline system prompt |
 | systemPromptFile | string | No* | Path to .md file |

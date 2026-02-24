@@ -129,23 +129,46 @@ export async function initCommand(languageArg: string): Promise<void> {
     });
 
     // v2 agent prompts
-    const agentMode = await select<'conversational' | 'one-shot'>({
+    const agentMode = await select<'conversational' | 'tool'>({
       message: 'Agent mode:',
       choices: [
         { value: 'conversational', name: 'Conversational (multi-turn ReAct agent)' },
-        { value: 'one-shot', name: 'One-shot (single request/response)' },
+        { value: 'tool', name: 'Tool (export native tools to main agent)' },
       ],
       default: 'conversational',
     });
 
-    const handoffDescription = await input({
-      message: 'Handoff description (how should the main agent describe this trik?):',
-      validate: (value: string) => {
-        if (value.length < 10) return 'Description must be at least 10 characters';
-        if (value.length > 500) return 'Description must be at most 500 characters';
-        return true;
-      },
-    });
+    // Handoff description only for conversational mode
+    let handoffDescription = '';
+    if (agentMode === 'conversational') {
+      handoffDescription = await input({
+        message: 'Handoff description (how should the main agent describe this trik?):',
+        validate: (value: string) => {
+          if (value.length < 10) return 'Description must be at least 10 characters';
+          if (value.length > 500) return 'Description must be at most 500 characters';
+          return true;
+        },
+      });
+    }
+
+    // Tool names for tool mode
+    let toolNames: string[] = [];
+    if (agentMode === 'tool') {
+      const toolNamesRaw = await input({
+        message: 'Tool names (comma-separated, camelCase, e.g. "getWeather, getForecast"):',
+        validate: (value: string) => {
+          const names = value.split(',').map((t) => t.trim()).filter(Boolean);
+          if (names.length === 0) return 'At least one tool name is required';
+          for (const n of names) {
+            if (!/^[a-z][a-zA-Z0-9]*$/.test(n)) {
+              return `Invalid tool name "${n}": must be camelCase starting with a lowercase letter`;
+            }
+          }
+          return true;
+        },
+      });
+      toolNames = toolNamesRaw.split(',').map((t) => t.trim()).filter(Boolean);
+    }
 
     const domainTagsRaw = await input({
       message: 'Domain tags (comma-separated, e.g. "content curation, article writing"):',
@@ -201,6 +224,7 @@ export async function initCommand(languageArg: string): Promise<void> {
       agentMode,
       handoffDescription,
       domainTags,
+      toolNames,
     };
 
     // Only TypeScript is supported for now
@@ -252,9 +276,11 @@ export async function initCommand(languageArg: string): Promise<void> {
     console.log();
     console.log(chalk.dim('  Next steps:'));
     console.log(`    cd ${name}`);
-    console.log('    Edit src/agent.ts to implement your agent logic');
-    console.log('    Add tools in src/tools/');
-    if (agentMode === 'conversational') {
+    if (agentMode === 'tool') {
+      console.log('    Edit src/agent.ts to implement your tool handlers');
+    } else {
+      console.log('    Edit src/agent.ts to implement your agent logic');
+      console.log('    Add tools in src/tools/');
       console.log('    Customize src/prompts/system.md');
     }
     console.log(`    ${packageManager === 'pnpm' ? 'pnpm' : 'npm run'} build`);

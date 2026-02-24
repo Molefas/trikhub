@@ -5,4 +5,5 @@ export type {
   TrikConfigContext,
   TrikStorageContext,
   ToolCallRecord,
+  ToolExecutionResult,
 } from '@trikhub/manifest';

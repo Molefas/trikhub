@@ -18,10 +18,11 @@ const CONVERSATIONAL_KEYWORDS = [
   'llm', 'ai', 'generate', 'create content', 'write', 'draft',
 ];
 
-const ONE_SHOT_KEYWORDS = [
+const TOOL_MODE_KEYWORDS = [
   'convert', 'transform', 'format', 'calculate', 'compute', 'validate',
   'check', 'lint', 'parse', 'encode', 'decode', 'deterministic',
-  'no llm', 'simple', 'one-shot', 'single request', 'lookup',
+  'no llm', 'simple', 'tool mode', 'single request', 'lookup',
+  'native tool', 'api', 'fetch', 'weather', 'data lookup',
 ];
 
 const STORAGE_KEYWORDS = [
@@ -164,16 +165,16 @@ export function analyzeTrikRequirements(
   constraints?: string,
 ): AnalyzeResult {
   const conversationalScore = countKeywords(description, CONVERSATIONAL_KEYWORDS);
-  const oneShotScore = countKeywords(description, ONE_SHOT_KEYWORDS);
+  const toolModeScore = countKeywords(description, TOOL_MODE_KEYWORDS);
   const storageScore = countKeywords(description, STORAGE_KEYWORDS);
   const sessionScore = countKeywords(description, SESSION_KEYWORDS);
 
-  const isConversational = conversationalScore >= oneShotScore;
-  const suggestedMode = isConversational ? 'conversational' : 'one-shot';
+  const isConversational = conversationalScore >= toolModeScore;
+  const suggestedMode = isConversational ? 'conversational' : 'tool';
 
   const modeReason = isConversational
-    ? `Conversational mode recommended: description suggests interactive, multi-turn interactions (matched ${conversationalScore} conversational keywords vs ${oneShotScore} one-shot keywords).`
-    : `One-shot mode recommended: description suggests deterministic, single-request processing (matched ${oneShotScore} one-shot keywords vs ${conversationalScore} conversational keywords).`;
+    ? `Conversational mode recommended: description suggests interactive, multi-turn interactions (matched ${conversationalScore} conversational keywords vs ${toolModeScore} tool-mode keywords).`
+    : `Tool mode recommended: description suggests native tools that export to the main agent (matched ${toolModeScore} tool-mode keywords vs ${conversationalScore} conversational keywords).`;
 
   const tools = extractTools(description);
   const domain = extractDomainTags(description);
@@ -183,9 +184,9 @@ export function analyzeTrikRequirements(
 
   const clarifyingQuestions: string[] = [];
 
-  if (conversationalScore === oneShotScore) {
+  if (conversationalScore === toolModeScore) {
     clarifyingQuestions.push(
-      'Should the trik handle multi-turn conversations (conversational) or process single requests deterministically (one-shot)?',
+      'Should the trik handle multi-turn conversations (conversational) or export native tools to the main agent (tool mode)?',
     );
   }
 
@@ -210,7 +211,7 @@ export function analyzeTrikRequirements(
   return {
     suggestedMode,
     modeReason,
-    suggestedHandoffDescription: generateHandoffDescription(description),
+    suggestedHandoffDescription: isConversational ? generateHandoffDescription(description) : '',
     suggestedDomain: domain,
     suggestedTools: tools,
     suggestedCapabilities: {

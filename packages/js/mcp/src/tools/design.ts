@@ -92,6 +92,22 @@ export function designTool(
     values?: string[];
     description?: string;
   }>,
+  inputFields?: Array<{
+    name: string;
+    type: string;
+    required?: boolean;
+    maxLength?: number;
+    values?: string[];
+    description?: string;
+  }>,
+  outputFields?: Array<{
+    name: string;
+    type: string;
+    required?: boolean;
+    maxLength?: number;
+    values?: string[];
+    description?: string;
+  }>,
 ): DesignToolResult {
   const warnings: string[] = [];
   const suggestions: string[] = [];
@@ -132,6 +148,33 @@ export function designTool(
     );
   }
 
+  // Build inputSchema / outputSchema for tool-mode triks
+  let inputSchema: JSONSchema | undefined;
+  let outputSchema: JSONSchema | undefined;
+
+  if (inputFields && inputFields.length > 0) {
+    inputSchema = buildObjectSchemaFromFields(inputFields);
+  }
+
+  if (outputFields && outputFields.length > 0) {
+    const schema = buildObjectSchemaFromFields(outputFields);
+    // Validate output fields are constrained (same rules as logSchema)
+    for (const field of outputFields) {
+      if (field.type === 'string' && !field.values && !field.maxLength) {
+        warnings.push(
+          `Output field "${field.name}": unconstrained string. Add enum (values), maxLength, or pattern for security.`,
+        );
+      }
+    }
+    outputSchema = schema;
+  }
+
+  if (inputFields && !outputFields) {
+    suggestions.push(
+      'Tool-mode triks need both inputSchema and outputSchema. Add outputFields to complete the tool definition.',
+    );
+  }
+
   // Validate tool name
   if (toolName.includes(' ') || toolName.includes('-')) {
     warnings.push('Tool name should be camelCase (e.g., "searchArticles" not "search-articles").');
@@ -142,9 +185,46 @@ export function designTool(
       description,
       logTemplate,
       logSchema,
+      inputSchema,
+      outputSchema,
     },
     warnings,
     suggestions,
+  };
+}
+
+/**
+ * Build a JSON Schema object from a list of field definitions.
+ */
+function buildObjectSchemaFromFields(
+  fields: Array<{
+    name: string;
+    type: string;
+    required?: boolean;
+    maxLength?: number;
+    values?: string[];
+    description?: string;
+  }>,
+): JSONSchema {
+  const properties: Record<string, JSONSchema> = {};
+  const required: string[] = [];
+
+  for (const field of fields) {
+    const prop: JSONSchema = { type: field.type };
+    if (field.description) prop.description = field.description;
+    if (field.maxLength) prop.maxLength = field.maxLength;
+    if (field.values && field.values.length > 0) prop.enum = field.values;
+    properties[field.name] = prop;
+
+    if (field.required !== false) {
+      required.push(field.name);
+    }
+  }
+
+  return {
+    type: 'object',
+    properties,
+    required: required.length > 0 ? required : undefined,
   };
 }
 

@@ -6,6 +6,10 @@ export type {
   WrapAgentOptions,
 } from './wrap-agent.js';
 
+// Tool-mode API
+export { wrapToolHandlers } from './wrap-tool-handlers.js';
+export type { ToolHandler } from './wrap-tool-handlers.js';
+
 // Transfer-back tool
 export { transferBackTool, TRANSFER_BACK_TOOL_NAME } from './transfer-back.js';
 
@@ -21,4 +25,5 @@ export type {
   TrikConfigContext,
   TrikStorageContext,
   ToolCallRecord,
+  ToolExecutionResult,
 } from './types.js';

@@ -19,9 +19,10 @@ export interface InitConfig {
   enableStorage: boolean;
   enableConfig: boolean;
   // v2 fields
-  agentMode: 'conversational' | 'one-shot';
+  agentMode: 'conversational' | 'tool';
   handoffDescription: string;
   domainTags: string[];
+  toolNames: string[];
 }
 
 // ============================================================================
@@ -29,29 +30,58 @@ export interface InitConfig {
 // ============================================================================
 
 function generateManifest(config: InitConfig): string {
+  const isToolMode = config.agentMode === 'tool';
+
+  const agent: Record<string, unknown> = {
+    mode: config.agentMode,
+    domain: config.domainTags,
+  };
+
+  if (!isToolMode) {
+    agent.handoffDescription = config.handoffDescription;
+    agent.systemPromptFile = './src/prompts/system.md';
+    agent.model = { capabilities: ['tool_use'] };
+  }
+
   const manifest: Record<string, unknown> = {
     schemaVersion: 2,
     id: config.name,
     name: config.displayName,
     description: config.description,
     version: '0.1.0',
-    agent: {
-      mode: config.agentMode,
-      handoffDescription: config.handoffDescription,
-      ...(config.agentMode === 'conversational'
-        ? { systemPromptFile: './src/prompts/system.md' }
-        : {}),
-      ...(config.agentMode === 'conversational'
-        ? { model: { capabilities: ['tool_use'] } }
-        : {}),
-      domain: config.domainTags,
-    },
-    tools: {
+    agent,
+  };
+
+  // Tools block
+  if (isToolMode && config.toolNames.length > 0) {
+    const tools: Record<string, Record<string, unknown>> = {};
+    for (const toolName of config.toolNames) {
+      tools[toolName] = {
+        description: `TODO: describe ${toolName}`,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', maxLength: 200 },
+          },
+          required: ['query'],
+        },
+        outputSchema: {
+          type: 'object',
+          properties: {
+            result: { type: 'string', maxLength: 500 },
+          },
+          required: ['result'],
+        },
+      };
+    }
+    manifest.tools = tools;
+  } else {
+    manifest.tools = {
       exampleTool: {
         description: 'An example tool',
       },
-    },
-  };
+    };
+  }
 
   if (config.enableStorage) {
     manifest.capabilities = {
@@ -94,6 +124,20 @@ function generateTrikhubJson(config: InitConfig): string {
 }
 
 function generatePackageJson(config: InitConfig): string {
+  const isToolMode = config.agentMode === 'tool';
+
+  const dependencies: Record<string, string> = {
+    '@trikhub/sdk': 'latest',
+  };
+
+  // Conversational mode needs LangChain + LLM provider
+  if (!isToolMode) {
+    dependencies['@langchain/anthropic'] = '^0.3.0';
+    dependencies['@langchain/core'] = '^0.3.0';
+    dependencies['@langchain/langgraph'] = '^0.2.0';
+    dependencies['zod'] = '^3.25.0';
+  }
+
   const pkg = {
     name: config.name,
     version: '0.1.0',
@@ -105,13 +149,7 @@ function generatePackageJson(config: InitConfig): string {
       dev: 'node --import tsx src/agent.ts',
       clean: 'rm -rf dist *.tsbuildinfo',
     },
-    dependencies: {
-      '@trikhub/sdk': 'latest',
-      '@langchain/anthropic': '^0.3.0',
-      '@langchain/core': '^0.3.0',
-      '@langchain/langgraph': '^0.2.0',
-      zod: '^3.25.0',
-    },
+    dependencies,
     devDependencies: {
       tsx: '^4.19.0',
       typescript: '^5.7.0',
@@ -143,30 +181,31 @@ function generateTsConfig(): string {
   return JSON.stringify(tsconfig, null, 2);
 }
 
-function generateAgentTs(config: InitConfig): string {
-  if (config.agentMode === 'one-shot') {
-    return `/**
- * ${config.displayName} — one-shot agent entry point.
+function generateToolModeAgentTs(config: InitConfig): string {
+  const handlers = config.toolNames.map((name) =>
+    `  ${name}: async (input, context) => {
+    // TODO: Implement ${name}
+    return { result: 'Not implemented' };
+  },`
+  ).join('\n');
+
+  return `/**
+ * ${config.displayName} — tool-mode agent entry point.
+ *
+ * Exports native tools to the main agent. No handoff, no session.
  */
 
-import { wrapAgent, transferBackTool } from '@trikhub/sdk';
-import type { TrikContext } from '@trikhub/sdk';
-import { exampleTool } from './tools/example.js';
+import { wrapToolHandlers } from '@trikhub/sdk';
 
-export default wrapAgent((context: TrikContext) => {
-  // One-shot mode: process the request and transfer back immediately.
-  // The agent will call tools as needed, then transfer_back with a summary.
-
-  const tools = [
-    exampleTool,
-    transferBackTool,
-  ];
-
-  // TODO: Replace with your one-shot processing logic
-  // For one-shot mode, consider using a simple function instead of a full LLM agent
-  throw new Error('Not implemented — replace with your processing logic');
+export default wrapToolHandlers({
+${handlers}
 });
 `;
+}
+
+function generateAgentTs(config: InitConfig): string {
+  if (config.agentMode === 'tool') {
+    return generateToolModeAgentTs(config);
   }
 
   // Conversational mode
@@ -260,6 +299,19 @@ dist/
 
 function generateReadme(config: InitConfig): string {
   const domainStr = config.domainTags.join(', ');
+  const isToolMode = config.agentMode === 'tool';
+
+  const devSection = isToolMode
+    ? `- Implement your tool handlers in \`src/agent.ts\`
+- Update inputSchema/outputSchema in \`manifest.json\``
+    : `- Edit your agent logic in \`src/agent.ts\`
+- Add tools in \`src/tools/\`
+- Customize the system prompt in \`src/prompts/system.md\``;
+
+  const archSection = isToolMode
+    ? `Tools from this trik appear as native tools on the main agent — no handoff, no session.`
+    : `The main agent routes conversations to this trik using a \`talk_to_${config.name}\` tool.
+When done, use the \`transfer_back\` tool to return control.`;
 
   return `# ${config.displayName}
 
@@ -274,17 +326,15 @@ ${config.description}
 
 ## Development
 
-- Edit your agent logic in \`src/agent.ts\`
-- Add tools in \`src/tools/\`
-${config.agentMode === 'conversational' ? '- Customize the system prompt in `src/prompts/system.md`\n' : ''}
+${devSection}
+
 ## Architecture
 
-This trik uses the TrikHub v2 handoff architecture:
+This trik uses the TrikHub v2 architecture:
 - **Mode**: ${config.agentMode}
 - **Domain**: ${domainStr}
 
-The main agent routes conversations to this trik using a \`talk_to_${config.name}\` tool.
-When done, use the \`transfer_back\` tool to return control.
+${archSection}
 `;
 }
 
@@ -310,12 +360,13 @@ export function generateTypescriptProject(config: InitConfig): Record<string, st
 
   // Source files
   files['src/agent.ts'] = generateAgentTs(config);
-  files['src/tools/example.ts'] = generateExampleTool();
 
-  // System prompt (conversational mode only)
   if (config.agentMode === 'conversational') {
+    // Conversational mode: example tool + system prompt
+    files['src/tools/example.ts'] = generateExampleTool();
     files['src/prompts/system.md'] = generateSystemPrompt(config);
   }
+  // Tool mode: no separate tool files or system prompt — all logic in agent.ts
 
   return files;
 }

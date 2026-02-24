@@ -31,7 +31,7 @@ const FIX_MAP: Array<{ pattern: RegExp; fix: string }> = [
   },
   {
     pattern: /mode.*enum/i,
-    fix: 'Set agent.mode to "conversational" (for LLM agents) or "one-shot" (for deterministic processing).',
+    fix: 'Set agent.mode to "conversational" (for LLM agents) or "tool" (to export native tools).',
   },
   {
     pattern: /domain.*minItems/i,
@@ -52,6 +52,18 @@ const FIX_MAP: Array<{ pattern: RegExp; fix: string }> = [
   {
     pattern: /placeholder.*logSchema|logSchema.*placeholder/i,
     fix: 'Add a logSchema entry for each {{placeholder}} in your logTemplate.',
+  },
+  {
+    pattern: /tool.*mode.*requires.*tools|tools.*required.*tool.*mode/i,
+    fix: 'Tool-mode triks must have a "tools" block with inputSchema and outputSchema for each tool.',
+  },
+  {
+    pattern: /inputSchema.*required|outputSchema.*required/i,
+    fix: 'Tool-mode tools need both "inputSchema" and "outputSchema". Define the JSON Schema for input and output.',
+  },
+  {
+    pattern: /outputSchema.*unconstrained/i,
+    fix: 'Output schema strings must be constrained (enum, maxLength, pattern, or format) for security.',
   },
   {
     pattern: /entry.*required|entry.*module/i,

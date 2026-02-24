@@ -11,6 +11,7 @@ export {
   type RouteTransferBack,
   type RouteForceBack,
   type HandoffToolDefinition,
+  type ExposedToolDefinition,
 } from './gateway.js';
 
 // Session storage
@@ -97,4 +98,5 @@ export type {
   TrikStorageContext,
   HandoffLogEntry,
   HandoffSession,
+  ToolExecutionResult,
 } from '@trikhub/manifest';

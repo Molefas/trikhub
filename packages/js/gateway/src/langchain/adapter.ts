@@ -7,7 +7,9 @@ import {
   type TrikGatewayConfig,
   type LoadFromConfigOptions,
   type HandoffToolDefinition,
+  type ExposedToolDefinition,
 } from '../gateway.js';
+import { jsonSchemaToZod } from './schema-converter.js';
 
 // ============================================================================
 // Types
@@ -158,6 +160,9 @@ export async function enhance(
 
   // Build the handoff tools as LangChain DynamicStructuredTools
   const handoffTools = buildHandoffTools(gateway.getHandoffTools());
+
+  // Build exposed tools from tool-mode triks
+  const exposedTools = buildExposedTools(gateway);
 
   return {
     gateway,
@@ -359,6 +364,38 @@ function buildHandoffTools(definitions: HandoffToolDefinition[]): DynamicStructu
  */
 export function getHandoffToolsForAgent(gateway: TrikGateway): DynamicStructuredTool[] {
   return buildHandoffTools(gateway.getHandoffTools());
+}
+
+// ============================================================================
+// Exposed Tool Building (tool-mode triks)
+// ============================================================================
+
+/**
+ * Convert gateway ExposedToolDefinitions into LangChain DynamicStructuredTools.
+ * These tools call gateway.executeExposedTool() and return JSON.stringify(output).
+ */
+function buildExposedTools(gateway: TrikGateway): DynamicStructuredTool[] {
+  const definitions = gateway.getExposedTools();
+
+  return definitions.map((def) =>
+    new DynamicStructuredTool({
+      name: def.toolName,
+      description: def.description,
+      schema: jsonSchemaToZod(def.inputSchema) as z.ZodObject<z.ZodRawShape>,
+      func: async (input: Record<string, unknown>) => {
+        const output = await gateway.executeExposedTool(def.trikId, def.toolName, input);
+        return JSON.stringify(output);
+      },
+    })
+  );
+}
+
+/**
+ * Get exposed tools from tool-mode triks as an array for binding to agents.
+ * These appear as native tools on the main agent (no handoff, no session).
+ */
+export function getExposedToolsForAgent(gateway: TrikGateway): DynamicStructuredTool[] {
+  return buildExposedTools(gateway);
 }
 
 // ============================================================================

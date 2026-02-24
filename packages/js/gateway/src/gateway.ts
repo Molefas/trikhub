@@ -13,7 +13,9 @@ import {
   type ToolCallRecord,
   type ToolDeclaration,
   type JSONSchema,
+  type ToolExecutionResult,
   validateManifest,
+  validateData,
 } from '@trikhub/manifest';
 import { PythonWorker, type PythonWorkerConfig } from './python-worker.js';
 import { type ConfigStore, FileConfigStore } from './config-store.js';
@@ -129,13 +131,25 @@ export interface RouteForceBack {
 }
 
 /**
- * A handoff tool definition — one per loaded trik.
+ * A handoff tool definition — one per loaded conversational trik.
  * The main agent calls these to initiate a handoff.
  */
 export interface HandoffToolDefinition {
   name: string;
   description: string;
   inputSchema: JSONSchema;
+}
+
+/**
+ * An exposed tool definition — one per tool in a tool-mode trik.
+ * These appear as native tools on the main agent (no handoff).
+ */
+export interface ExposedToolDefinition {
+  trikId: string;
+  toolName: string;
+  description: string;
+  inputSchema: JSONSchema;
+  outputSchema: JSONSchema;
 }
 
 // ============================================================================
@@ -284,16 +298,18 @@ export class TrikGateway {
   // ==========================================================================
 
   /**
-   * Generate handoff tool definitions — one per loaded trik.
+   * Generate handoff tool definitions — one per loaded conversational trik.
    * These get added to the main agent's tool set by enhance() (Phase 5).
    */
   getHandoffTools(): HandoffToolDefinition[] {
     const tools: HandoffToolDefinition[] = [];
 
     for (const [trikId, loaded] of this.triks) {
+      if (loaded.manifest.agent.mode !== 'conversational') continue;
+
       tools.push({
         name: `talk_to_${trikId}`,
-        description: loaded.manifest.agent.handoffDescription,
+        description: loaded.manifest.agent.handoffDescription!,
         inputSchema: {
           type: 'object',
           properties: {
@@ -308,6 +324,84 @@ export class TrikGateway {
     }
 
     return tools;
+  }
+
+  /**
+   * Get exposed tool definitions from tool-mode triks.
+   * These appear as native tools on the main agent.
+   */
+  getExposedTools(): ExposedToolDefinition[] {
+    const tools: ExposedToolDefinition[] = [];
+
+    for (const [trikId, loaded] of this.triks) {
+      if (loaded.manifest.agent.mode !== 'tool') continue;
+      if (!loaded.manifest.tools) continue;
+
+      for (const [toolName, toolDecl] of Object.entries(loaded.manifest.tools)) {
+        if (!toolDecl.inputSchema || !toolDecl.outputSchema) continue;
+
+        tools.push({
+          trikId,
+          toolName,
+          description: toolDecl.description,
+          inputSchema: toolDecl.inputSchema,
+          outputSchema: toolDecl.outputSchema,
+        });
+      }
+    }
+
+    return tools;
+  }
+
+  /**
+   * Execute an exposed tool from a tool-mode trik.
+   * Validates input and output against manifest schemas.
+   */
+  async executeExposedTool(
+    trikId: string,
+    toolName: string,
+    input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const loaded = this.triks.get(trikId);
+    if (!loaded) {
+      throw new Error(`Trik "${trikId}" is not loaded`);
+    }
+
+    if (loaded.manifest.agent.mode !== 'tool') {
+      throw new Error(`Trik "${trikId}" is not a tool-mode trik`);
+    }
+
+    const toolDecl = loaded.manifest.tools?.[toolName];
+    if (!toolDecl || !toolDecl.inputSchema || !toolDecl.outputSchema) {
+      throw new Error(`Tool "${toolName}" not found in trik "${trikId}"`);
+    }
+
+    // Validate input against inputSchema
+    const inputValidation = validateData(toolDecl.inputSchema, input);
+    if (!inputValidation.valid) {
+      throw new Error(
+        `Invalid input for ${trikId}.${toolName}: ${inputValidation.errors?.join(', ')}`,
+      );
+    }
+
+    // Execute the tool
+    if (!loaded.agent.executeTool) {
+      throw new Error(`Trik "${trikId}" does not implement executeTool()`);
+    }
+
+    const context = this.buildTrikContext(`tool:${trikId}:${toolName}`, loaded);
+    const result: ToolExecutionResult = await loaded.agent.executeTool(toolName, input, context);
+
+    // Validate output against outputSchema
+    const outputValidation = validateData(toolDecl.outputSchema, result.output);
+    if (!outputValidation.valid) {
+      // Never return raw output on validation failure — sanitized error only
+      throw new Error(
+        `Tool "${toolName}" returned invalid output: ${outputValidation.errors?.join(', ')}`,
+      );
+    }
+
+    return result.output;
   }
 
   // ==========================================================================
@@ -337,7 +431,7 @@ export class TrikGateway {
     // Call the trik agent
     let response: TrikResponse;
     try {
-      response = await loaded.agent.processMessage(message, trikContext);
+      response = await loaded.agent.processMessage!(message, trikContext);
     } catch (error) {
       // Trik threw an error — transfer back with error summary
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -548,6 +642,8 @@ export class TrikGateway {
 
     const runtime: TrikRuntime = manifest.entry.runtime ?? 'node';
 
+    const isToolMode = manifest.agent.mode === 'tool';
+
     if (runtime === 'python') {
       // Python triks use the worker protocol — create a proxy TrikAgent
       await this.ensurePythonWorker();
@@ -562,11 +658,36 @@ export class TrikGateway {
       const exportName = manifest.entry.export;
       const agent = mod[exportName] ?? mod.default;
 
-      if (!agent || typeof agent.processMessage !== 'function') {
-        throw new Error(
-          `Trik "${manifest.id}" module does not export a valid TrikAgent ` +
-          `(expected export "${exportName}" with a processMessage method)`
-        );
+      if (isToolMode) {
+        // Tool-mode triks must implement executeTool()
+        if (!agent || typeof agent.executeTool !== 'function') {
+          throw new Error(
+            `Trik "${manifest.id}" module does not export a valid tool-mode TrikAgent ` +
+            `(expected export "${exportName}" with an executeTool method)`
+          );
+        }
+
+        // Check for duplicate tool names across loaded tool-mode triks
+        if (manifest.tools) {
+          for (const toolName of Object.keys(manifest.tools)) {
+            for (const [existingId, existingTrik] of this.triks) {
+              if (existingTrik.manifest.agent.mode !== 'tool') continue;
+              if (existingTrik.manifest.tools?.[toolName]) {
+                throw new Error(
+                  `Duplicate tool name "${toolName}": declared in both "${existingId}" and "${manifest.id}"`
+                );
+              }
+            }
+          }
+        }
+      } else {
+        // Conversational triks must implement processMessage()
+        if (!agent || typeof agent.processMessage !== 'function') {
+          throw new Error(
+            `Trik "${manifest.id}" module does not export a valid TrikAgent ` +
+            `(expected export "${exportName}" with a processMessage method)`
+          );
+        }
       }
 
       this.triks.set(manifest.id, { manifest, agent: agent as TrikAgent, path: trikPath, runtime });

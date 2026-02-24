@@ -1,12 +1,13 @@
 import { createReactAgent } from '@langchain/langgraph/prebuilt';
 import { TrikGateway } from '@trikhub/gateway';
-import { enhance, getHandoffToolsForAgent } from '@trikhub/gateway/langchain';
+import { enhance, getHandoffToolsForAgent, getExposedToolsForAgent } from '@trikhub/gateway/langchain';
 import { builtInTools } from './tools.js';
 import { createLLM, getProviderInfo } from './llm.js';
 
 const SYSTEM_PROMPT = `You are a helpful assistant with access to various tools.
 You can check the weather, do math calculations, and search the web.
-When the user asks about content curation, article writing, hoarding content, RSS feeds, or voice profiles, use the appropriate talk_to tool to hand off to a specialist agent.`;
+When the user asks about content curation, article writing, hoarding content, RSS feeds, or voice profiles, use the appropriate talk_to tool to hand off to a specialist agent.
+Any additional tools provided by installed triks are available as native tools — use them directly.`;
 
 export async function initializeAgent() {
   const model = await createLLM();
@@ -17,12 +18,13 @@ export async function initializeAgent() {
   await gateway.initialize();
   await gateway.loadTriksFromConfig();
 
-  // Build handoff tools for loaded triks
+  // Build handoff tools (conversational triks) and exposed tools (tool-mode triks)
   const handoffTools = getHandoffToolsForAgent(gateway);
+  const exposedTools = getExposedToolsForAgent(gateway);
 
-  // Create main agent with built-in + handoff tools
+  // Create main agent with built-in + handoff + exposed tools
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LangChain v0.3→v1 type mismatch (gateway typed against 0.3.x)
-  const allTools = [...builtInTools, ...handoffTools] as any;
+  const allTools = [...builtInTools, ...handoffTools, ...exposedTools] as any;
   const agent = createReactAgent({
     llm: model,
     tools: allTools,

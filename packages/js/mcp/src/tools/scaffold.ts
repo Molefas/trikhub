@@ -20,6 +20,8 @@ interface ToolDef {
   description: string;
   logTemplate?: string;
   logSchema?: Record<string, unknown>;
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
 }
 
 interface ScaffoldInput {
@@ -28,7 +30,7 @@ interface ScaffoldInput {
   description: string;
   language: 'ts' | 'py';
   category: string;
-  mode: 'conversational' | 'one-shot';
+  mode: 'conversational' | 'tool';
   handoffDescription: string;
   domain: string[];
   tools?: ToolDef[];
@@ -53,7 +55,9 @@ function generateManifest(input: ScaffoldInput): string {
 
     agent: {
       mode: input.mode,
-      handoffDescription: input.handoffDescription,
+      ...(input.mode !== 'tool'
+        ? { handoffDescription: input.handoffDescription }
+        : {}),
       ...(input.mode === 'conversational'
         ? { systemPromptFile: './src/prompts/system.md' }
         : {}),
@@ -76,6 +80,27 @@ function generateManifest(input: ScaffoldInput): string {
       }
       if (tool.logSchema) {
         toolDef.logSchema = tool.logSchema;
+      }
+      if (tool.inputSchema) {
+        toolDef.inputSchema = tool.inputSchema;
+      }
+      if (tool.outputSchema) {
+        toolDef.outputSchema = tool.outputSchema;
+      }
+      // For tool-mode, add default schemas if not provided
+      if (input.mode === 'tool' && !tool.inputSchema) {
+        toolDef.inputSchema = {
+          type: 'object',
+          properties: { query: { type: 'string', maxLength: 200 } },
+          required: ['query'],
+        };
+      }
+      if (input.mode === 'tool' && !tool.outputSchema) {
+        toolDef.outputSchema = {
+          type: 'object',
+          properties: { result: { type: 'string', maxLength: 500 } },
+          required: ['result'],
+        };
       }
       tools[tool.name] = toolDef;
     }
@@ -131,26 +156,22 @@ function generateAgentTs(input: ScaffoldInput): string {
     ? `  const { ${contextDestructure.join(', ')} } = context;\n\n`
     : '';
 
-  if (input.mode === 'one-shot') {
+  if (input.mode === 'tool') {
+    // Tool mode: use wrapToolHandlers, no LLM or LangChain
+    const toolHandlers = (input.tools || [])
+      .map((t) => `  ${t.name}: async (input, context) => {\n    // TODO: Implement ${t.name}\n    return { result: 'Not implemented' };\n  },`)
+      .join('\n');
+
     return `/**
- * ${input.displayName} — one-shot agent entry point.
+ * ${input.displayName} — tool-mode agent entry point.
+ *
+ * Exports native tools to the main agent. No handoff, no session.
  */
 
-import { wrapAgent, transferBackTool } from '@trikhub/sdk';
-import type { TrikContext } from '@trikhub/sdk';
-${toolImports ? `\n${toolImports}\n` : ''}
-export default wrapAgent((context: TrikContext) => {
-${destructureStr}  // One-shot mode: process the request and transfer back immediately.
-  // The agent will call tools as needed, then transfer_back with a summary.
+import { wrapToolHandlers } from '@trikhub/sdk';
 
-  const tools = [
-${toolArray}
-    transferBackTool,
-  ];
-
-  // TODO: Replace with your one-shot processing logic
-  // For one-shot mode, consider using a simple function instead of a full LLM agent
-  throw new Error('Not implemented — replace with your processing logic');
+export default wrapToolHandlers({
+${toolHandlers}
 });
 `;
   }
@@ -242,6 +263,19 @@ export const ${tool.name} = tool(
 }
 
 function generatePackageJson(input: ScaffoldInput): string {
+  const isToolMode = input.mode === 'tool';
+
+  const dependencies: Record<string, string> = {
+    '@trikhub/sdk': 'latest',
+  };
+
+  if (!isToolMode) {
+    dependencies['@langchain/anthropic'] = '^0.3.0';
+    dependencies['@langchain/core'] = '^0.3.0';
+    dependencies['@langchain/langgraph'] = '^0.2.0';
+    dependencies['zod'] = '^3.25.0';
+  }
+
   const pkg: Record<string, unknown> = {
     name: input.name,
     version: '0.1.0',
@@ -253,13 +287,7 @@ function generatePackageJson(input: ScaffoldInput): string {
       dev: 'node --import tsx src/agent.ts',
       clean: 'rm -rf dist *.tsbuildinfo',
     },
-    dependencies: {
-      '@trikhub/sdk': 'latest',
-      '@langchain/anthropic': '^0.3.0',
-      '@langchain/core': '^0.3.0',
-      '@langchain/langgraph': '^0.2.0',
-      zod: '^3.25.0',
-    },
+    dependencies,
     devDependencies: {
       tsx: '^4.19.0',
       typescript: '^5.7.0',
@@ -365,15 +393,16 @@ export function scaffoldTrik(input: ScaffoldInput): ScaffoldResult {
         path: 'src/prompts/system.md',
         content: generateSystemPrompt(input),
       });
-    }
 
-    // Tool files
-    for (const tool of input.tools || []) {
-      files.push({
-        path: `src/tools/${tool.name}.ts`,
-        content: generateToolFile(tool),
-      });
+      // Separate tool files for conversational mode
+      for (const tool of input.tools || []) {
+        files.push({
+          path: `src/tools/${tool.name}.ts`,
+          content: generateToolFile(tool),
+        });
+      }
     }
+    // Tool mode: all handlers live in agent.ts, no separate tool files
 
     files.push({
       path: 'package.json',
@@ -390,12 +419,21 @@ export function scaffoldTrik(input: ScaffoldInput): ScaffoldResult {
       content: generateGitignore(),
     });
 
-    nextSteps.push('1. Run `npm install` to install dependencies');
-    nextSteps.push('2. Implement your tools in src/tools/');
-    nextSteps.push('3. Customize the system prompt in src/prompts/system.md');
-    nextSteps.push('4. Run `npm run build` to compile');
-    nextSteps.push('5. Test with `trik lint .` to validate your manifest');
-    nextSteps.push('6. Publish with `trik publish`');
+    if (input.mode === 'tool') {
+      nextSteps.push('1. Run `npm install` to install dependencies');
+      nextSteps.push('2. Implement your tool handlers in src/agent.ts');
+      nextSteps.push('3. Update inputSchema/outputSchema in manifest.json');
+      nextSteps.push('4. Run `npm run build` to compile');
+      nextSteps.push('5. Test with `trik lint .` to validate your manifest');
+      nextSteps.push('6. Publish with `trik publish`');
+    } else {
+      nextSteps.push('1. Run `npm install` to install dependencies');
+      nextSteps.push('2. Implement your tools in src/tools/');
+      nextSteps.push('3. Customize the system prompt in src/prompts/system.md');
+      nextSteps.push('4. Run `npm run build` to compile');
+      nextSteps.push('5. Test with `trik lint .` to validate your manifest');
+      nextSteps.push('6. Publish with `trik publish`');
+    }
   } else {
     // Python project
     const moduleName = input.name.replace(/-/g, '_');

@@ -25,6 +25,7 @@ export type {
   TrikAgent,
   TrikResponse,
   ToolCallRecord,
+  ToolExecutionResult,
   // Gateway session
   HandoffLogType,
   HandoffLogEntry,
