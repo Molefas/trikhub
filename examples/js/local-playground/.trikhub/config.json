@@ -1,5 +1,6 @@
 {
   "triks": [
-    "@molefas/trik-content-hoarder"
+    "@molefas/trik-content-hoarder",
+    "@molefas/trik-demo-notes"
   ]
 }
