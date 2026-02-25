@@ -32,7 +32,7 @@ interface ScaffoldInput {
   language: 'ts' | 'py';
   category: string;
   mode: 'conversational' | 'tool';
-  handoffDescription: string;
+  handoffDescription?: string;
   domain: string[];
   tools?: ToolDef[];
   capabilities?: {

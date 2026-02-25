@@ -135,7 +135,8 @@ server.tool(
       .describe('Agent mode: conversational (LLM agent) or tool (export native tools)'),
     handoffDescription: z
       .string()
-      .describe('Description used for handoff routing (10-500 chars)'),
+      .optional()
+      .describe('Description used for handoff routing (10-500 chars). Required for conversational mode, omit for tool mode.'),
     domain: z
       .array(z.string())
       .describe('Domain tags for routing (e.g., ["content curation", "RSS feeds"])'),
@@ -244,31 +245,57 @@ const MANIFEST_SCHEMA_DOC = `# TrikHub v2 Manifest Schema
 | agent | AgentDefinition | How this trik operates as an agent |
 | entry | EntryPoint | Module entry point |
 
+## Optional Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| tools | Record<string, ToolDeclaration> | Internal tools the agent uses |
+| capabilities | { session?, storage? } | Session and storage capabilities |
+| limits | { maxTurnTimeMs } | Resource limits |
+| config | { required?, optional? } | Configuration requirements (API keys, tokens) |
+| author | string | Author name |
+| repository | string | Repository URL |
+| license | string | License identifier |
+
 ## Agent Definition
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | mode | "conversational" \\| "tool" | Yes | How the agent operates |
-| handoffDescription | string (10-500 chars) | Yes | Routing description |
-| systemPrompt | string | No* | Inline system prompt |
-| systemPromptFile | string | No* | Path to .md file |
+| handoffDescription | string (10-500 chars) | Conversational only | Routing description for the handoff tool |
+| systemPrompt | string | Conversational only* | Inline system prompt |
+| systemPromptFile | string | Conversational only* | Path to .md file |
 | model | ModelPreferences | No | LLM preferences |
 | domain | string[] | Yes | Expertise tags (min 1) |
 
 *Conversational mode requires one of systemPrompt or systemPromptFile (not both).
+Tool-mode triks should NOT have handoffDescription or systemPrompt.
 
 ## Tool Declaration
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | description | string | Yes | What the tool does |
-| logTemplate | string | No | Template with {{placeholders}} for log entries |
-| logSchema | Record<string, JSONSchema> | No | Types for log placeholders |
+| logTemplate | string | Conversational only | Template with {{placeholders}} for log entries |
+| logSchema | Record<string, JSONSchema> | Conversational only | Types for log placeholders |
 | inputSchema | JSONSchema | Tool-mode only | JSON Schema for tool input |
 | outputSchema | JSONSchema | Tool-mode only | JSON Schema for tool output (agent-safe types) |
 | outputTemplate | string | Tool-mode only | Template with {{placeholders}} for output sent to LLM |
 
-### Log Schema Constraints (conversational mode)
+## Configuration
+
+Triks can declare required and optional configuration values (typically API keys):
+
+\`\`\`json
+"config": {
+  "required": [{ "key": "API_KEY", "description": "API key for the service" }],
+  "optional": [{ "key": "MODEL", "description": "Model name", "default": "gpt-4" }]
+}
+\`\`\`
+
+## Security Constraints
+
+### Log Schema (conversational mode)
 
 String fields in logSchema MUST be constrained:
 - \`enum\`: list of allowed values
@@ -276,7 +303,7 @@ String fields in logSchema MUST be constrained:
 - \`pattern\`: regex pattern
 - \`format\`: "id", "date", "date-time", "uuid", "email", "url"
 
-### Output Schema Constraints (tool mode — stricter)
+### Output Schema (tool mode — stricter)
 
 String fields in outputSchema must be **agent-safe**:
 - \`enum\`: list of allowed values
@@ -288,14 +315,16 @@ If your tool returns user-provided content (titles, free text), use conversation
 
 Integer, number, and boolean fields are always safe.
 
-## Example
+## Examples
+
+### Conversational Mode
 
 \`\`\`json
 {
   "schemaVersion": 2,
-  "id": "my-trik",
-  "name": "My Trik",
-  "description": "Does something useful",
+  "id": "my-assistant",
+  "name": "My Assistant",
+  "description": "A conversational assistant for specific tasks",
   "version": "1.0.0",
   "agent": {
     "mode": "conversational",
@@ -315,8 +344,47 @@ Integer, number, and boolean fields are always safe.
     "session": { "enabled": true },
     "storage": { "enabled": true }
   },
+  "config": {
+    "optional": [{ "key": "ANTHROPIC_API_KEY", "description": "Anthropic API key" }]
+  },
   "limits": { "maxTurnTimeMs": 30000 },
-  "entry": { "module": "./dist/agent.js", "export": "default" }
+  "entry": { "module": "./dist/index.js", "export": "default" }
+}
+\`\`\`
+
+### Tool Mode
+
+\`\`\`json
+{
+  "schemaVersion": 2,
+  "id": "my-tool",
+  "name": "My Tool",
+  "description": "A tool that returns structured data to the main agent",
+  "version": "1.0.0",
+  "agent": {
+    "mode": "tool",
+    "domain": ["utilities"]
+  },
+  "tools": {
+    "lookup": {
+      "description": "Look up a value by ID",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "id": { "type": "string", "format": "uuid" } },
+        "required": ["id"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "enum": ["found", "not_found"] },
+          "category": { "type": "string", "enum": ["A", "B", "C"] }
+        },
+        "required": ["status"]
+      },
+      "outputTemplate": "Lookup {{status}}: category={{category}}"
+    }
+  },
+  "entry": { "module": "./dist/index.js", "export": "default" }
 }
 \`\`\`
 `;
