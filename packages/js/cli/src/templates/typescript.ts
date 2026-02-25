@@ -1,116 +1,120 @@
 /**
- * TypeScript Trik Template Generator
+ * v2 TypeScript scaffold template.
  *
- * Generates all files needed for a TypeScript trik project.
+ * Generates a complete v2 trik project structure using the
+ * agent-based handoff architecture with wrapAgent() from @trikhub/sdk.
  */
 
-import { TrikCategory } from '../types.js';
+// ============================================================================
+// Types
+// ============================================================================
 
-export interface TsTemplateConfig {
+export interface InitConfig {
   name: string;
   displayName: string;
   description: string;
   authorName: string;
   authorGithub: string;
-  category: TrikCategory;
+  category: string;
   enableStorage: boolean;
   enableConfig: boolean;
+  // v2 fields
+  agentMode: 'conversational' | 'tool';
+  handoffDescription: string;
+  domainTags: string[];
+  toolNames: string[];
 }
 
-export interface GeneratedFile {
-  path: string;
-  content: string;
-}
+// ============================================================================
+// File generators
+// ============================================================================
 
-/**
- * Generate all files for a TypeScript trik project
- */
-export function generateTypescriptProject(config: TsTemplateConfig): GeneratedFile[] {
-  const files: GeneratedFile[] = [];
+function generateManifest(config: InitConfig): string {
+  const isToolMode = config.agentMode === 'tool';
 
-  files.push({ path: 'manifest.json', content: generateManifest(config) });
-  files.push({ path: 'trikhub.json', content: generateTrikhubJson(config) });
-  files.push({ path: 'package.json', content: generatePackageJson(config) });
-  files.push({ path: 'tsconfig.json', content: generateTsConfig() });
-  files.push({ path: 'src/index.ts', content: generateIndexTs(config) });
-  files.push({ path: 'test.ts', content: generateTestTs() });
-  files.push({ path: 'README.md', content: generateReadme(config) });
-  files.push({ path: '.gitignore', content: generateGitignore() });
+  const agent: Record<string, unknown> = {
+    mode: config.agentMode,
+    domain: config.domainTags,
+  };
 
-  return files;
-}
+  if (!isToolMode) {
+    agent.handoffDescription = config.handoffDescription;
+    agent.systemPromptFile = './src/prompts/system.md';
+    agent.model = { capabilities: ['tool_use'] };
+  }
 
-function generateManifest(config: TsTemplateConfig): string {
   const manifest: Record<string, unknown> = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: config.name,
     name: config.displayName,
     description: config.description,
     version: '0.1.0',
-    actions: {
-      hello: {
-        description: 'Say hello to someone',
+    agent,
+  };
+
+  // Tools block
+  if (isToolMode && config.toolNames.length > 0) {
+    const tools: Record<string, Record<string, unknown>> = {};
+    for (const toolName of config.toolNames) {
+      tools[toolName] = {
+        description: `TODO: describe ${toolName}`,
         inputSchema: {
           type: 'object',
           properties: {
-            name: { type: 'string', description: 'Name to greet' },
+            query: { type: 'string', maxLength: 200 },
           },
-          required: ['name'],
+          required: ['query'],
         },
-        responseMode: 'template',
-        agentDataSchema: {
+        outputSchema: {
           type: 'object',
           properties: {
-            template: { type: 'string', enum: ['success'] },
-            greeting: { type: 'string', maxLength: 200, pattern: '^.{1,200}$' },
+            status: { type: 'string', enum: ['success', 'error'] },
+            resultId: { type: 'string', format: 'id' },
           },
-          required: ['template', 'greeting'],
+          required: ['status'],
         },
-        responseTemplates: {
-          success: { text: '{{greeting}}' },
-        },
+        outputTemplate: `${toolName}: {{status}} ({{resultId}})`,
+      };
+    }
+    manifest.tools = tools;
+  } else {
+    manifest.tools = {
+      exampleTool: {
+        description: 'An example tool',
       },
-    },
-    capabilities: {
-      tools: [],
-    },
-    limits: {
-      maxExecutionTimeMs: 5000,
-    },
-    entry: {
-      module: './dist/index.js',
-      export: 'default',
-    },
-  };
-
-  // Add storage capability if enabled
-  if (config.enableStorage) {
-    (manifest.capabilities as Record<string, unknown>).storage = {
-      enabled: true,
-      maxSizeBytes: 1048576,
-      persistent: true,
     };
   }
 
-  // Add config if enabled
+  if (config.enableStorage) {
+    manifest.capabilities = {
+      storage: { enabled: true },
+    };
+  }
+
+  manifest.limits = { maxTurnTimeMs: 30000 };
+  manifest.entry = {
+    module: './dist/agent.js',
+    export: 'default',
+  };
+  manifest.author = config.authorName;
+
   if (config.enableConfig) {
     manifest.config = {
-      required: [
-        { key: 'API_KEY', description: 'Your API key' },
+      optional: [
+        { key: 'ANTHROPIC_API_KEY', description: 'Anthropic API key for the agent' },
       ],
-      optional: [],
     };
   }
 
-  return JSON.stringify(manifest, null, 2) + '\n';
+  return JSON.stringify(manifest, null, 2);
 }
 
-function generateTrikhubJson(config: TsTemplateConfig): string {
-  const trikhub = {
+function generateTrikhubJson(config: InitConfig): string {
+  const metadata = {
     displayName: config.displayName,
     shortDescription: config.description,
     categories: [config.category],
-    keywords: [config.name],
+    keywords: [] as string[],
     author: {
       name: config.authorName,
       github: config.authorGithub,
@@ -118,35 +122,43 @@ function generateTrikhubJson(config: TsTemplateConfig): string {
     repository: `https://github.com/${config.authorGithub}/${config.name}`,
   };
 
-  return JSON.stringify(trikhub, null, 2) + '\n';
+  return JSON.stringify(metadata, null, 2);
 }
 
-function generatePackageJson(config: TsTemplateConfig): string {
+function generatePackageJson(config: InitConfig): string {
+  const isToolMode = config.agentMode === 'tool';
+
+  const dependencies: Record<string, string> = {
+    '@trikhub/sdk': 'latest',
+  };
+
+  // Conversational mode needs LangChain + LLM provider
+  if (!isToolMode) {
+    dependencies['@langchain/anthropic'] = '^0.3.0';
+    dependencies['@langchain/core'] = '^0.3.0';
+    dependencies['@langchain/langgraph'] = '^0.2.0';
+    dependencies['zod'] = '^3.25.0';
+  }
+
   const pkg = {
-    name: `@${config.authorGithub.toLowerCase()}/${config.name}`,
+    name: config.name,
     version: '0.1.0',
     description: config.description,
     type: 'module',
-    main: 'dist/index.js',
+    main: './dist/agent.js',
     scripts: {
       build: 'tsc',
-      clean: 'rm -rf dist',
-      test: 'npm run build && tsx test.ts',
+      dev: 'node --import tsx src/agent.ts',
+      clean: 'rm -rf dist *.tsbuildinfo',
     },
-    dependencies: {
-      '@trikhub/manifest': '^0.7.0',
-    },
+    dependencies,
     devDependencies: {
-      '@types/node': '^20.0.0',
-      tsx: '^4.0.0',
-      typescript: '^5.6.0',
-    },
-    engines: {
-      node: '>=20',
+      tsx: '^4.19.0',
+      typescript: '^5.7.0',
     },
   };
 
-  return JSON.stringify(pkg, null, 2) + '\n';
+  return JSON.stringify(pkg, null, 2);
 }
 
 function generateTsConfig(): string {
@@ -154,156 +166,209 @@ function generateTsConfig(): string {
     compilerOptions: {
       target: 'ES2022',
       module: 'NodeNext',
-      moduleResolution: 'NodeNext',
+      moduleResolution: 'nodenext',
       outDir: './dist',
       rootDir: './src',
       strict: true,
       esModuleInterop: true,
       skipLibCheck: true,
+      forceConsistentCasingInFileNames: true,
       declaration: true,
+      declarationMap: true,
+      sourceMap: true,
     },
     include: ['src/**/*'],
-    exclude: ['node_modules', 'dist'],
   };
 
-  return JSON.stringify(tsconfig, null, 2) + '\n';
+  return JSON.stringify(tsconfig, null, 2);
 }
 
-function generateIndexTs(config: TsTemplateConfig): string {
-  const storageImport = config.enableStorage
-    ? `
-interface Storage {
-  get(key: string): Promise<string | null>;
-  set(key: string, value: string): Promise<void>;
-  delete(key: string): Promise<void>;
-}
-`
-    : '';
-
-  const configType = config.enableConfig
-    ? `
-interface Config {
-  API_KEY: string;
-}
-`
-    : '';
-
-  const invokeParams = [
-    'action: string',
-    'input: Record<string, unknown>',
-    config.enableStorage ? 'storage?: Storage' : null,
-    config.enableConfig ? 'config?: Config' : null,
-  ]
-    .filter(Boolean)
-    .join('; ');
+function generateToolModeAgentTs(config: InitConfig): string {
+  const handlers = config.toolNames.map((name) =>
+    `  ${name}: async (input, context) => {
+    // TODO: Implement ${name}
+    return { result: 'Not implemented' };
+  },`
+  ).join('\n');
 
   return `/**
- * ${config.displayName}
+ * ${config.displayName} — tool-mode agent entry point.
  *
- * ${config.description}
+ * Exports native tools to the main agent. No handoff, no session.
  */
 
-type InvokeInput = {
-  ${invokeParams};
-};
+import { wrapToolHandlers } from '@trikhub/sdk';
 
-type InvokeResult = {
-  responseMode: 'template' | 'passthrough';
-  agentData?: Record<string, unknown>;
-  userContent?: Record<string, unknown>;
-};
-${storageImport}${configType}
-class ${toPascalCase(config.name)}Graph {
-  async invoke(input: InvokeInput): Promise<InvokeResult> {
-    const { action, input: actionInput } = input;
-
-    if (action === 'hello') {
-      const name = (actionInput.name as string) || 'World';
-      return {
-        responseMode: 'template',
-        agentData: {
-          template: 'success',
-          greeting: \`Hello, \${name}!\`,
-        },
-      };
-    }
-
-    return {
-      responseMode: 'template',
-      agentData: {
-        template: 'error',
-        message: \`Unknown action: \${action}\`,
-      },
-    };
-  }
-}
-
-export default new ${toPascalCase(config.name)}Graph();
+export default wrapToolHandlers({
+${handlers}
+});
 `;
 }
 
-function generateTestTs(): string {
+function generateAgentTs(config: InitConfig): string {
+  if (config.agentMode === 'tool') {
+    return generateToolModeAgentTs(config);
+  }
+
+  // Conversational mode
   return `/**
- * Local test script
- *
- * Run with: npm test
+ * ${config.displayName} — conversational agent entry point.
  */
 
-import graph from './src/index.js';
+import { ChatAnthropic } from '@langchain/anthropic';
+import { createReactAgent } from '@langchain/langgraph/prebuilt';
+import { wrapAgent, transferBackTool } from '@trikhub/sdk';
+import type { TrikContext } from '@trikhub/sdk';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { exampleTool } from './tools/example.js';
 
-async function main() {
-  const result = await graph.invoke({
-    action: 'hello',
-    input: { name: 'World' },
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const systemPrompt = readFileSync(join(__dirname, '../src/prompts/system.md'), 'utf-8');
+
+export default wrapAgent((context: TrikContext) => {
+  const model = new ChatAnthropic({
+    modelName: 'claude-sonnet-4-20250514',
+    anthropicApiKey: ${config.enableConfig ? "config.get('ANTHROPIC_API_KEY')" : 'process.env.ANTHROPIC_API_KEY'},
   });
 
-  console.log(JSON.stringify(result, null, 2));
-}
+  const tools = [
+    exampleTool,
+    transferBackTool,
+  ];
 
-main().catch(console.error);
+  return createReactAgent({
+    llm: model,
+    tools,
+    messageModifier: systemPrompt,
+  });
+});
 `;
 }
 
-function generateReadme(config: TsTemplateConfig): string {
+function generateExampleTool(): string {
+  return `import { tool } from '@langchain/core/tools';
+import { z } from 'zod';
+
+export const exampleTool = tool(
+  async (input) => {
+    // TODO: Implement your tool logic here
+    return JSON.stringify({ result: \`Processed: \${input.query}\` });
+  },
+  {
+    name: 'exampleTool',
+    description: 'An example tool — replace with your own implementation',
+    schema: z.object({
+      query: z.string().describe('The input query to process'),
+    }),
+  },
+);
+`;
+}
+
+function generateSystemPrompt(config: InitConfig): string {
+  const domainStr = config.domainTags.join(', ');
+
   return `# ${config.displayName}
 
-${config.description}
+You are ${config.displayName}, a specialized assistant for ${config.description.toLowerCase()}.
 
-## Development
+## Your capabilities
+- **exampleTool**: An example tool
 
-\`\`\`bash
-npm install
-npm run build
-npm test
-\`\`\`
+## Guidelines
+- Focus on tasks within your domain: ${domainStr}
+- When the user's request is outside your expertise, use the transfer_back tool
+- Provide clear, actionable responses
 
-## Actions
-
-### hello
-
-Say hello to someone.
-
-**Input:**
-- \`name\` (string, required): Name to greet
-
-## Publishing
-
-\`\`\`bash
-trik publish
-\`\`\`
+## Transfer back
+Use the \`transfer_back\` tool when:
+- The user's request is outside your domain
+- You've completed the task and the user wants to do something else
+- The user explicitly asks to go back
 `;
 }
 
 function generateGitignore(): string {
   return `node_modules/
-*.log
-.DS_Store
+dist/
+*.tsbuildinfo
+.env
+.trikhub/secrets.json
 `;
 }
 
-function toPascalCase(str: string): string {
-  return str
-    .split('-')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join('');
+function generateReadme(config: InitConfig): string {
+  const domainStr = config.domainTags.join(', ');
+  const isToolMode = config.agentMode === 'tool';
+
+  const devSection = isToolMode
+    ? `- Implement your tool handlers in \`src/agent.ts\`
+- Update inputSchema/outputSchema in \`manifest.json\``
+    : `- Edit your agent logic in \`src/agent.ts\`
+- Add tools in \`src/tools/\`
+- Customize the system prompt in \`src/prompts/system.md\``;
+
+  const archSection = isToolMode
+    ? `Tools from this trik appear as native tools on the main agent — no handoff, no session.`
+    : `The main agent routes conversations to this trik using a \`talk_to_${config.name}\` tool.
+When done, use the \`transfer_back\` tool to return control.`;
+
+  return `# ${config.displayName}
+
+${config.description}
+
+## Getting Started
+
+1. Install dependencies: \`npm install\`
+2. Build: \`npm run build\`
+3. Validate: \`trik lint .\`
+4. Publish: \`trik publish\`
+
+## Development
+
+${devSection}
+
+## Architecture
+
+This trik uses the TrikHub v2 architecture:
+- **Mode**: ${config.agentMode}
+- **Domain**: ${domainStr}
+
+${archSection}
+`;
+}
+
+// ============================================================================
+// Public API
+// ============================================================================
+
+/**
+ * Generate a complete v2 TypeScript trik project.
+ *
+ * @returns Map of { relativePath: fileContent } for all project files.
+ */
+export function generateTypescriptProject(config: InitConfig): Record<string, string> {
+  const files: Record<string, string> = {};
+
+  // Core config files
+  files['manifest.json'] = generateManifest(config);
+  files['trikhub.json'] = generateTrikhubJson(config);
+  files['package.json'] = generatePackageJson(config);
+  files['tsconfig.json'] = generateTsConfig();
+  files['.gitignore'] = generateGitignore();
+  files['README.md'] = generateReadme(config);
+
+  // Source files
+  files['src/agent.ts'] = generateAgentTs(config);
+
+  if (config.agentMode === 'conversational') {
+    // Conversational mode: example tool + system prompt
+    files['src/tools/example.ts'] = generateExampleTool();
+    files['src/prompts/system.md'] = generateSystemPrompt(config);
+  }
+  // Tool mode: no separate tool files or system prompt — all logic in agent.ts
+
+  return files;
 }

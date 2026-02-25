@@ -1,276 +1,224 @@
 /**
- * Trik Requirements Analysis Tool
+ * analyze_trik_requirements — v2 implementation.
  *
- * Analyzes a user's description and suggests trik architecture,
- * actions, capabilities, and clarifying questions.
+ * Analyzes a user description and suggests v2 trik architecture:
+ * agent mode, handoff description, domain tags, and internal tools.
  */
 
-import type {
-  AnalysisResult,
-  SuggestedAction,
-  SuggestedCapabilities,
-  TrikArchitecture,
-} from './types.js';
+import type { AnalyzeResult } from './types.js';
 
-/**
- * Keywords that suggest LangGraph is needed
- */
-const LANGGRAPH_KEYWORDS = [
-  'workflow',
-  'multi-step',
-  'pipeline',
-  'chain',
-  'conditional',
-  'branching',
-  'retry',
-  'loop',
-  'iterate',
-  'sequence',
-  'orchestrate',
-  'coordinate',
-  'state machine',
-  'decision',
-  'if-then',
-  'llm call',
-  'agent',
-  'reasoning',
+// ============================================================================
+// Keyword sets for heuristic analysis
+// ============================================================================
+
+const CONVERSATIONAL_KEYWORDS = [
+  'conversation', 'chat', 'discuss', 'multi-turn', 'follow-up', 'agent',
+  'interactive', 'reasoning', 'think', 'decide', 'help me', 'assist',
+  'advise', 'recommend', 'explore', 'brainstorm', 'collaborate',
+  'llm', 'ai', 'generate', 'create content', 'write', 'draft',
 ];
 
-/**
- * Keywords that suggest storage is needed
- */
+const TOOL_MODE_KEYWORDS = [
+  'convert', 'transform', 'format', 'calculate', 'compute', 'validate',
+  'check', 'lint', 'parse', 'encode', 'decode', 'deterministic',
+  'no llm', 'simple', 'tool mode', 'single request', 'lookup',
+  'native tool', 'api', 'fetch', 'weather', 'data lookup',
+];
+
 const STORAGE_KEYWORDS = [
-  'remember',
-  'save',
-  'store',
-  'persist',
-  'history',
-  'cache',
-  'track',
-  'log',
-  'bookmark',
-  'favorite',
-  'preference',
-  'setting',
-  'state',
-  'session',
-  'across sessions',
+  'remember', 'save', 'store', 'persist', 'history', 'cache', 'track',
+  'log', 'bookmark', 'favorite', 'preference', 'database', 'data',
+  'across sessions', 'persistent',
 ];
 
-/**
- * Keywords that suggest session is needed
- */
 const SESSION_KEYWORDS = [
-  'conversation',
-  'context',
-  'follow-up',
-  'reference',
-  'the first',
-  'the second',
-  'that one',
-  'previous',
-  'earlier',
-  'multi-turn',
+  'conversation', 'context', 'follow-up', 'reference', 'previous',
+  'earlier', 'multi-turn', 'session', 'stateful',
 ];
 
-/**
- * Common API patterns and their likely config requirements
- */
-const API_PATTERNS: Record<string, string[]> = {
-  github: ['GITHUB_TOKEN'],
-  twitter: ['TWITTER_API_KEY', 'TWITTER_API_SECRET'],
-  openai: ['OPENAI_API_KEY'],
-  anthropic: ['ANTHROPIC_API_KEY'],
-  google: ['GOOGLE_API_KEY'],
-  slack: ['SLACK_TOKEN'],
-  discord: ['DISCORD_TOKEN'],
-  stripe: ['STRIPE_API_KEY'],
-  aws: ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'],
-  database: ['DATABASE_URL'],
-  api: ['API_KEY'],
-  weather: ['WEATHER_API_KEY'],
-  news: ['NEWS_API_KEY'],
+/** Maps API name mentions to config keys */
+const API_CONFIG_MAP: Record<string, { key: string; description: string }> = {
+  'github': { key: 'GITHUB_TOKEN', description: 'GitHub personal access token' },
+  'twitter': { key: 'TWITTER_API_KEY', description: 'Twitter/X API key' },
+  'openai': { key: 'OPENAI_API_KEY', description: 'OpenAI API key' },
+  'anthropic': { key: 'ANTHROPIC_API_KEY', description: 'Anthropic API key' },
+  'slack': { key: 'SLACK_TOKEN', description: 'Slack bot token' },
+  'discord': { key: 'DISCORD_TOKEN', description: 'Discord bot token' },
+  'stripe': { key: 'STRIPE_API_KEY', description: 'Stripe API key' },
+  'notion': { key: 'NOTION_API_KEY', description: 'Notion API key' },
+  'google': { key: 'GOOGLE_API_KEY', description: 'Google API key' },
+  'spotify': { key: 'SPOTIFY_CLIENT_ID', description: 'Spotify client ID' },
+  'jira': { key: 'JIRA_API_TOKEN', description: 'Jira API token' },
+  'linear': { key: 'LINEAR_API_KEY', description: 'Linear API key' },
 };
 
-/**
- * Action patterns based on common verbs
- */
-const ACTION_PATTERNS: Record<string, { complexity: 'simple' | 'moderate' | 'complex'; responseMode: 'template' | 'passthrough' }> = {
-  search: { complexity: 'moderate', responseMode: 'template' },
-  find: { complexity: 'moderate', responseMode: 'template' },
-  list: { complexity: 'simple', responseMode: 'template' },
-  get: { complexity: 'simple', responseMode: 'passthrough' },
-  fetch: { complexity: 'simple', responseMode: 'passthrough' },
-  read: { complexity: 'simple', responseMode: 'passthrough' },
-  create: { complexity: 'moderate', responseMode: 'template' },
-  add: { complexity: 'simple', responseMode: 'template' },
-  update: { complexity: 'moderate', responseMode: 'template' },
-  delete: { complexity: 'simple', responseMode: 'template' },
-  remove: { complexity: 'simple', responseMode: 'template' },
-  analyze: { complexity: 'complex', responseMode: 'passthrough' },
-  summarize: { complexity: 'complex', responseMode: 'passthrough' },
-  generate: { complexity: 'complex', responseMode: 'passthrough' },
-  convert: { complexity: 'moderate', responseMode: 'passthrough' },
-  transform: { complexity: 'moderate', responseMode: 'passthrough' },
-  monitor: { complexity: 'complex', responseMode: 'template' },
-  alert: { complexity: 'moderate', responseMode: 'template' },
-  notify: { complexity: 'simple', responseMode: 'template' },
-  download: { complexity: 'moderate', responseMode: 'passthrough' },
-  upload: { complexity: 'moderate', responseMode: 'template' },
-};
+/** Verb → tool pattern mapping */
+const TOOL_PATTERNS: Array<{
+  verbs: string[];
+  namePrefix: string;
+  hasLogTemplate: boolean;
+}> = [
+  { verbs: ['search', 'find', 'query', 'look up', 'lookup'], namePrefix: 'search', hasLogTemplate: true },
+  { verbs: ['create', 'add', 'new', 'insert', 'generate'], namePrefix: 'create', hasLogTemplate: true },
+  { verbs: ['update', 'edit', 'modify', 'change', 'revise'], namePrefix: 'update', hasLogTemplate: true },
+  { verbs: ['delete', 'remove', 'clear'], namePrefix: 'delete', hasLogTemplate: true },
+  { verbs: ['list', 'show', 'display', 'get all'], namePrefix: 'list', hasLogTemplate: false },
+  { verbs: ['fetch', 'download', 'pull', 'import', 'sync'], namePrefix: 'fetch', hasLogTemplate: true },
+  { verbs: ['analyze', 'summarize', 'review', 'assess'], namePrefix: 'analyze', hasLogTemplate: true },
+  { verbs: ['publish', 'deploy', 'send', 'push', 'export'], namePrefix: 'publish', hasLogTemplate: true },
+  { verbs: ['convert', 'transform', 'format'], namePrefix: 'convert', hasLogTemplate: true },
+];
 
-function containsKeywords(text: string, keywords: string[]): boolean {
+// ============================================================================
+// Analysis logic
+// ============================================================================
+
+function countKeywords(text: string, keywords: string[]): number {
   const lower = text.toLowerCase();
-  return keywords.some((kw) => lower.includes(kw.toLowerCase()));
+  return keywords.filter((kw) => lower.includes(kw)).length;
 }
 
-function extractApiPatterns(text: string): string[] {
-  const lower = text.toLowerCase();
-  const configs: string[] = [];
+function extractDomainTags(description: string): string[] {
+  const lower = description.toLowerCase();
+  const tags: string[] = [];
 
-  for (const [pattern, keys] of Object.entries(API_PATTERNS)) {
-    if (lower.includes(pattern)) {
-      configs.push(...keys);
+  const domainPatterns: Array<{ keywords: string[]; tag: string }> = [
+    { keywords: ['content', 'article', 'blog', 'post', 'writing'], tag: 'content management' },
+    { keywords: ['code', 'programming', 'developer', 'software', 'git'], tag: 'software development' },
+    { keywords: ['data', 'analytics', 'metrics', 'statistics', 'dashboard'], tag: 'data analysis' },
+    { keywords: ['email', 'message', 'notification', 'communication'], tag: 'communication' },
+    { keywords: ['file', 'document', 'pdf', 'image', 'media'], tag: 'file management' },
+    { keywords: ['calendar', 'schedule', 'meeting', 'event', 'time'], tag: 'scheduling' },
+    { keywords: ['finance', 'money', 'payment', 'invoice', 'budget'], tag: 'finance' },
+    { keywords: ['project', 'task', 'todo', 'kanban', 'workflow'], tag: 'project management' },
+    { keywords: ['search', 'find', 'query', 'index'], tag: 'search' },
+    { keywords: ['api', 'integration', 'webhook', 'connect'], tag: 'integrations' },
+    { keywords: ['rss', 'feed', 'news', 'curate', 'aggregate'], tag: 'content curation' },
+    { keywords: ['ai', 'machine learning', 'model', 'generate'], tag: 'AI generation' },
+    { keywords: ['social media', 'twitter', 'linkedin', 'social'], tag: 'social media' },
+    { keywords: ['database', 'sql', 'store', 'persist'], tag: 'data storage' },
+  ];
+
+  for (const { keywords, tag } of domainPatterns) {
+    if (keywords.some((kw) => lower.includes(kw))) {
+      tags.push(tag);
     }
   }
 
-  return [...new Set(configs)];
+  return tags.length > 0 ? tags : ['general purpose'];
 }
 
-function suggestActions(description: string): SuggestedAction[] {
+function extractTools(description: string): AnalyzeResult['suggestedTools'] {
   const lower = description.toLowerCase();
-  const actions: SuggestedAction[] = [];
+  const tools: AnalyzeResult['suggestedTools'] = [];
 
-  // Extract verbs and nouns to suggest actions
-  const words = lower.split(/\s+/);
+  for (const pattern of TOOL_PATTERNS) {
+    const matchedVerb = pattern.verbs.find((v) => lower.includes(v));
+    if (matchedVerb) {
+      // Try to extract the object of the verb
+      const regex = new RegExp(`${matchedVerb}\\s+(?:the\\s+)?(?:a\\s+)?(\\w+)`, 'i');
+      const match = description.match(regex);
+      const object = match?.[1] || 'items';
+      const toolName = `${pattern.namePrefix}${object.charAt(0).toUpperCase() + object.slice(1)}`;
 
-  for (const [verb, config] of Object.entries(ACTION_PATTERNS)) {
-    if (lower.includes(verb)) {
-      // Find the noun after the verb
-      const verbIndex = words.findIndex((w) => w.includes(verb));
-      const noun = verbIndex < words.length - 1 ? words[verbIndex + 1] : 'items';
-
-      actions.push({
-        name: `${verb}${capitalize(noun.replace(/[^a-z]/g, ''))}`,
-        purpose: `${capitalize(verb)} ${noun}`,
-        complexity: config.complexity,
-        responseMode: config.responseMode,
+      tools.push({
+        name: toolName,
+        description: `${matchedVerb.charAt(0).toUpperCase() + matchedVerb.slice(1)} ${object}`,
+        hasLogTemplate: pattern.hasLogTemplate,
       });
     }
   }
 
-  // If no actions found, suggest a generic main action
-  if (actions.length === 0) {
-    actions.push({
-      name: 'execute',
-      purpose: 'Main action for the trik',
-      complexity: 'moderate',
-      responseMode: 'template',
-    });
-  }
-
-  // Deduplicate by name
-  const seen = new Set<string>();
-  return actions.filter((a) => {
-    if (seen.has(a.name)) return false;
-    seen.add(a.name);
-    return true;
-  });
+  return tools;
 }
 
-function determineArchitecture(description: string, actions: SuggestedAction[]): { arch: TrikArchitecture; reason: string } {
-  const needsLangGraph = containsKeywords(description, LANGGRAPH_KEYWORDS);
-  const hasComplexActions = actions.some((a) => a.complexity === 'complex');
-  const hasMultipleActions = actions.length > 2;
-
-  if (needsLangGraph) {
-    return {
-      arch: 'langgraph',
-      reason: 'Description suggests multi-step workflow or conditional logic',
-    };
-  }
-
-  if (hasComplexActions && hasMultipleActions) {
-    return {
-      arch: 'langgraph',
-      reason: 'Multiple complex actions may benefit from LangGraph orchestration',
-    };
-  }
-
-  return {
-    arch: 'simple',
-    reason: 'Simple actions can be handled with direct function calls',
-  };
-}
-
-function suggestCapabilities(description: string): SuggestedCapabilities {
-  return {
-    storage: containsKeywords(description, STORAGE_KEYWORDS),
-    session: containsKeywords(description, SESSION_KEYWORDS),
-    config: extractApiPatterns(description),
-  };
-}
-
-function generateClarifyingQuestions(
+function extractConfigRequirements(
   description: string,
-  actions: SuggestedAction[],
-  capabilities: SuggestedCapabilities
-): string[] {
-  const questions: string[] = [];
+  constraints?: string,
+): Array<{ key: string; description: string }> {
+  const text = `${description} ${constraints || ''}`.toLowerCase();
+  const configs: Array<{ key: string; description: string }> = [];
 
-  // Ask about response mode if not clear
-  if (actions.some((a) => !a.responseMode)) {
-    questions.push(
-      'Should the agent see the full content (template mode) or should content go directly to the user (passthrough mode)?'
-    );
+  for (const [apiName, config] of Object.entries(API_CONFIG_MAP)) {
+    if (text.includes(apiName)) {
+      configs.push(config);
+    }
   }
 
-  // Ask about storage if mentioned but not explicit
-  if (!capabilities.storage && description.length > 50) {
-    questions.push('Do you need to remember data between sessions (persistent storage)?');
-  }
-
-  // Ask about session if follow-up seems likely
-  if (!capabilities.session && actions.length > 1) {
-    questions.push('Will users ask follow-up questions about previous results?');
-  }
-
-  // Ask about authentication if APIs are involved
-  if (capabilities.config.length > 0) {
-    questions.push(
-      `This seems to need API access. Do you have the required API keys? (${capabilities.config.join(', ')})`
-    );
-  }
-
-  // Ask about error handling
-  questions.push('How should the trik handle errors? (retry, fallback, or report to user)');
-
-  return questions.slice(0, 4); // Limit to 4 questions
+  return configs;
 }
 
-function capitalize(str: string): string {
-  return str.charAt(0).toUpperCase() + str.slice(1);
+function generateHandoffDescription(description: string): string {
+  // Trim to a reasonable length for handoff (10-500 chars)
+  const trimmed = description.length > 450 ? description.slice(0, 447) + '...' : description;
+  return trimmed.length < 10
+    ? `${description}. An agent that handles this task.`
+    : trimmed;
 }
 
-/**
- * Analyze trik requirements from a user description
- */
+// ============================================================================
+// Public API
+// ============================================================================
+
 export function analyzeTrikRequirements(
   description: string,
-  constraints?: string
-): AnalysisResult {
-  const fullText = constraints ? `${description} ${constraints}` : description;
+  constraints?: string,
+): AnalyzeResult {
+  const conversationalScore = countKeywords(description, CONVERSATIONAL_KEYWORDS);
+  const toolModeScore = countKeywords(description, TOOL_MODE_KEYWORDS);
+  const storageScore = countKeywords(description, STORAGE_KEYWORDS);
+  const sessionScore = countKeywords(description, SESSION_KEYWORDS);
 
-  const actions = suggestActions(fullText);
-  const { arch, reason } = determineArchitecture(fullText, actions);
-  const capabilities = suggestCapabilities(fullText);
-  const questions = generateClarifyingQuestions(fullText, actions, capabilities);
+  const isConversational = conversationalScore >= toolModeScore;
+  const suggestedMode = isConversational ? 'conversational' : 'tool';
+
+  const modeReason = isConversational
+    ? `Conversational mode recommended: description suggests interactive, multi-turn interactions (matched ${conversationalScore} conversational keywords vs ${toolModeScore} tool-mode keywords).`
+    : `Tool mode recommended: description suggests native tools that export to the main agent (matched ${toolModeScore} tool-mode keywords vs ${conversationalScore} conversational keywords).`;
+
+  const tools = extractTools(description);
+  const domain = extractDomainTags(description);
+  const config = extractConfigRequirements(description, constraints);
+  const needsStorage = storageScore > 0;
+  const needsSession = sessionScore > 0 || isConversational;
+
+  const clarifyingQuestions: string[] = [];
+
+  if (conversationalScore === toolModeScore) {
+    clarifyingQuestions.push(
+      'Should the trik handle multi-turn conversations (conversational) or export native tools to the main agent (tool mode)?',
+    );
+  }
+
+  if (tools.length === 0) {
+    clarifyingQuestions.push(
+      'What specific operations should the trik perform? (e.g., search, create, list, analyze)',
+    );
+  }
+
+  if (!needsStorage) {
+    clarifyingQuestions.push(
+      'Does the trik need to remember data across sessions (persistent storage)?',
+    );
+  }
+
+  if (config.length === 0 && (description.toLowerCase().includes('api') || description.toLowerCase().includes('service'))) {
+    clarifyingQuestions.push(
+      'Which external APIs or services does the trik connect to? This determines config requirements.',
+    );
+  }
 
   return {
-    suggestedActions: actions,
-    recommendedArchitecture: arch,
-    architectureReason: reason,
-    suggestedCapabilities: capabilities,
-    clarifyingQuestions: questions,
+    suggestedMode,
+    modeReason,
+    suggestedHandoffDescription: isConversational ? generateHandoffDescription(description) : '',
+    suggestedDomain: domain,
+    suggestedTools: tools,
+    suggestedCapabilities: {
+      storage: needsStorage,
+      session: needsSession,
+      config,
+    },
+    clarifyingQuestions: clarifyingQuestions.slice(0, 4),
   };
 }

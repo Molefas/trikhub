@@ -1,15 +1,11 @@
 # TrikHub Local Playground
-This demo is meant to simulate an existing LangGraph Agent ready to consume Triks and the process of finding, installing and running these.
-
-## Disclaimer
-There is a significant portion of boilerplate that would ideally not be added to the main Agent, however, I needed to make sure that the basic example is ready to run with one command AND that it supports the main LLMs (OpenAI, Anthropic and Google).
+This demo shows how to enhance an existing LangGraph agent with TrikHub support using the v2 `enhance()` API. The agent gains the ability to hand off conversations to specialist trik agents (conversational mode) and use trik-provided tools directly (tool mode).
 
 ## What You'll Learn
-- How to load triks using `@trikhub/gateway` and exposing env variables to them
-- How template responses keep agents safe from prompt injection
-- How passthrough content is delivered directly to users
-- How to expose Environment variables per Trik
-- How to interact with persistent storage
+- How to enhance an agent with TrikHub support using `enhance()`
+- How the handoff routing model works (`talk_to_X` tools, `transfer_back`)
+- How tool-mode triks expose native tools to the main agent
+- How to use `/back` to force a transfer-back from any trik handoff
 
 ## Architecture
 
@@ -17,7 +13,7 @@ There is a significant portion of boilerplate that would ideally not be added to
 ┌─────────────────────────────────────────────────────────┐
 │                    Node.js Process                      │
 │  ┌──────────────┐    ┌──────────────┐    ┌───────────┐  │
-│  │   CLI (You)  │◄──►│  LangGraph   │◄──►│  Gateway  │  │
+│  │   CLI (You)  │◄──►│  Enhanced    │◄──►│  Gateway  │  │
 │  │              │    │    Agent     │    │  (triks)  │  │
 │  └──────────────┘    └──────────────┘    └───────────┘  │
 └─────────────────────────────────────────────────────────┘
@@ -29,44 +25,32 @@ There is a significant portion of boilerplate that would ideally not be added to
 
 - Node.js 18+
 - pnpm (or npm)
-- OpenAI / Anthropic / Googel API key
+- OpenAI / Anthropic / Google API key
 
 ## Quick Start
 
-**1. Install dependencies**
-
-From the monorepo root:
-
-## Clone the repository
+**1. Clone and build**
 
 ```bash
 git clone https://github.com/molefas/trikhub.git
 cd trikhub
-```
-
-## Setup
-
-```bash
-# Install dependencies and build packages
 pnpm install
 pnpm build
-
-# Navigate to the example
-cd examples/js/local-playground
-
-# Install dependencies just for the demo
-npm install
-
-# Provide an LLM key to the main Agent
-cp .env.example .env
-# Edit .env and add your LLM's API KEY
 ```
 
+**2. Set up the playground**
+
 ```bash
-# Provide an LLM key to the Trik Agent
-cd .trikhub
-cp secrets.json.example secrets.json
-# Edit secrets.json with your LLM's API KEY
+cd examples/js/local-playground
+npm install
+
+# Provide an LLM key to the main agent
+cp .env.example .env
+# Edit .env and add your API key
+
+# Provide an LLM key for trik agents
+cp .trikhub/secrets.json.example .trikhub/secrets.json
+# Edit secrets.json with the trik's API key
 ```
 
 **3. Run the agent**
@@ -78,12 +62,14 @@ pnpm dev
 You should see:
 
 ```
-[TrikGateway] No config file found at /../config.json
-[Triks] No triks configured
-LLM: ... // Your LLM if you've added the details on the .env
+LangGraph Agent CLI with TrikHub Handoff Support
+Loading...
+
+LLM: openai (gpt-4o-mini)
 Built-in tools: get_weather, calculate, search_web
-Total tools: 3
-Type "/tools" to list all, "exit" to quit.
+Handoff triks: talk_to_content_hoarder
+Tool-mode triks: searchArticles
+Type "/back" to return from a trik handoff, "exit" to quit.
 
 You:
 ```
@@ -93,12 +79,25 @@ You:
 
 ```
 You: Can you tell me the weather in Lisbon, Portugal?
-Agent: The weather in Lisbon is currently rainy with a temperature of 30°C (86 F). It's quite warm despite the rain!
+Agent: The weather in Lisbon is currently rainy with a temperature of 30C (86 F). It's quite warm despite the rain!
+```
 
+### Handoff to a Trik
+
+```
+You: I want to create an article about AI trends
+
+[Handoff to content-hoarder]
+
+Content-Hoarder: I'll help you create an article about AI trends...
+
+You: /back
+
+[Transferred back to main agent]
 ```
 
 ### Install new Triks
-You can now search and install existing Triks to test. 
+You can search and install existing Triks to test.
 ```bash
 # This will help you find triks by keywords
 trik search {keyword}
@@ -122,30 +121,22 @@ I've shipped a few basic Triks for this example:
 You can find more details on how to interact with each Trik in their documentations.
 Find more about these on [Trikhub.com](https://trikhub.com).
 
-## How It Works
+## Trik Modes
 
-### Template Mode (Safe for Agent)
+TrikHub v2 supports two modes for triks:
 
-```
-Trik returns: { template: "success", count: 3 }
-Agent sees:   "I found 3 articles about AI."
-```
+### Conversational Mode (Handoff)
 
-The agent only sees structured data (enums, numbers, IDs) - never free-form text that could contain prompt injection.
+Conversational triks are full agents that take over the conversation. The gateway generates a `talk_to_<trik-name>` tool for each one.
 
-### Passthrough Mode (Direct to User)
+- **talk_to_X**: The main agent calls this tool to hand off to a specialist trik agent
+- **transfer_back**: The trik agent calls this when it has finished, returning control to the main agent
+- **/back command**: Type `/back` in the CLI to force a transfer-back if the trik doesn't return on its own
+- **Session state**: Triks remember context within a session
 
-```
-Trik returns: { content: "# Article Title\n\nFull article text..." }
-Agent sees:   "[Content delivered directly]"
-You see:      The full article
-```
+### Tool Mode (Exposed Tools)
 
-Content that might contain untrusted text bypasses the agent entirely.
-
-### Session State
-
-Triks remember context. When you say "the healthcare one", the trik resolves this reference using the history of your conversation.
+Tool-mode triks export individual tools that appear as native tools on the main agent. No handoff occurs — the main agent calls the tool directly and receives a structured response. The trik's `outputTemplate` controls what the main agent sees.
 
 ## Project Structure
 
@@ -153,31 +144,30 @@ Triks remember context. When you say "the healthcare one", the trik resolves thi
 local-playground/
 ├── src/
 │   ├── cli.ts          # Interactive REPL
-│   ├── agent.ts        # LangGraph workflow with validation
-│   └── tools.ts        # Built-in tools + trik loader
-│   └── llm.ts          # Langgraph Model selection based on key provided
+│   ├── agent.ts        # LangGraph workflow with enhance()
+│   ├── tools.ts        # Built-in demo tools (weather, calc, search)
+│   └── llm.ts          # Multi-provider LLM selection
 ├── .trikhub/
-│   └── config.json     # Installed triks (once there are Triks installed)
-│   └── secrets.json    # Secrets segregation per Trik
+│   ├── config.json     # Installed triks (created by `trik install`)
+│   └── secrets.json    # Per-trik API keys and secrets
 ├── .env.example        # Environment template
 └── package.json
-└── langgraph.json
 ```
 
 ## Troubleshooting
 
 **"Cannot find module '@trikhub/gateway'"**
 
-→ Run `pnpm build` from the monorepo root first
+> Run `pnpm build` from the monorepo root first
 
 **"OPENAI_API_KEY is not set"**
 
-→ Copy `.env.example` to `.env` and add your key
+> Copy `.env.example` to `.env` and add your key
 
 **Trik not loading**
 
-→ Check `.trikhub/config.json` has the trik listed
-→ If you're running Python Triks you need to have an available Python environment regardless (see below)
+> Check `.trikhub/config.json` has the trik listed
+> If you're running Python Triks you need to have an available Python environment regardless (see below)
 
 ## Using Python Triks
 
@@ -212,11 +202,7 @@ The JavaScript gateway can execute Python triks through a worker subprocess. Thi
      "triks": [
        "@molefas/trik-article-search",
        "@molefas/trik-article-search-py"
-     ],
-     "trikhub": {
-       "@molefas/trik-article-search": "1.0.1",
-       "@molefas/trik-article-search-py": "1.0.0"
-     }
+     ]
    }
    ```
 

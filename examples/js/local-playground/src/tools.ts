@@ -1,7 +1,5 @@
-import { tool, type DynamicStructuredTool } from '@langchain/core/tools';
+import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
-import { TrikGateway, type PassthroughContent } from '@trikhub/gateway';
-import { loadLangChainTriks } from '@trikhub/gateway/langchain';
 
 // ============================================================================
 // Built-in Demo Tools
@@ -59,55 +57,3 @@ const searchWeb = tool(
 );
 
 export const builtInTools = [getWeather, calculate, searchWeb];
-
-// ============================================================================
-// Trik Loading
-// ============================================================================
-
-export interface TrikLoaderResult {
-  tools: DynamicStructuredTool[];
-  gateway: TrikGateway | null;
-  loadedTriks: string[];
-}
-
-export interface AllToolsResult extends TrikLoaderResult {
-  allTools: DynamicStructuredTool[];
-}
-
-export async function loadTriks(
-  onPassthrough?: (content: PassthroughContent) => void
-): Promise<TrikLoaderResult> {
-  try {
-    const result = await loadLangChainTriks({ onPassthrough, debug: true });
-
-    if (result.loadedTriks.length === 0) {
-      console.log('[Triks] No triks configured');
-    } else {
-      console.log(`[Triks] Loaded: ${result.loadedTriks.join(', ')}`);
-    }
-
-    return {
-      tools: result.tools,
-      gateway: result.gateway,
-      loadedTriks: result.loadedTriks,
-    };
-  } catch (error) {
-    console.error('[Triks] Error loading:', error);
-    return {
-      tools: [],
-      gateway: null,
-      loadedTriks: [],
-    };
-  }
-}
-
-export async function loadAllTools(
-  onPassthrough?: (content: PassthroughContent) => void
-): Promise<AllToolsResult> {
-  const trikResult = await loadTriks(onPassthrough);
-
-  return {
-    ...trikResult,
-    allTools: [...builtInTools, ...trikResult.tools],
-  };
-}

@@ -1,80 +1,49 @@
-import { StateGraph, MessagesAnnotation, START, END } from '@langchain/langgraph';
-import { ToolNode } from '@langchain/langgraph/prebuilt';
-import { AIMessage, SystemMessage } from '@langchain/core/messages';
-import type { DynamicStructuredTool } from '@langchain/core/tools';
-import type { PassthroughContent } from '@trikhub/gateway';
-import { builtInTools, loadAllTools } from './tools.js';
+import { createReactAgent } from '@langchain/langgraph/prebuilt';
+import { TrikGateway } from '@trikhub/gateway';
+import { enhance, getHandoffToolsForAgent, getExposedToolsForAgent } from '@trikhub/gateway/langchain';
+import { builtInTools } from './tools.js';
 import { createLLM, getProviderInfo } from './llm.js';
 
-let lastPassthroughContent: PassthroughContent | null = null;
-
-export function getLastPassthroughContent(): PassthroughContent | null {
-  const content = lastPassthroughContent;
-  lastPassthroughContent = null;
-  return content;
-}
-
-function handlePassthrough(content: PassthroughContent) {
-  lastPassthroughContent = content;
-}
-
 const SYSTEM_PROMPT = `You are a helpful assistant with access to various tools.
+You can check the weather, do math calculations, and search the web.
+When the user asks about content curation, article writing, hoarding content, RSS feeds, or voice profiles, use the appropriate talk_to tool to hand off to a specialist agent.
+Any additional tools provided by installed triks are available as native tools — use them directly.`;
 
-IMPORTANT: Some tools deliver content directly to the user through a separate channel (passthrough). When a tool response says "delivered directly to the user" or similar:
-
-1. The user HAS seen the content, but YOU HAVE NOT
-2. Do NOT repeat or summarize content you cannot see
-3. Simply acknowledge briefly that the content was delivered
-
-CRITICAL FOR FOLLOW-UP QUESTIONS:
-- If the user asks about specifics from delivered content (titles, details, "the first one", "the third article", etc.), you CANNOT answer from memory because you never saw the content
-- Instead, call the SAME trik again with the user's reference - triks have session memory and can resolve natural language references like "the first one" or "the healthcare article"
-- Use the "details" action with a "reference" parameter for questions about specific items
-- The trik's internal LLM will use its session history to resolve what the user is referring to
-`;
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function createAgentGraph(tools: DynamicStructuredTool[], model: any) {
-  const boundModel = model.bindTools(tools);
-
-  async function callModel(state: typeof MessagesAnnotation.State) {
-    const messagesWithSystem = [new SystemMessage(SYSTEM_PROMPT), ...state.messages];
-    const response = await boundModel.invoke(messagesWithSystem);
-    return { messages: [response] };
-  }
-
-  function shouldContinue(state: typeof MessagesAnnotation.State) {
-    const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
-    if (!lastMessage.tool_calls || lastMessage.tool_calls.length === 0) {
-      return END;
-    }
-    return 'tools';
-  }
-
-  const workflow = new StateGraph(MessagesAnnotation)
-    .addNode('agent', callModel)
-    .addNode('tools', new ToolNode(tools))
-    .addEdge(START, 'agent')
-    .addConditionalEdges('agent', shouldContinue, ['tools', END])
-    .addEdge('tools', 'agent');
-
-  return workflow.compile();
-}
-
-import { ChatOpenAI } from '@langchain/openai';
-const defaultModel = new ChatOpenAI({ model: 'gpt-4o-mini', temperature: 0 });
-export const graph = createAgentGraph(builtInTools, defaultModel);
-
-export async function initializeAgentWithTriks() {
-  const result = await loadAllTools(handlePassthrough);
+export async function initializeAgent() {
   const model = await createLLM();
   const providerInfo = getProviderInfo();
 
+  // Set up gateway and load triks from .trikhub/config.json
+  const gateway = new TrikGateway();
+  await gateway.initialize();
+  await gateway.loadTriksFromConfig();
+
+  // Build handoff tools (conversational triks) and exposed tools (tool-mode triks)
+  const handoffTools = getHandoffToolsForAgent(gateway);
+  const exposedTools = getExposedToolsForAgent(gateway);
+
+  // Create main agent with built-in + handoff + exposed tools
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LangChain v0.3→v1 type mismatch (gateway typed against 0.3.x)
+  const allTools = [...builtInTools, ...handoffTools, ...exposedTools] as any;
+  const agent = createReactAgent({
+    llm: model,
+    tools: allTools,
+    messageModifier: SYSTEM_PROMPT,
+  });
+
+  // Enhance with handoff routing
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- same v0.3→v1 type mismatch
+  const app = await enhance(agent as any, {
+    gatewayInstance: gateway,
+    debug: !!process.env.TRIKHUB_DEBUG || !!process.env.TRIKHUB_VERBOSE,
+    verbose: !!process.env.TRIKHUB_VERBOSE,
+  });
+
   return {
-    graph: createAgentGraph(result.allTools, model),
-    loadedTriks: result.loadedTriks,
-    gateway: result.gateway,
-    tools: result.allTools,
+    app,
+    loadedTriks: app.getLoadedTriks(),
+    handoffTools: handoffTools.map((t) => t.name),
+    exposedTools: exposedTools.map((t) => t.name),
     provider: providerInfo,
   };
 }

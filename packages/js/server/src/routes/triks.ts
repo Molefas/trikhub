@@ -20,6 +20,10 @@ interface InstallResponse {
 interface TrikListItem {
   name: string;
   version?: string;
+  description?: string;
+  mode?: string;
+  domain?: string[];
+  tools?: string[];
 }
 
 interface ListResponse {
@@ -66,6 +70,10 @@ const listResponseSchema = {
         properties: {
           name: { type: 'string' },
           version: { type: 'string' },
+          description: { type: 'string' },
+          mode: { type: 'string' },
+          domain: { type: 'array', items: { type: 'string' } },
+          tools: { type: 'array', items: { type: 'string' } },
         },
       },
     },
@@ -103,13 +111,33 @@ export async function triksRoutes(
     async () => {
       const triks: TrikListItem[] = [];
 
+      // Get all loaded trik IDs from gateway
+      const loadedTrikIds = gateway.getLoadedTriks();
+
+      for (const trikId of loadedTrikIds) {
+        const manifest = gateway.getManifest(trikId);
+        if (manifest) {
+          triks.push({
+            name: manifest.id,
+            version: manifest.version,
+            description: manifest.description,
+            mode: manifest.agent.mode,
+            domain: manifest.agent.domain,
+            tools: manifest.tools ? Object.keys(manifest.tools) : [],
+          });
+        }
+      }
+
+      // Also add triks from config that aren't loaded
       if (configPath) {
         try {
           const configContent = await readFile(configPath, 'utf-8');
           const config = JSON.parse(configContent);
           if (Array.isArray(config.triks)) {
             for (const name of config.triks) {
-              triks.push({ name });
+              if (!triks.some(t => t.name === name)) {
+                triks.push({ name });
+              }
             }
           }
         } catch {
@@ -255,8 +283,8 @@ export async function triksRoutes(
     {
       schema: {
         tags: ['triks'],
-        summary: 'Reload skills',
-        description: 'Reloads all skills from the config without restarting the server',
+        summary: 'Reload triks',
+        description: 'Reloads all triks from the config without restarting the server',
         response: {
           200: reloadResponseSchema,
           500: reloadResponseSchema,

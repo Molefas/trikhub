@@ -1,145 +1,67 @@
-import type {
-  TrikSession,
-  SessionHistoryEntry,
-  SessionCapabilities,
-} from '@trikhub/manifest';
+import { v4 as uuidv4 } from 'uuid';
+import type { HandoffLogEntry, HandoffSession } from '@trikhub/manifest';
+
+// ============================================================================
+// Session Storage Interface
+// ============================================================================
 
 /**
- * Interface for session storage implementations
+ * Interface for session storage implementations.
+ * Manages HandoffSession lifecycle for the gateway.
  */
 export interface SessionStorage {
-  /**
-   * Create a new session for a trik
-   */
-  create(trikId: string, config?: SessionCapabilities): Promise<TrikSession>;
-
-  /**
-   * Get an existing session by ID
-   * Returns null if session doesn't exist or is expired
-   */
-  get(sessionId: string): Promise<TrikSession | null>;
-
-  /**
-   * Add a history entry to a session
-   */
-  addHistory(
-    sessionId: string,
-    entry: Omit<SessionHistoryEntry, 'timestamp'>
-  ): Promise<void>;
-
-  /**
-   * Delete a session
-   */
-  delete(sessionId: string): Promise<void>;
-
-  /**
-   * Clean up expired sessions
-   * Returns the number of sessions cleaned up
-   */
-  cleanup(): Promise<number>;
+  /** Create a new handoff session for a trik */
+  createSession(trikId: string): HandoffSession;
+  /** Get an existing session by ID */
+  getSession(sessionId: string): HandoffSession | null;
+  /** Append a log entry to a session */
+  appendLog(sessionId: string, entry: HandoffLogEntry): void;
+  /** Close a session (marks it as ended) */
+  closeSession(sessionId: string): void;
 }
 
-/**
- * Generate a random session ID
- */
-function generateSessionId(): string {
-  return `sess_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-}
+// ============================================================================
+// In-Memory Implementation
+// ============================================================================
 
 /**
- * Default values for session configuration
- */
-const DEFAULT_MAX_DURATION_MS = 30 * 60 * 1000; // 30 minutes
-const DEFAULT_MAX_HISTORY_ENTRIES = 20;
-
-/**
- * In-memory session storage implementation.
- * Sessions are lost when the process restarts.
+ * In-memory session storage.
+ * Sessions are lost on process restart — suitable for development and testing.
  */
 export class InMemorySessionStorage implements SessionStorage {
-  private sessions = new Map<string, TrikSession>();
+  private sessions = new Map<string, HandoffSession>();
 
-  async create(trikId: string, config?: SessionCapabilities): Promise<TrikSession> {
+  createSession(trikId: string): HandoffSession {
     const now = Date.now();
-    const maxDurationMs = config?.maxDurationMs ?? DEFAULT_MAX_DURATION_MS;
-
-    const session: TrikSession = {
-      sessionId: generateSessionId(),
+    const session: HandoffSession = {
+      sessionId: uuidv4(),
       trikId,
+      log: [],
       createdAt: now,
       lastActivityAt: now,
-      expiresAt: now + maxDurationMs,
-      history: [],
     };
-
     this.sessions.set(session.sessionId, session);
     return session;
   }
 
-  async get(sessionId: string): Promise<TrikSession | null> {
+  getSession(sessionId: string): HandoffSession | null {
+    return this.sessions.get(sessionId) ?? null;
+  }
+
+  appendLog(sessionId: string, entry: HandoffLogEntry): void {
     const session = this.sessions.get(sessionId);
-
     if (!session) {
-      return null;
+      throw new Error(`Session "${sessionId}" not found`);
     }
-
-    // Check if session has expired
-    if (Date.now() > session.expiresAt) {
-      this.sessions.delete(sessionId);
-      return null;
-    }
-
-    // Update last activity
+    session.log.push(entry);
     session.lastActivityAt = Date.now();
-    return session;
   }
 
-  async addHistory(
-    sessionId: string,
-    entry: Omit<SessionHistoryEntry, 'timestamp'>
-  ): Promise<void> {
-    const session = await this.get(sessionId);
+  closeSession(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
     if (!session) {
-      throw new Error(`Session ${sessionId} not found`);
+      throw new Error(`Session "${sessionId}" not found`);
     }
-
-    // Add the history entry with timestamp
-    const historyEntry: SessionHistoryEntry = {
-      ...entry,
-      timestamp: Date.now(),
-    };
-
-    session.history.push(historyEntry);
-
-    // Trim history if it exceeds the limit
-    // We use DEFAULT_MAX_HISTORY_ENTRIES since we don't store the config
-    if (session.history.length > DEFAULT_MAX_HISTORY_ENTRIES) {
-      session.history = session.history.slice(-DEFAULT_MAX_HISTORY_ENTRIES);
-    }
-  }
-
-  async delete(sessionId: string): Promise<void> {
-    this.sessions.delete(sessionId);
-  }
-
-  async cleanup(): Promise<number> {
-    const now = Date.now();
-    let cleaned = 0;
-
-    for (const [sessionId, session] of this.sessions) {
-      if (now > session.expiresAt) {
-        this.sessions.delete(sessionId);
-        cleaned++;
-      }
-    }
-
-    return cleaned;
-  }
-
-  /**
-   * Get the number of active sessions (for debugging/monitoring)
-   */
-  getActiveSessionCount(): number {
-    return this.sessions.size;
+    session.lastActivityAt = Date.now();
   }
 }

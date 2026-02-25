@@ -90,18 +90,11 @@ export async function mcpCommand(options: McpOptions): Promise<void> {
     console.log(chalk.bold('Available Tools'));
     console.log();
     console.log('  • analyze_trik_requirements - Understand what to build');
-    console.log('  • design_action - Design action schemas');
-    console.log('  • design_schema - Create JSON schemas');
+    console.log('  • design_tool - Design tool schemas with log templates');
+    console.log('  • design_log_schema - Create constrained log schemas');
     console.log('  • scaffold_trik - Generate complete project');
     console.log('  • validate_manifest - Check manifest for errors');
     console.log('  • diagnose_error - Explain and fix errors');
-    console.log();
-
-    console.log(chalk.bold('Available Prompts'));
-    console.log();
-    console.log('  • create-trik - Guided trik creation');
-    console.log('  • debug-manifest - Debug manifest issues');
-    console.log('  • add-api-integration - Add API action');
     console.log();
 
     console.log(chalk.dim('Learn more: https://trikhub.com/docs/mcp-server'));

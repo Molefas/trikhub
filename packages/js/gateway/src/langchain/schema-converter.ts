@@ -1,90 +1,145 @@
-import { z, type ZodTypeAny } from 'zod';
+/**
+ * JSON Schema → Zod schema converter.
+ *
+ * Converts JSON Schema objects (from manifest inputSchema/outputSchema)
+ * into Zod schemas for use with LangChain DynamicStructuredTool.
+ */
+
+import { z } from 'zod';
 import type { JSONSchema } from '@trikhub/manifest';
 
-export function jsonSchemaToZod(schema: JSONSchema, path: string = 'root'): ZodTypeAny {
-  if (!schema.type && !schema.$ref) {
-    return z.unknown();
-  }
-
-  if (schema.type === 'string') {
-    let zodSchema = z.string();
-
+/**
+ * Convert a JSON Schema definition to a Zod schema.
+ *
+ * Supports: string (maxLength, enum, pattern, format), number, integer,
+ * boolean, object with properties + required, and description passthrough.
+ *
+ * Throws on unsupported constructs ($ref, oneOf, anyOf, allOf, arrays, etc.).
+ */
+export function jsonSchemaToZod(schema: JSONSchema): z.ZodTypeAny {
+  // Enum at top level (applies to any type)
+  if (schema.enum) {
+    if (schema.enum.length === 0) {
+      throw new Error('jsonSchemaToZod: empty enum is not supported');
+    }
+    const values = schema.enum.map((v) => String(v));
+    let zodEnum = z.enum(values as [string, ...string[]]);
     if (schema.description) {
-      zodSchema = zodSchema.describe(schema.description);
+      zodEnum = zodEnum.describe(schema.description);
     }
-
-    if (schema.minLength !== undefined) {
-      zodSchema = zodSchema.min(schema.minLength);
-    }
-    if (schema.maxLength !== undefined) {
-      zodSchema = zodSchema.max(schema.maxLength);
-    }
-    if (schema.pattern !== undefined) {
-      zodSchema = zodSchema.regex(new RegExp(schema.pattern));
-    }
-
-    if (schema.enum && schema.enum.length > 0) {
-      return z.enum(schema.enum as [string, ...string[]]).describe(schema.description || '');
-    }
-
-    return zodSchema;
+    return zodEnum;
   }
 
-  if (schema.type === 'number' || schema.type === 'integer') {
-    let zodSchema = schema.type === 'integer' ? z.number().int() : z.number();
+  const type = schema.type;
 
+  if (type === 'string') {
+    return buildStringSchema(schema);
+  }
+
+  if (type === 'number' || type === 'integer') {
+    return buildNumberSchema(schema);
+  }
+
+  if (type === 'boolean') {
+    let zodBool: z.ZodTypeAny = z.boolean();
     if (schema.description) {
-      zodSchema = zodSchema.describe(schema.description);
+      zodBool = zodBool.describe(schema.description);
     }
-    if (schema.minimum !== undefined) {
-      zodSchema = zodSchema.min(schema.minimum);
-    }
-    if (schema.maximum !== undefined) {
-      zodSchema = zodSchema.max(schema.maximum);
-    }
-
-    return zodSchema;
+    return zodBool;
   }
 
-  if (schema.type === 'boolean') {
-    let zodSchema = z.boolean();
+  if (type === 'object') {
+    return buildObjectSchema(schema);
+  }
+
+  // Unsupported constructs
+  if (schema.$ref) {
+    throw new Error('jsonSchemaToZod: $ref is not supported');
+  }
+  if (type === 'array') {
+    throw new Error('jsonSchemaToZod: array type is not supported');
+  }
+  if (Array.isArray(type)) {
+    throw new Error('jsonSchemaToZod: union types are not supported');
+  }
+
+  throw new Error(`jsonSchemaToZod: unsupported schema type "${type ?? 'undefined'}"`);
+}
+
+function buildStringSchema(schema: JSONSchema): z.ZodTypeAny {
+  let zodStr = z.string();
+
+  if (schema.maxLength !== undefined) {
+    zodStr = zodStr.max(schema.maxLength);
+  }
+
+  if (schema.minLength !== undefined) {
+    zodStr = zodStr.min(schema.minLength);
+  }
+
+  if (schema.pattern) {
+    zodStr = zodStr.regex(new RegExp(schema.pattern));
+  }
+
+  // Format → basic string with description hint (Zod doesn't have native format)
+  // We add the format info to the description for LLM guidance
+  let desc = schema.description ?? '';
+  if (schema.format) {
+    const formatHint = `(format: ${schema.format})`;
+    desc = desc ? `${desc} ${formatHint}` : formatHint;
+  }
+
+  let result: z.ZodTypeAny = zodStr;
+  if (desc) {
+    result = result.describe(desc);
+  }
+  return result;
+}
+
+function buildNumberSchema(schema: JSONSchema): z.ZodTypeAny {
+  const isInteger = schema.type === 'integer';
+  let zodNum = isInteger ? z.number().int() : z.number();
+
+  if (schema.minimum !== undefined) {
+    zodNum = zodNum.min(schema.minimum);
+  }
+
+  if (schema.maximum !== undefined) {
+    zodNum = zodNum.max(schema.maximum);
+  }
+
+  let result: z.ZodTypeAny = zodNum;
+  if (schema.description) {
+    result = result.describe(schema.description);
+  }
+  return result;
+}
+
+function buildObjectSchema(schema: JSONSchema): z.ZodTypeAny {
+  const properties = schema.properties;
+  if (!properties) {
+    // Object with no properties — use record
+    let zodRecord: z.ZodTypeAny = z.record(z.unknown());
     if (schema.description) {
-      zodSchema = zodSchema.describe(schema.description);
+      zodRecord = zodRecord.describe(schema.description);
     }
-    return zodSchema;
+    return zodRecord;
   }
 
-  if (schema.type === 'array') {
-    const itemSchema = schema.items ? jsonSchemaToZod(schema.items, `${path}.items`) : z.unknown();
-    let zodSchema = z.array(itemSchema);
-    if (schema.description) {
-      zodSchema = zodSchema.describe(schema.description);
+  const requiredSet = new Set(schema.required ?? []);
+  const shape: Record<string, z.ZodTypeAny> = {};
+
+  for (const [key, propSchema] of Object.entries(properties)) {
+    let field = jsonSchemaToZod(propSchema);
+    if (!requiredSet.has(key)) {
+      field = field.optional();
     }
-    return zodSchema;
+    shape[key] = field;
   }
 
-  if (schema.type === 'object') {
-    const shape: Record<string, ZodTypeAny> = {};
-
-    if (schema.properties) {
-      for (const [key, propSchema] of Object.entries(schema.properties)) {
-        const propZod = jsonSchemaToZod(propSchema as JSONSchema, `${path}.${key}`);
-
-        if (!schema.required?.includes(key)) {
-          // OpenAI structured outputs require optional fields to also be nullable
-          shape[key] = propZod.nullable().optional();
-        } else {
-          shape[key] = propZod;
-        }
-      }
-    }
-
-    let zodSchema = z.object(shape);
-    if (schema.description) {
-      zodSchema = zodSchema.describe(schema.description);
-    }
-    return zodSchema;
+  let zodObj: z.ZodTypeAny = z.object(shape);
+  if (schema.description) {
+    zodObj = zodObj.describe(schema.description);
   }
-
-  return z.unknown();
+  return zodObj;
 }

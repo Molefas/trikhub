@@ -1,7 +1,6 @@
 import "dotenv/config";
 import * as readline from "readline";
-import { HumanMessage, BaseMessage } from "@langchain/core/messages";
-import { initializeAgentWithTriks, getLastPassthroughContent } from "./agent.js";
+import { initializeAgent } from "./agent.js";
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -17,22 +16,22 @@ function prompt(question: string): Promise<string> {
 }
 
 async function main() {
-  console.log("LangGraph Agent CLI with TrikHub Support");
+  console.log("LangGraph Agent CLI with TrikHub Handoff Support");
   console.log("Loading...\n");
 
-  // Initialize agent with triks
-  const { graph, loadedTriks, tools, provider } = await initializeAgentWithTriks();
+  const { app, handoffTools, exposedTools, provider } = await initializeAgent();
 
   console.log(`LLM: ${provider.provider} (${provider.model})`);
   console.log(`Built-in tools: get_weather, calculate, search_web`);
-  if (loadedTriks.length > 0) {
-    console.log(`Triks: ${loadedTriks.join(', ')}`);
+  if (handoffTools.length > 0) {
+    console.log(`Handoff triks: ${handoffTools.join(', ')}`);
   }
-  console.log(`Total tools: ${tools.length}`);
-  console.log('Type "/tools" to list all, "exit" to quit.\n');
+  if (exposedTools.length > 0) {
+    console.log(`Tool-mode triks: ${exposedTools.join(', ')}`);
+  }
+  console.log('Type "/back" to return from a trik handoff, "exit" to quit.\n');
 
-  const messages: BaseMessage[] = [];
-  const threadId = `cli-${Date.now()}`;
+  const sessionId = `cli-${Date.now()}`;
 
   while (true) {
     const userInput = await prompt("You: ");
@@ -49,39 +48,17 @@ async function main() {
       break;
     }
 
-    // Handle special commands
-    if (userInput.toLowerCase() === "/tools") {
-      console.log("\nAvailable tools:");
-      for (const tool of tools) {
-        console.log(`  - ${tool.name}: ${tool.description}`);
-      }
-      console.log();
-      continue;
-    }
-
-    messages.push(new HumanMessage(userInput));
-
     try {
-      const result = await graph.invoke(
-        { messages },
-        { configurable: { thread_id: threadId } }
-      );
+      const result = await app.processMessage(userInput, sessionId);
 
-      // Check for passthrough content (direct output from trik)
-      const passthroughContent = getLastPassthroughContent();
-      if (passthroughContent) {
-        console.log(`\n--- Direct Content (${passthroughContent.contentType}) ---`);
-        console.log(passthroughContent.content);
-        console.log("--- End ---\n");
+      // Show source indicator when in a trik handoff
+      if (result.source === 'system') {
+        console.log(`\n\x1b[2m${result.message}\x1b[0m\n`);
+      } else if (result.source !== 'main') {
+        console.log(`\n[${result.source}] ${result.message}\n`);
+      } else {
+        console.log(`\nAssistant: ${result.message}\n`);
       }
-
-      // Always show assistant message
-      const assistantMessage = result.messages[result.messages.length - 1];
-      console.log(`\nAssistant: ${assistantMessage.content}\n`);
-
-      // Update messages with the full conversation history from the graph
-      messages.length = 0;
-      messages.push(...result.messages);
     } catch (error) {
       console.error("\nError:", error);
       console.log("Please try again.\n");

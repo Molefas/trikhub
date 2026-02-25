@@ -137,17 +137,6 @@ function apiToTrikVersion(api: ApiTrikVersion): TrikVersion {
 }
 
 /**
- * Build a trik path from full name (e.g., "@Molefas/article-search" -> "@Molefas/article-search")
- * Used to construct API paths with scope and name as separate segments
- */
-function trikPath(fullName: string): string {
-  // fullName format: @scope/name
-  // We need to return: @scope/name (scope and name as path segments)
-  // The URL will be: /api/v1/triks/@scope/name
-  return fullName;
-}
-
-/**
  * Registry client class
  */
 export class RegistryClient {
@@ -259,7 +248,7 @@ export class RegistryClient {
   async getTrik(fullName: string): Promise<TrikInfo | null> {
     try {
       // Use path directly - routes expect /api/v1/triks/:scope/:trikName
-      const result = await this.fetch<ApiTrikDetails>(`/api/v1/triks/${trikPath(fullName)}`);
+      const result = await this.fetch<ApiTrikDetails>(`/api/v1/triks/${fullName}`);
 
       const versions = result.versions.map((v) => apiToTrikVersion(v));
       return apiToTrikInfo(result, versions);
@@ -318,7 +307,7 @@ export class RegistryClient {
   async reportDownload(fullName: string, version: string): Promise<void> {
     try {
       // Use path directly - routes expect /api/v1/triks/:scope/:trikName/download
-      await fetch(`${this.baseUrl}/api/v1/triks/${trikPath(fullName)}/download`, {
+      await fetch(`${this.baseUrl}/api/v1/triks/${fullName}/download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ version }),
@@ -447,7 +436,7 @@ export class RegistryClient {
     }
 
     // Use path directly - routes expect /api/v1/triks/:scope/:trikName/versions
-    const result = await this.fetch<ApiTrikVersion>(`/api/v1/triks/${trikPath(fullName)}/versions`, {
+    const result = await this.fetch<ApiTrikVersion>(`/api/v1/triks/${fullName}/versions`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -463,7 +452,7 @@ export class RegistryClient {
       throw new Error('Not authenticated. Please run `trik login`');
     }
 
-    await this.fetch(`/api/v1/triks/${trikPath(fullName)}`, {
+    await this.fetch(`/api/v1/triks/${fullName}`, {
       method: 'DELETE',
     });
   }

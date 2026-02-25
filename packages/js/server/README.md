@@ -1,6 +1,6 @@
 # @trikhub/server
 
-HTTP server for TrikHub - remote gateway for AI agents.
+HTTP server for TrikHub - remote gateway for AI agent handoff routing.
 
 ## Installation
 
@@ -35,18 +35,19 @@ docker-compose up
 trik-server
 ```
 
-1. Install a trik via API:
-
-```bash
-curl -X POST http://localhost:3000/api/v1/triks/install \
-  -H "Content-Type: application/json" \
-  -d '{"package": "@molefas/article-search"}'
-```
-
-1. Access the API:
+2. Check available endpoints:
    - Health: http://localhost:3000/api/v1/health
    - API Docs: http://localhost:3000/docs
-   - Tools: http://localhost:3000/api/v1/tools
+   - Handoff Tools: http://localhost:3000/api/v1/tools
+   - Loaded Triks: http://localhost:3000/api/v1/triks
+
+3. Send a message through the gateway:
+
+```bash
+curl -X POST http://localhost:3000/api/v1/message \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello", "sessionId": "session-1"}'
+```
 
 ## Configuration
 
@@ -56,41 +57,137 @@ All configuration is done via environment variables:
 |----------|---------|-------------|
 | `PORT` | `3000` | Server port |
 | `HOST` | `0.0.0.0` | Server host |
-| `SKILLS_DIR` | `./skills` | Directory containing local skills |
-| `CONFIG_PATH` | - | Path to `.trikhub/config.json` for npm-installed skills |
+| `SKILLS_DIR` | - | Directory containing local triks (optional) |
+| `CONFIG_PATH` | - | Path to `.trikhub/config.json` for npm-installed triks |
 | `AUTH_TOKEN` | - | Bearer token for authentication (optional) |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `LINT_ON_LOAD` | `true` | Validate skills before loading |
-| `LINT_WARNINGS_AS_ERRORS` | `false` | Treat lint warnings as errors |
-| `ALLOWED_SKILLS` | - | Comma-separated allowlist of skill IDs |
+| `ALLOWED_SKILLS` | - | Comma-separated allowlist of trik IDs |
 
 ## API Endpoints
 
-### Core Endpoints
+### Message Routing
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/message` | POST | Route a user message through the handoff gateway |
+| `/api/v1/back` | POST | Force transfer-back from current handoff |
+| `/api/v1/session` | GET | Get current handoff state |
+
+### Tools & Triks
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/tools` | GET | List handoff tool definitions |
+| `/api/v1/triks` | GET | List loaded triks with v2 info |
+| `/api/v1/triks/install` | POST | Install a trik package |
+| `/api/v1/triks/:name` | DELETE | Uninstall a trik |
+| `/api/v1/triks/reload` | POST | Hot-reload all triks |
+
+### System
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/v1/health` | GET | Health check |
-| `/api/v1/tools` | GET | List available tools |
-| `/api/v1/execute` | POST | Execute a skill action |
-| `/api/v1/content/:ref` | GET | Retrieve passthrough content |
 | `/docs` | GET | Swagger UI documentation |
 
-### Trik Management Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/triks` | GET | List installed triks |
-| `/api/v1/triks/install` | POST | Install a trik package |
-| `/api/v1/triks/:name` | DELETE | Uninstall a trik |
-| `/api/v1/triks/reload` | POST | Hot-reload all skills |
-
-### Execute a Skill
+### Send a Message
 
 ```bash
-curl -X POST http://localhost:3000/api/v1/execute \
+curl -X POST http://localhost:3000/api/v1/message \
   -H "Content-Type: application/json" \
-  -d '{"tool": "my-skill:action", "input": {"param": "value"}}'
+  -d '{"message": "Search for articles about AI", "sessionId": "s1"}'
+```
+
+**Response (no active handoff):**
+
+```json
+{
+  "target": "main",
+  "handoffTools": [
+    {
+      "name": "talk_to_content-hoarder",
+      "description": "Search, create, and manage articles...",
+      "inputSchema": { "type": "object", "properties": { "context": { "type": "string" } } }
+    }
+  ]
+}
+```
+
+**Response (active handoff):**
+
+```json
+{
+  "target": "trik",
+  "trikId": "content-hoarder",
+  "response": {
+    "message": "I found 3 articles about AI.",
+    "transferBack": false
+  },
+  "sessionId": "hs-abc123"
+}
+```
+
+### Force Transfer Back
+
+```bash
+curl -X POST http://localhost:3000/api/v1/back \
+  -H "Content-Type: application/json" \
+  -d '{"sessionId": "s1"}'
+```
+
+### Get Session State
+
+```bash
+curl http://localhost:3000/api/v1/session
+```
+
+```json
+{
+  "activeHandoff": {
+    "trikId": "content-hoarder",
+    "sessionId": "hs-abc123",
+    "turnCount": 3
+  }
+}
+```
+
+### List Handoff Tools
+
+```bash
+curl http://localhost:3000/api/v1/tools
+```
+
+```json
+{
+  "handoffTools": [
+    {
+      "name": "talk_to_content-hoarder",
+      "description": "Search, create, revise, and publish articles...",
+      "inputSchema": { ... }
+    }
+  ]
+}
+```
+
+### List Loaded Triks
+
+```bash
+curl http://localhost:3000/api/v1/triks
+```
+
+```json
+{
+  "triks": [
+    {
+      "name": "content-hoarder",
+      "version": "0.1.0",
+      "description": "Article curation and publishing agent",
+      "mode": "conversational",
+      "domain": ["content curation", "article writing"],
+      "tools": ["searchArticles", "createArticle", "reviseArticle"]
+    }
+  ]
+}
 ```
 
 ### Install a Trik
@@ -98,31 +195,15 @@ curl -X POST http://localhost:3000/api/v1/execute \
 ```bash
 curl -X POST http://localhost:3000/api/v1/triks/install \
   -H "Content-Type: application/json" \
-  -d '{"package": "@molefas/article-search"}'
-```
-
-### List Installed Triks
-
-```bash
-curl http://localhost:3000/api/v1/triks
+  -d '{"package": "@molefas/content-hoarder"}'
 ```
 
 ## Docker Usage
-
-The Docker image includes the `trik` CLI for runtime package management.
 
 ### Basic Usage
 
 ```bash
 docker run -p 3000:3000 -v trik-data:/data trikhub/server
-```
-
-### With Local Skills (Read-Only)
-
-```bash
-docker run -p 3000:3000 \
-  -v ./skills:/data/skills:ro \
-  trikhub/server
 ```
 
 ### With Authentication
@@ -136,18 +217,14 @@ docker run -p 3000:3000 \
 
 ### Runtime Trik Installation
 
-Install triks at runtime via CLI:
-
 ```bash
-docker exec trik-server trik install @molefas/article-search
-```
+# Via CLI
+docker exec trik-server trik install @molefas/content-hoarder
 
-Or via API:
-
-```bash
+# Via API
 curl -X POST http://localhost:3000/api/v1/triks/install \
   -H "Content-Type: application/json" \
-  -d '{"package": "@molefas/article-search"}'
+  -d '{"package": "@molefas/content-hoarder"}'
 ```
 
 ### Using docker-compose
@@ -167,42 +244,35 @@ volumes:
   trik-data:
 ```
 
-### Building from Source
+## Trik Loading
 
-```bash
-# From monorepo root
-docker build -f packages/trik-server/Dockerfile -t trikhub/server .
-```
-
-## Skill Loading
-
-The server loads skills from two sources:
+The server loads triks from two sources:
 
 ### 1. Local Directory (`SKILLS_DIR`)
 
-Skills are directories containing a `manifest.json` and implementation:
+Triks are directories containing a `manifest.json` and implementation:
 
 ```
 skills/
-├── my-skill/
+├── my-trik/
 │   ├── manifest.json
-│   └── graph.js
-└── @scope/another-skill/
+│   └── dist/agent.js
+└── @scope/another-trik/
     ├── manifest.json
-    └── graph.js
+    └── dist/agent.js
 ```
 
 ### 2. npm Packages (`CONFIG_PATH`)
 
-Skills installed via `trik install` or the API are tracked in a config file:
+Triks installed via `trik install` or the API are tracked in a config file:
 
 ```json
 {
-  "triks": ["@molefas/article-search", "my-other-skill"]
+  "triks": ["@molefas/content-hoarder", "@acme/web-scraper"]
 }
 ```
 
-Set `CONFIG_PATH` to enable npm-based skill loading:
+Set `CONFIG_PATH` to enable npm-based trik loading:
 
 ```bash
 CONFIG_PATH=./.trikhub/config.json trik-server
@@ -210,9 +280,10 @@ CONFIG_PATH=./.trikhub/config.json trik-server
 
 ## See Also
 
-- [@trikhub/manifest](../trik-manifest) - Manifest schema documentation
-- [@trikhub/gateway](../trik-gateway) - Core gateway library
-- [@trikhub/cli](../trik-cli) - CLI for installing triks
+- [@trikhub/gateway](../gateway) - Core gateway library with handoff routing
+- [@trikhub/manifest](../manifest) - Manifest types and validation
+- [@trikhub/cli](../cli) - CLI for installing and managing triks
+- [@trikhub/sdk](../sdk) - SDK for building triks
 
 ## License
 

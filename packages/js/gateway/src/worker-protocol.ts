@@ -8,14 +8,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import type {
-  SessionHistoryEntry,
-  PassthroughContent,
-  ClarificationQuestion,
-} from '@trikhub/manifest';
-
-// Re-export for convenience
-export type { SessionHistoryEntry, PassthroughContent, ClarificationQuestion };
+import type { ToolCallRecord } from '@trikhub/manifest';
 
 // ============================================================================
 // JSON-RPC 2.0 Base Types
@@ -45,25 +38,35 @@ export interface JsonRpcError {
 // Worker Request Types
 // ============================================================================
 
-export type WorkerMethod = 'invoke' | 'health' | 'shutdown';
+export type WorkerMethod = 'processMessage' | 'health' | 'shutdown';
 
-export interface InvokeParams {
-  /** Absolute path to the trik directory */
-  trikPath: string;
-  /** Action name to execute */
-  action: string;
-  /** Action input (validated against inputSchema) */
-  input: unknown;
-  /** Session context if session is enabled */
-  session?: {
-    sessionId: string;
-    history: SessionHistoryEntry[];
-  };
-  /** Configuration values (API keys, etc.) */
-  config?: Record<string, string>;
+/**
+ * Input for processMessage — the v2 protocol.
+ * Replaces v1's InvokeParams (action-based execution).
+ */
+export interface ProcessMessageInput {
+  /** The user's message to process */
+  message: string;
+  /** Session identifier for conversation continuity */
+  sessionId: string;
+  /** Configuration context (API keys, tokens) */
+  config: Record<string, string>;
+  /** Storage namespace for the trik */
+  storageNamespace: string;
 }
 
-// SessionHistoryEntry is imported from @trikhub/manifest
+/**
+ * Result from processMessage — the v2 protocol.
+ * Replaces v1's InvokeResult (action-based results).
+ */
+export interface ProcessMessageResult {
+  /** The agent's response message */
+  message: string;
+  /** Whether to transfer back to the main agent */
+  transferBack: boolean;
+  /** Tool calls made during processing (for log template filling) */
+  toolCalls?: ToolCallRecord[];
+}
 
 export interface HealthParams {
   /** Optional timeout in ms */
@@ -78,23 +81,6 @@ export interface ShutdownParams {
 // ============================================================================
 // Worker Response Types
 // ============================================================================
-
-export interface InvokeResult {
-  /** Response mode (template or passthrough) */
-  responseMode?: 'template' | 'passthrough';
-  /** Structured agent data (template mode) */
-  agentData?: unknown;
-  /** User content (passthrough mode) */
-  userContent?: PassthroughContent;
-  /** Whether clarification is needed */
-  needsClarification?: boolean;
-  /** Clarification questions if needed */
-  clarificationQuestions?: ClarificationQuestion[];
-  /** Whether to end the session */
-  endSession?: boolean;
-}
-
-// PassthroughContent and ClarificationQuestion are imported from @trikhub/manifest
 
 export interface HealthResult {
   status: 'ok' | 'error';
@@ -155,9 +141,7 @@ export const WorkerErrorCodes = {
 
   // Custom worker errors
   TRIK_NOT_FOUND: 1001,
-  ACTION_NOT_FOUND: 1002,
   EXECUTION_TIMEOUT: 1003,
-  SCHEMA_VALIDATION_FAILED: 1004,
   WORKER_NOT_READY: 1005,
   STORAGE_ERROR: 1006,
 } as const;
@@ -178,8 +162,10 @@ export function createRequest(
   };
 }
 
-export function createInvokeRequest(params: InvokeParams): JsonRpcRequest {
-  return createRequest('invoke', params);
+export function createProcessMessageRequest(
+  input: ProcessMessageInput
+): JsonRpcRequest {
+  return createRequest('processMessage', input);
 }
 
 export function createHealthRequest(): JsonRpcRequest {

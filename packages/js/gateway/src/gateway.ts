@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
@@ -8,62 +7,36 @@ import { createRequire } from 'node:module';
 import {
   type TrikManifest,
   type TrikRuntime,
-  type GatewayResult,
-  type GatewaySuccessTemplate,
-  type GatewaySuccessPassthrough,
-  type ClarificationQuestion,
-  type ClarificationAnswer,
-  type ActionDefinition,
-  type ResponseTemplate,
-  type ResponseMode,
-  type TrikSession,
-  type PassthroughContent,
-  type PassthroughDeliveryReceipt,
-  type UserContentReference,
-  type SessionHistoryEntry,
-  type TrikConfigContext,
-  type TrikStorageContext,
+  type TrikAgent,
+  type TrikContext,
+  type TrikResponse,
+  type ToolCallRecord,
+  type ToolDeclaration,
+  type JSONSchema,
+  type ToolExecutionResult,
   validateManifest,
-  SchemaValidator,
+  validateData,
 } from '@trikhub/manifest';
 import { PythonWorker, type PythonWorkerConfig } from './python-worker.js';
-import { type SessionStorage, InMemorySessionStorage } from './session-storage.js';
 import { type ConfigStore, FileConfigStore } from './config-store.js';
 import { type StorageProvider, SqliteStorageProvider } from './storage-provider.js';
+import { type SessionStorage, InMemorySessionStorage } from './session-storage.js';
 
-interface TrikInput {
-  action: string;
-  input: unknown;
-  session?: {
-    sessionId: string;
-    history: SessionHistoryEntry[];
-  };
-  config?: TrikConfigContext;
-  storage?: TrikStorageContext;
-}
+// ============================================================================
+// Types
+// ============================================================================
 
-interface TrikOutput {
-  responseMode: ResponseMode;
-  agentData?: unknown;
-  userContent?: PassthroughContent;
-  endSession?: boolean;
-  needsClarification?: boolean;
-  clarificationQuestions?: ClarificationQuestion[];
-}
-
-interface TrikGraph {
-  invoke(input: TrikInput): Promise<TrikOutput>;
+interface LoadedTrik {
+  manifest: TrikManifest;
+  agent: TrikAgent;
+  path: string;
+  runtime: TrikRuntime;
 }
 
 export interface TrikGatewayConfig {
   allowedTriks?: string[];
-  onClarificationNeeded?: (
-    trikId: string,
-    questions: ClarificationQuestion[]
-  ) => Promise<ClarificationAnswer[]>;
-  sessionStorage?: SessionStorage;
   /**
-   * Directory containing installed triks (triks) for auto-discovery.
+   * Directory containing installed triks for auto-discovery.
    * Supports scoped directory structure: triksDirectory/@scope/trik-name/
    * Use '~' for home directory (e.g., '~/.trikhub/triks')
    */
@@ -76,9 +49,14 @@ export interface TrikGatewayConfig {
   configStore?: ConfigStore;
   /**
    * Storage provider for persistent trik data.
-   * Defaults to JsonFileStorageProvider which stores data in ~/.trikhub/storage/
+   * Defaults to SqliteStorageProvider which stores data in ~/.trikhub/storage/
    */
   storageProvider?: StorageProvider;
+  /**
+   * Session storage for handoff sessions.
+   * Defaults to InMemorySessionStorage.
+   */
+  sessionStorage?: SessionStorage;
   /**
    * Whether to validate that all required config values are present when loading triks.
    * Defaults to true. Set to false to skip validation (e.g., for listing triks).
@@ -89,41 +67,11 @@ export interface TrikGatewayConfig {
    * If not provided, defaults will be used when a Python trik is loaded.
    */
   pythonWorkerConfig?: PythonWorkerConfig;
-}
-
-export interface ExecuteTrikOptions {
-  sessionId?: string;
-}
-
-export type GatewayResultWithSession<TAgent = unknown> = GatewayResult<TAgent> & {
-  sessionId?: string;
-};
-
-interface LoadedTrik {
-  manifest: TrikManifest;
-  graph: TrikGraph | null; // null for Python triks (executed via worker)
-  path: string;
-  runtime: TrikRuntime;
-}
-
-export interface ToolDefinition {
-  name: string;
-  description: string;
-  inputSchema: import('@trikhub/manifest').JSONSchema;
-  responseMode: ResponseMode;
-  isGatewayTool?: boolean;
-}
-
-export interface TrikInfo {
-  id: string;
-  name: string;
-  description: string;
-  tools: ToolDefinition[];
-  sessionEnabled: boolean;
-}
-
-export interface GetToolDefinitionsOptions {
-  includeReadContent?: boolean;
+  /**
+   * Maximum turns per handoff session before auto-transfer-back.
+   * Defaults to 20.
+   */
+  maxTurnsPerHandoff?: number;
 }
 
 /**
@@ -141,26 +89,110 @@ export interface LoadFromConfigOptions {
   baseDir?: string;
 }
 
+// ============================================================================
+// Route Result Types
+// ============================================================================
+
+/**
+ * Result of routing a message through the gateway.
+ */
+export type RouteResult = RouteToMain | RouteToTrik | RouteTransferBack | RouteForceBack;
+
+/** No active handoff — caller should send to main agent with these handoff tools */
+export interface RouteToMain {
+  target: 'main';
+  handoffTools: HandoffToolDefinition[];
+}
+
+/** Active handoff — the gateway routed the message to the trik and got a response */
+export interface RouteToTrik {
+  target: 'trik';
+  trikId: string;
+  response: TrikResponse;
+  sessionId: string;
+}
+
+/** Trik signaled transfer-back — message shown to user, summary injected into history */
+export interface RouteTransferBack {
+  target: 'transfer_back';
+  trikId: string;
+  message: string;   // trik's response → shown to user
+  summary: string;   // session log → injected into main history
+  sessionId: string;
+}
+
+/** User forced /back — message shown to user, summary injected into history */
+export interface RouteForceBack {
+  target: 'force_back';
+  trikId: string;
+  message: string;   // empty string (adapter generates system message)
+  summary: string;   // session log → injected into main history
+  sessionId: string;
+}
+
+/**
+ * A handoff tool definition — one per loaded conversational trik.
+ * The main agent calls these to initiate a handoff.
+ */
+export interface HandoffToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: JSONSchema;
+}
+
+/**
+ * An exposed tool definition — one per tool in a tool-mode trik.
+ * These appear as native tools on the main agent (no handoff).
+ */
+export interface ExposedToolDefinition {
+  trikId: string;
+  toolName: string;
+  description: string;
+  inputSchema: JSONSchema;
+  outputSchema: JSONSchema;
+  outputTemplate: string;
+}
+
+// ============================================================================
+// Active Handoff State
+// ============================================================================
+
+interface ActiveHandoff {
+  trikId: string;
+  sessionId: string;
+  turnCount: number;
+}
+
+// ============================================================================
+// Gateway
+// ============================================================================
+
 export class TrikGateway {
-  private validator = new SchemaValidator();
   private config: TrikGatewayConfig;
-  private sessionStorage: SessionStorage;
   private configStore: ConfigStore;
   private storageProvider: StorageProvider;
+  private sessionStorage: SessionStorage;
   private configLoaded = false;
   private pythonWorker: PythonWorker | null = null;
+  private maxTurnsPerHandoff: number;
 
   // Loaded triks (by trik ID)
   private triks = new Map<string, LoadedTrik>();
-  private contentReferences = new Map<string, UserContentReference>();
-  private static CONTENT_REF_TTL_MS = 10 * 60 * 1000;
+
+  // Active handoff state (null = no active handoff)
+  private activeHandoff: ActiveHandoff | null = null;
 
   constructor(config: TrikGatewayConfig = {}) {
     this.config = config;
-    this.sessionStorage = config.sessionStorage ?? new InMemorySessionStorage();
     this.configStore = config.configStore ?? new FileConfigStore();
     this.storageProvider = config.storageProvider ?? new SqliteStorageProvider();
+    this.sessionStorage = config.sessionStorage ?? new InMemorySessionStorage();
+    this.maxTurnsPerHandoff = config.maxTurnsPerHandoff ?? 20;
   }
+
+  // ==========================================================================
+  // Initialization
+  // ==========================================================================
 
   /**
    * Initialize the gateway by loading configuration.
@@ -187,6 +219,427 @@ export class TrikGateway {
     return this.storageProvider;
   }
 
+  /**
+   * Get the session storage
+   */
+  getSessionStorage(): SessionStorage {
+    return this.sessionStorage;
+  }
+
+  // ==========================================================================
+  // Message Routing (the heart of the handoff model)
+  // ==========================================================================
+
+  /**
+   * Route a user message through the gateway.
+   *
+   * - If no active handoff: returns RouteToMain with handoff tools
+   * - If active handoff + "/back": forces transfer-back
+   * - If active handoff: routes to trik, handles transfer-back and max turns
+   */
+  async routeMessage(message: string, sessionId: string): Promise<RouteResult> {
+    // /back escape — deterministic, always works
+    if (message.trim() === '/back' && this.activeHandoff) {
+      return this.forceTransferBack();
+    }
+
+    // Active handoff — route to trik
+    if (this.activeHandoff) {
+      return this.routeToTrik(message, sessionId);
+    }
+
+    // No handoff — return to main agent with handoff tools
+    return { target: 'main', handoffTools: this.getHandoffTools() };
+  }
+
+  /**
+   * Start a handoff to a trik. Called when the main agent invokes a talk_to_X tool.
+   *
+   * @param trikId - The trik to hand off to
+   * @param context - Context message from the main agent
+   * @param sessionId - Session ID for the conversation
+   */
+  async startHandoff(trikId: string, context: string, sessionId: string): Promise<RouteToTrik | RouteTransferBack> {
+    const loaded = this.triks.get(trikId);
+    if (!loaded) {
+      throw new Error(`Trik "${trikId}" is not loaded`);
+    }
+
+    // Create a handoff session
+    const handoffSession = this.sessionStorage.createSession(trikId);
+
+    // Set active handoff state
+    this.activeHandoff = {
+      trikId,
+      sessionId: handoffSession.sessionId,
+      turnCount: 0,
+    };
+
+    // Log handoff start
+    this.sessionStorage.appendLog(handoffSession.sessionId, {
+      timestamp: Date.now(),
+      type: 'handoff_start',
+      summary: `Handoff to ${loaded.manifest.name}`,
+    });
+
+    // Route the initial context message to the trik
+    return this.routeToTrik(context, sessionId);
+  }
+
+  /**
+   * Get the current active handoff state, if any.
+   */
+  getActiveHandoff(): { trikId: string; sessionId: string; turnCount: number } | null {
+    if (!this.activeHandoff) return null;
+    return { ...this.activeHandoff };
+  }
+
+  // ==========================================================================
+  // Handoff Tool Generation
+  // ==========================================================================
+
+  /**
+   * Generate handoff tool definitions — one per loaded conversational trik.
+   * These get added to the main agent's tool set by the LangChain adapter.
+   */
+  getHandoffTools(): HandoffToolDefinition[] {
+    const tools: HandoffToolDefinition[] = [];
+
+    for (const [trikId, loaded] of this.triks) {
+      if (loaded.manifest.agent.mode !== 'conversational') continue;
+
+      tools.push({
+        name: `talk_to_${trikId}`,
+        description: loaded.manifest.agent.handoffDescription!,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            context: {
+              type: 'string',
+              description: 'Context about what the user needs from this agent',
+            },
+          },
+          required: ['context'],
+        },
+      });
+    }
+
+    return tools;
+  }
+
+  /**
+   * Get exposed tool definitions from tool-mode triks.
+   * These appear as native tools on the main agent.
+   */
+  getExposedTools(): ExposedToolDefinition[] {
+    const tools: ExposedToolDefinition[] = [];
+
+    for (const [trikId, loaded] of this.triks) {
+      if (loaded.manifest.agent.mode !== 'tool') continue;
+      if (!loaded.manifest.tools) continue;
+
+      for (const [toolName, toolDecl] of Object.entries(loaded.manifest.tools)) {
+        if (!toolDecl.inputSchema || !toolDecl.outputSchema || !toolDecl.outputTemplate) continue;
+
+        tools.push({
+          trikId,
+          toolName,
+          description: toolDecl.description,
+          inputSchema: toolDecl.inputSchema,
+          outputSchema: toolDecl.outputSchema,
+          outputTemplate: toolDecl.outputTemplate,
+        });
+      }
+    }
+
+    return tools;
+  }
+
+  /**
+   * Execute an exposed tool from a tool-mode trik.
+   * Validates input and output against manifest schemas.
+   */
+  async executeExposedTool(
+    trikId: string,
+    toolName: string,
+    input: Record<string, unknown>,
+  ): Promise<string> {
+    const loaded = this.triks.get(trikId);
+    if (!loaded) {
+      throw new Error(`Trik "${trikId}" is not loaded`);
+    }
+
+    if (loaded.manifest.agent.mode !== 'tool') {
+      throw new Error(`Trik "${trikId}" is not a tool-mode trik`);
+    }
+
+    const toolDecl = loaded.manifest.tools?.[toolName];
+    if (!toolDecl || !toolDecl.inputSchema || !toolDecl.outputSchema || !toolDecl.outputTemplate) {
+      throw new Error(`Tool "${toolName}" not found in trik "${trikId}"`);
+    }
+
+    // Validate input against inputSchema
+    const inputValidation = validateData(toolDecl.inputSchema, input);
+    if (!inputValidation.valid) {
+      throw new Error(
+        `Invalid input for ${trikId}.${toolName}: ${inputValidation.errors?.join(', ')}`,
+      );
+    }
+
+    // Execute the tool
+    if (!loaded.agent.executeTool) {
+      throw new Error(`Trik "${trikId}" does not implement executeTool()`);
+    }
+
+    const context = this.buildTrikContext(`tool:${trikId}:${toolName}`, loaded);
+    const result: ToolExecutionResult = await loaded.agent.executeTool(toolName, input, context);
+
+    // Validate output against outputSchema
+    const outputValidation = validateData(toolDecl.outputSchema, result.output);
+    if (!outputValidation.valid) {
+      // Never return raw output on validation failure — sanitized error only
+      throw new Error(
+        `Tool "${toolName}" returned invalid output: ${outputValidation.errors?.join(', ')}`,
+      );
+    }
+
+    // Strip to declared outputSchema properties only
+    const declaredProps = Object.keys(
+      (toolDecl.outputSchema as Record<string, unknown>).properties ?? {}
+    );
+    const stripped: Record<string, unknown> = {};
+    for (const key of declaredProps) {
+      if (key in result.output) stripped[key] = result.output[key];
+    }
+
+    // Fill outputTemplate
+    return toolDecl.outputTemplate.replace(/\{\{(\w+)\}\}/g, (_match, field: string) => {
+      const value = stripped[field];
+      if (value === undefined || value === null) return `{{${field}}}`;
+      return String(value);
+    });
+  }
+
+  // ==========================================================================
+  // Internal Routing
+  // ==========================================================================
+
+  /**
+   * Route a message to the active trik agent.
+   */
+  private async routeToTrik(message: string, sessionId: string): Promise<RouteToTrik | RouteTransferBack> {
+    const handoff = this.activeHandoff!;
+    const loaded = this.triks.get(handoff.trikId)!;
+
+    // Build trik context
+    const trikContext = this.buildTrikContext(handoff.sessionId, loaded);
+
+    // Increment turn count
+    handoff.turnCount++;
+
+    // Check max turns safety net
+    if (handoff.turnCount > this.maxTurnsPerHandoff) {
+      return this.autoTransferBack(
+        `Maximum turns (${this.maxTurnsPerHandoff}) exceeded. Automatically transferring back.`
+      );
+    }
+
+    // Call the trik agent
+    let response: TrikResponse;
+    try {
+      response = await loaded.agent.processMessage!(message, trikContext);
+    } catch (error) {
+      // Trik threw an error — transfer back with error summary
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      return this.autoTransferBack(`Trik "${loaded.manifest.name}" encountered an error: ${errorMsg}`);
+    }
+
+    // Process tool calls into log entries
+    if (response.toolCalls) {
+      this.processToolCalls(handoff.sessionId, loaded.manifest, response.toolCalls);
+    }
+
+    // Check if trik wants to transfer back
+    if (response.transferBack) {
+      // Log handoff end
+      this.sessionStorage.appendLog(handoff.sessionId, {
+        timestamp: Date.now(),
+        type: 'handoff_end',
+        summary: `Transferred back from ${loaded.manifest.name}`,
+      });
+
+      const summary = this.buildSessionSummary(handoff.sessionId, loaded.manifest);
+      const handoffSessionId = handoff.sessionId;
+      const trikId = handoff.trikId;
+
+      // Clear active handoff
+      this.activeHandoff = null;
+
+      return {
+        target: 'transfer_back',
+        trikId,
+        message: response.message,
+        summary,
+        sessionId: handoffSessionId,
+      };
+    }
+
+    // Trik responded normally — stay in handoff
+    return {
+      target: 'trik',
+      trikId: handoff.trikId,
+      response,
+      sessionId: handoff.sessionId,
+    };
+  }
+
+  /**
+   * Force transfer-back via /back command.
+   */
+  private forceTransferBack(): RouteForceBack {
+    const handoff = this.activeHandoff!;
+    const loaded = this.triks.get(handoff.trikId)!;
+
+    // Log handoff end
+    this.sessionStorage.appendLog(handoff.sessionId, {
+      timestamp: Date.now(),
+      type: 'handoff_end',
+      summary: `Force transfer-back via /back`,
+    });
+
+    const summary = this.buildSessionSummary(handoff.sessionId, loaded.manifest);
+    const result: RouteForceBack = {
+      target: 'force_back',
+      trikId: handoff.trikId,
+      message: '',
+      summary,
+      sessionId: handoff.sessionId,
+    };
+
+    // Clear active handoff
+    this.activeHandoff = null;
+
+    return result;
+  }
+
+  /**
+   * Auto transfer-back due to max turns or error.
+   */
+  private autoTransferBack(reason: string): RouteTransferBack {
+    const handoff = this.activeHandoff!;
+    const loaded = this.triks.get(handoff.trikId)!;
+
+    // Log handoff end with reason
+    this.sessionStorage.appendLog(handoff.sessionId, {
+      timestamp: Date.now(),
+      type: 'handoff_end',
+      summary: reason,
+    });
+
+    const summary = this.buildSessionSummary(handoff.sessionId, loaded.manifest);
+    const result: RouteTransferBack = {
+      target: 'transfer_back',
+      trikId: handoff.trikId,
+      message: reason,
+      summary,
+      sessionId: handoff.sessionId,
+    };
+
+    // Clear active handoff
+    this.activeHandoff = null;
+
+    return result;
+  }
+
+  // ==========================================================================
+  // Conversation Log
+  // ==========================================================================
+
+  /**
+   * Process tool calls from a trik response into log entries.
+   * Matches tool calls against manifest logTemplate/logSchema definitions.
+   */
+  private processToolCalls(
+    sessionId: string,
+    manifest: TrikManifest,
+    toolCalls: ToolCallRecord[]
+  ): void {
+    for (const call of toolCalls) {
+      const toolDecl = manifest.tools?.[call.tool];
+      const summary = this.buildToolLogSummary(call, toolDecl);
+
+      this.sessionStorage.appendLog(sessionId, {
+        timestamp: Date.now(),
+        type: 'tool_execution',
+        summary,
+      });
+    }
+  }
+
+  /**
+   * Build a log summary string for a single tool call.
+   * Uses logTemplate if available, otherwise falls back to generic format.
+   */
+  private buildToolLogSummary(call: ToolCallRecord, toolDecl?: ToolDeclaration): string {
+    if (!toolDecl?.logTemplate) {
+      return `Called ${call.tool}`;
+    }
+
+    const template = toolDecl.logTemplate;
+
+    // Fill placeholders with output data
+    return template.replace(/\{\{(\w+)\}\}/g, (_match, field: string) => {
+      const value = call.output[field];
+      if (value === undefined || value === null) {
+        return `{{${field}}}`;
+      }
+      return String(value);
+    });
+  }
+
+  /**
+   * Build a summary of a handoff session from its log entries.
+   */
+  private buildSessionSummary(sessionId: string, manifest: TrikManifest): string {
+    const session = this.sessionStorage.getSession(sessionId);
+    if (!session || session.log.length === 0) {
+      return `Handoff to ${manifest.name} (no activity logged)`;
+    }
+
+    const toolEntries = session.log.filter((e) => e.type === 'tool_execution');
+    if (toolEntries.length === 0) {
+      return `Handoff to ${manifest.name} (conversation only, no tools used)`;
+    }
+
+    const lines = toolEntries.map((e) => `- ${e.summary}`);
+    return lines.join('\n');
+  }
+
+  // ==========================================================================
+  // Context Building
+  // ==========================================================================
+
+  /**
+   * Build the TrikContext passed to a trik agent on each message.
+   */
+  private buildTrikContext(sessionId: string, loaded: LoadedTrik): TrikContext {
+    const configContext = this.configStore.getForTrik(loaded.manifest.id);
+    const storageContext = this.storageProvider.forTrik(
+      loaded.manifest.id,
+      loaded.manifest.capabilities?.storage
+    );
+
+    return {
+      sessionId,
+      config: configContext,
+      storage: storageContext,
+    };
+  }
+
+  // ==========================================================================
+  // Trik Loading
+  // ==========================================================================
+
   async loadTrik(trikPath: string): Promise<TrikManifest> {
     const manifestPath = join(trikPath, 'manifest.json');
     const manifestContent = await readFile(manifestPath, 'utf-8');
@@ -205,30 +658,70 @@ export class TrikGateway {
 
     const runtime: TrikRuntime = manifest.entry.runtime ?? 'node';
 
-    if (runtime === 'python') {
-      // Python triks are executed via the Python worker
-      // We don't load the graph here, just register the manifest
-      this.triks.set(manifest.id, { manifest, graph: null, path: trikPath, runtime });
+    const isToolMode = manifest.agent.mode === 'tool';
 
-      // Ensure Python worker is initialized
+    if (runtime === 'python') {
+      // Python triks use the worker protocol — create a proxy TrikAgent
       await this.ensurePythonWorker();
+      const agent = this.createPythonAgentProxy(manifest);
+      this.triks.set(manifest.id, { manifest, agent, path: trikPath, runtime });
     } else {
-      // Node.js triks are loaded and executed in-process
+      // Node triks — dynamic import and extract TrikAgent
       const modulePath = join(trikPath, manifest.entry.module);
       const moduleUrl = pathToFileURL(modulePath).href;
-      const module = await import(moduleUrl);
-      const graph = module[manifest.entry.export] as TrikGraph;
+      const mod = await import(moduleUrl);
 
-      if (!graph || typeof graph.invoke !== 'function') {
-        throw new Error(
-          `Invalid graph at ${modulePath}: export "${manifest.entry.export}" must have an invoke function`
-        );
+      const exportName = manifest.entry.export;
+      const agent = mod[exportName] ?? mod.default;
+
+      if (isToolMode) {
+        // Tool-mode triks must implement executeTool()
+        if (!agent || typeof agent.executeTool !== 'function') {
+          throw new Error(
+            `Trik "${manifest.id}" module does not export a valid tool-mode TrikAgent ` +
+            `(expected export "${exportName}" with an executeTool method)`
+          );
+        }
+
+        // Check for duplicate tool names across loaded tool-mode triks
+        if (manifest.tools) {
+          for (const toolName of Object.keys(manifest.tools)) {
+            for (const [existingId, existingTrik] of this.triks) {
+              if (existingTrik.manifest.agent.mode !== 'tool') continue;
+              if (existingTrik.manifest.tools?.[toolName]) {
+                throw new Error(
+                  `Duplicate tool name "${toolName}": declared in both "${existingId}" and "${manifest.id}"`
+                );
+              }
+            }
+          }
+        }
+      } else {
+        // Conversational triks must implement processMessage()
+        if (!agent || typeof agent.processMessage !== 'function') {
+          throw new Error(
+            `Trik "${manifest.id}" module does not export a valid TrikAgent ` +
+            `(expected export "${exportName}" with a processMessage method)`
+          );
+        }
       }
 
-      this.triks.set(manifest.id, { manifest, graph, path: trikPath, runtime });
+      this.triks.set(manifest.id, { manifest, agent: agent as TrikAgent, path: trikPath, runtime });
     }
 
     return manifest;
+  }
+
+  /**
+   * Create a proxy TrikAgent for Python triks that delegates to the worker protocol.
+   */
+  private createPythonAgentProxy(manifest: TrikManifest): TrikAgent {
+    return {
+      processMessage: async (_message: string, _context: TrikContext): Promise<TrikResponse> => {
+        // Python worker integration deferred — types prepared now
+        throw new Error(`Python trik "${manifest.id}" execution not yet implemented`);
+      },
+    };
   }
 
   /**
@@ -257,13 +750,8 @@ export class TrikGateway {
   /**
    * Load all triks from a directory.
    * Supports scoped directory structure: directory/@scope/trik-name/
-   *
-   * @param directory - Path to the directory containing triks.
-   *                   Use '~' prefix for home directory (e.g., '~/.trikhub/triks')
-   * @returns Array of successfully loaded manifests
    */
   async loadTriksFromDirectory(directory: string): Promise<TrikManifest[]> {
-    // Resolve ~ to home directory
     const resolvedDir = directory.startsWith('~')
       ? join(homedir(), directory.slice(1))
       : resolve(directory);
@@ -279,9 +767,7 @@ export class TrikGateway {
 
         const entryPath = join(resolvedDir, entry.name);
 
-        // Check if this is a scoped directory (starts with @)
         if (entry.name.startsWith('@')) {
-          // Scoped directory: @scope/trik-name structure
           const scopedEntries = await readdir(entryPath, { withFileTypes: true });
 
           for (const scopedEntry of scopedEntries) {
@@ -297,7 +783,6 @@ export class TrikGateway {
                 manifests.push(manifest);
               }
             } catch (error) {
-              // Trik failed to load, record error but continue
               errors.push({
                 path: trikPath,
                 error: error instanceof Error ? error.message : 'Unknown error',
@@ -305,7 +790,6 @@ export class TrikGateway {
             }
           }
         } else {
-          // Non-scoped directory: direct trik-name structure
           const trikPath = entryPath;
           const manifestPath = join(trikPath, 'manifest.json');
 
@@ -316,7 +800,6 @@ export class TrikGateway {
               manifests.push(manifest);
             }
           } catch (error) {
-            // Trik failed to load, record error but continue
             errors.push({
               path: trikPath,
               error: error instanceof Error ? error.message : 'Unknown error',
@@ -325,8 +808,6 @@ export class TrikGateway {
         }
       }
     } catch (error) {
-      // Directory doesn't exist or isn't readable - not necessarily an error
-      // (e.g., user hasn't installed any triks yet)
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         throw new Error(
           `Failed to read triks directory "${resolvedDir}": ${
@@ -336,7 +817,6 @@ export class TrikGateway {
       }
     }
 
-    // Log errors for debugging (triks that failed to load)
     if (errors.length > 0) {
       console.warn(`[TrikGateway] Failed to load ${errors.length} trik(s):`);
       for (const { path, error } of errors) {
@@ -349,7 +829,6 @@ export class TrikGateway {
 
   /**
    * Load triks from the configured triksDirectory (if set).
-   * This is a convenience method for loading the default TrikHub directory.
    */
   async loadInstalledTriks(): Promise<TrikManifest[]> {
     if (!this.config.triksDirectory) {
@@ -360,29 +839,16 @@ export class TrikGateway {
 
   /**
    * Load triks from a config file (.trikhub/config.json).
-   * Triks are resolved from node_modules based on the package names in config.
-   *
-   * Config file format:
-   * ```json
-   * {
-   *   "triks": ["@molefas/article-search", "some-other-trik"]
-   * }
-   * ```
-   *
-   * @param options - Configuration options
-   * @returns Array of successfully loaded manifests
    */
   async loadTriksFromConfig(options: LoadFromConfigOptions = {}): Promise<TrikManifest[]> {
     const configPath = options.configPath ?? join(process.cwd(), '.trikhub', 'config.json');
     const baseDir = options.baseDir ?? dirname(configPath);
 
-    // Check if config file exists
     if (!existsSync(configPath)) {
       console.log(`[TrikGateway] No config file found at ${configPath}`);
       return [];
     }
 
-    // Read and parse config
     let config: TrikHubConfig;
     try {
       const configContent = await readFile(configPath, 'utf-8');
@@ -403,17 +869,11 @@ export class TrikGateway {
     const manifests: TrikManifest[] = [];
     const errors: Array<{ trik: string; error: string }> = [];
 
-    // Create a require function relative to the base directory
-    // This allows us to resolve packages from the project's node_modules
     const require = createRequire(join(baseDir, 'package.json'));
-
-    // Get the .trikhub/triks directory for cross-language fallback
     const triksDir = join(dirname(configPath), 'triks');
 
     for (const trikName of config.triks) {
       try {
-        // Resolve the package path from node_modules
-        // First, try to find the manifest.json in the package
         let trikPath: string;
         let foundInNodeModules = false;
 
@@ -423,14 +883,11 @@ export class TrikGateway {
           foundInNodeModules = true;
         } catch {
           try {
-            // Fall back to resolving the package main and getting its directory
             const packageMain = require.resolve(trikName);
             trikPath = dirname(packageMain);
 
-            // Check if manifest.json exists in the package root
             const manifestPath = join(trikPath, 'manifest.json');
             if (!existsSync(manifestPath)) {
-              // Try going up one level (for packages with dist/ structure)
               const parentManifest = join(dirname(trikPath), 'manifest.json');
               if (existsSync(parentManifest)) {
                 trikPath = dirname(trikPath);
@@ -440,23 +897,18 @@ export class TrikGateway {
             }
             foundInNodeModules = true;
           } catch {
-            // Not found in node_modules - will try .trikhub/triks/ below
             foundInNodeModules = false;
             trikPath = '';
           }
         }
 
-        // If not found in node_modules, try .trikhub/triks/ (cross-language triks)
         if (!foundInNodeModules) {
           const crossLangPath = join(triksDir, ...trikName.split('/'));
 
-          // Check for manifest.json directly in the trik directory
           const directManifest = join(crossLangPath, 'manifest.json');
           if (existsSync(directManifest)) {
             trikPath = crossLangPath;
           } else {
-            // Check for Python package structure: package_dir/package_name/manifest.json
-            // Python packages often have their code in a subdirectory named after the package
             const entries = existsSync(crossLangPath)
               ? await readdir(crossLangPath, { withFileTypes: true })
               : [];
@@ -491,7 +943,6 @@ export class TrikGateway {
       }
     }
 
-    // Log errors for debugging
     if (errors.length > 0) {
       console.warn(`[TrikGateway] Failed to load ${errors.length} trik(s) from config:`);
       for (const { trik, error } of errors) {
@@ -505,6 +956,10 @@ export class TrikGateway {
 
     return manifests;
   }
+
+  // ==========================================================================
+  // Trik Queries
+  // ==========================================================================
 
   getManifest(trikId: string): TrikManifest | undefined {
     return this.triks.get(trikId)?.manifest;
@@ -520,424 +975,8 @@ export class TrikGateway {
 
   /**
    * Unload a trik from memory.
-   * Call this after uninstalling a trik to remove it from the available tools.
    */
   unloadTrik(trikId: string): boolean {
     return this.triks.delete(trikId);
-  }
-
-  getAvailableTriks(): TrikInfo[] {
-    return Array.from(this.triks.values()).map(({ manifest }) => ({
-      id: manifest.id,
-      name: manifest.name,
-      description: manifest.description,
-      sessionEnabled: manifest.capabilities?.session?.enabled ?? false,
-      tools: Object.entries(manifest.actions).map(([actionName, action]) =>
-        this.actionToToolDefinition(manifest.id, actionName, action)
-      ),
-    }));
-  }
-
-  getToolDefinitions(_options: GetToolDefinitionsOptions = {}): ToolDefinition[] {
-    const tools: ToolDefinition[] = [];
-
-    for (const { manifest } of this.triks.values()) {
-      for (const [actionName, action] of Object.entries(manifest.actions)) {
-        const tool = this.actionToToolDefinition(manifest.id, actionName, action);
-        tools.push(tool);
-      }
-    }
-
-    return tools;
-  }
-
-  private actionToToolDefinition(
-    trikId: string,
-    actionName: string,
-    action: ActionDefinition
-  ): ToolDefinition {
-    return {
-      name: `${trikId}:${actionName}`,
-      description: action.description || `Execute ${actionName} on ${trikId}`,
-      inputSchema: action.inputSchema,
-      responseMode: action.responseMode,
-    };
-  }
-
-  async execute<TAgent = unknown>(
-    trikId: string,
-    actionName: string,
-    input: unknown,
-    options?: ExecuteTrikOptions
-  ): Promise<GatewayResultWithSession<TAgent>> {
-    const loaded = this.triks.get(trikId);
-    if (!loaded) {
-      return {
-        success: false,
-        code: 'TRIK_NOT_FOUND',
-        error: `Trik "${trikId}" is not loaded. Call loadTrik() first.`,
-      };
-    }
-
-    const { manifest, graph, path: trikPath, runtime } = loaded;
-
-    const action = manifest.actions[actionName];
-    if (!action) {
-      return {
-        success: false,
-        code: 'INVALID_INPUT',
-        error: `Action "${actionName}" not found. Available: ${Object.keys(manifest.actions).join(', ')}`,
-      };
-    }
-
-    const inputValidation = this.validator.validate(
-      `${trikId}:${actionName}:input`,
-      action.inputSchema,
-      input
-    );
-    if (!inputValidation.valid) {
-      return {
-        success: false,
-        code: 'INVALID_INPUT',
-        error: `Invalid input: ${inputValidation.errors?.join(', ')}`,
-      };
-    }
-
-    let session: TrikSession | null = null;
-    if (manifest.capabilities?.session?.enabled) {
-      if (options?.sessionId) {
-        session = await this.sessionStorage.get(options.sessionId);
-      }
-      if (!session) {
-        session = await this.sessionStorage.create(trikId, manifest.capabilities.session);
-      }
-    }
-
-    try {
-      // Get config context for this trik
-      const configContext = this.configStore.getForTrik(trikId);
-
-      // Get storage context if storage is enabled
-      const storageContext = manifest.capabilities?.storage?.enabled
-        ? this.storageProvider.forTrik(trikId, manifest.capabilities.storage)
-        : undefined;
-
-      let result: TrikOutput;
-
-      if (runtime === 'python') {
-        // Execute via Python worker
-        const worker = await this.ensurePythonWorker();
-        const invokeResult = await worker.invoke(trikPath, actionName, input, {
-          session: session
-            ? {
-                sessionId: session.sessionId,
-                history: session.history,
-              }
-            : undefined,
-          config: configContext,
-          storage: storageContext,
-        });
-
-        // Convert InvokeResult to TrikOutput
-        result = {
-          responseMode: invokeResult.responseMode ?? action.responseMode,
-          agentData: invokeResult.agentData,
-          userContent: invokeResult.userContent,
-          endSession: invokeResult.endSession,
-          needsClarification: invokeResult.needsClarification,
-          clarificationQuestions: invokeResult.clarificationQuestions,
-        };
-      } else {
-        // Execute Node.js trik in-process
-        if (!graph) {
-          return {
-            success: false,
-            code: 'EXECUTION_ERROR',
-            error: 'Graph not loaded for Node.js trik',
-          };
-        }
-
-        const trikInput: TrikInput = {
-          action: actionName,
-          input,
-          session: session
-            ? {
-                sessionId: session.sessionId,
-                history: session.history,
-              }
-            : undefined,
-          config: configContext,
-          storage: storageContext,
-        };
-
-        result = await this.executeWithTimeout(
-          graph,
-          trikInput,
-          manifest.limits.maxExecutionTimeMs
-        );
-      }
-
-      if (result.needsClarification && result.clarificationQuestions?.length) {
-        if (this.config.onClarificationNeeded) {
-          await this.config.onClarificationNeeded(trikId, result.clarificationQuestions);
-        }
-
-        return {
-          success: false,
-          code: 'CLARIFICATION_NEEDED',
-          sessionId: session?.sessionId ?? '',
-          questions: result.clarificationQuestions,
-        };
-      }
-
-      return this.processResult<TAgent>(trikId, actionName, action, session, result);
-    } catch (error) {
-      if (error instanceof Error && error.message === 'TIMEOUT') {
-        return {
-          success: false,
-          code: 'TIMEOUT',
-          error: `Execution timed out after ${manifest.limits.maxExecutionTimeMs}ms`,
-        };
-      }
-
-      return {
-        success: false,
-        code: 'EXECUTION_ERROR',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      };
-    }
-  }
-
-  private async executeWithTimeout(
-    graph: TrikGraph,
-    input: TrikInput,
-    timeoutMs: number
-  ): Promise<TrikOutput> {
-    return Promise.race([
-      graph.invoke(input),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)),
-    ]);
-  }
-
-  private async processResult<TAgent>(
-    trikId: string,
-    actionName: string,
-    action: ActionDefinition,
-    session: TrikSession | null,
-    result: TrikOutput
-  ): Promise<GatewayResultWithSession<TAgent>> {
-    const effectiveMode: ResponseMode = result.responseMode || action.responseMode;
-
-    if (session) {
-      if (result.endSession) {
-        await this.sessionStorage.delete(session.sessionId);
-        session = null;
-      } else {
-        await this.sessionStorage.addHistory(session.sessionId, {
-          action: actionName,
-          input: {},
-          agentData: result.agentData,
-          userContent: result.userContent,
-        });
-      }
-    }
-
-    if (effectiveMode === 'passthrough') {
-      if (result.userContent === undefined) {
-        return { success: false, code: 'INVALID_OUTPUT', error: 'Passthrough mode requires userContent' };
-      }
-
-      if (action.userContentSchema) {
-        const userValidation = this.validator.validate(
-          `${trikId}:${actionName}:userContent`,
-          action.userContentSchema,
-          result.userContent
-        );
-
-        if (!userValidation.valid) {
-          return {
-            success: false,
-            code: 'INVALID_OUTPUT',
-            error: `Invalid userContent: ${userValidation.errors?.join(', ')}`,
-          };
-        }
-      }
-
-      const userContent = result.userContent;
-      const contentRef = this.storePassthroughContent(trikId, actionName, userContent);
-
-      const gatewayResult: GatewaySuccessPassthrough = {
-        success: true,
-        responseMode: 'passthrough',
-        userContentRef: contentRef,
-        contentType: userContent.contentType,
-        metadata: userContent.metadata,
-      };
-
-      return this.addSessionId(gatewayResult, session);
-    }
-
-    if (result.agentData === undefined) {
-      return { success: false, code: 'INVALID_OUTPUT', error: 'Template mode requires agentData' };
-    }
-
-    if (action.agentDataSchema) {
-      const agentValidation = this.validator.validate(
-        `${trikId}:${actionName}:agentData`,
-        action.agentDataSchema,
-        result.agentData
-      );
-
-      if (!agentValidation.valid) {
-        return {
-          success: false,
-          code: 'INVALID_OUTPUT',
-          error: `Invalid agentData: ${agentValidation.errors?.join(', ')}`,
-        };
-      }
-    }
-
-    // Get template text if available
-    const agentData = result.agentData as Record<string, unknown>;
-    const templateId = agentData.template as string | undefined;
-    const templateText = templateId && action.responseTemplates?.[templateId]?.text;
-
-    const gatewayResult: GatewaySuccessTemplate<TAgent> = {
-      success: true,
-      responseMode: 'template',
-      agentData: result.agentData as TAgent,
-      templateText,
-    };
-
-    return this.addSessionId(gatewayResult, session);
-  }
-
-  /**
-   * Add sessionId to result if session exists
-   */
-  private addSessionId<T extends GatewayResult>(
-    result: T,
-    session: TrikSession | null
-  ): T & { sessionId?: string } {
-    if (session) {
-      return { ...result, sessionId: session.sessionId };
-    }
-    return result;
-  }
-
-  // ============================================
-  // Passthrough Content Management
-  // ============================================
-
-  /**
-   * Store passthrough content and return a reference
-   */
-  private storePassthroughContent(
-    trikId: string,
-    actionName: string,
-    content: PassthroughContent
-  ): string {
-    this.cleanupExpiredContentReferences();
-
-    const ref = randomUUID();
-    const now = Date.now();
-
-    this.contentReferences.set(ref, {
-      ref,
-      trikId,
-      actionName,
-      content,
-      createdAt: now,
-      expiresAt: now + TrikGateway.CONTENT_REF_TTL_MS,
-    });
-
-    return ref;
-  }
-
-  /**
-   * Clean up expired content references
-   */
-  private cleanupExpiredContentReferences(): void {
-    const now = Date.now();
-    for (const [ref, contentRef] of this.contentReferences) {
-      if (contentRef.expiresAt < now) {
-        this.contentReferences.delete(ref);
-      }
-    }
-  }
-
-  /**
-   * Deliver passthrough content to the user.
-   * One-time delivery - the reference is deleted after delivery.
-   */
-  deliverContent(ref: string): {
-    content: PassthroughContent;
-    receipt: PassthroughDeliveryReceipt;
-  } | null {
-    const contentRef = this.contentReferences.get(ref);
-
-    if (!contentRef) {
-      return null;
-    }
-
-    if (contentRef.expiresAt < Date.now()) {
-      this.contentReferences.delete(ref);
-      return null;
-    }
-
-    // One-time delivery
-    this.contentReferences.delete(ref);
-
-    return {
-      content: contentRef.content,
-      receipt: {
-        delivered: true,
-        contentType: contentRef.content.contentType,
-        metadata: contentRef.content.metadata,
-      },
-    };
-  }
-
-  hasContentRef(ref: string): boolean {
-    const contentRef = this.contentReferences.get(ref);
-    if (!contentRef) return false;
-    if (contentRef.expiresAt < Date.now()) {
-      this.contentReferences.delete(ref);
-      return false;
-    }
-    return true;
-  }
-
-  getContentRefInfo(ref: string): { contentType: string; metadata?: Record<string, unknown> } | null {
-    const contentRef = this.contentReferences.get(ref);
-    if (!contentRef || contentRef.expiresAt < Date.now()) {
-      return null;
-    }
-    return {
-      contentType: contentRef.content.contentType,
-      metadata: contentRef.content.metadata,
-    };
-  }
-
-  resolveTemplate(template: ResponseTemplate, agentData: Record<string, unknown>): string {
-    let text = template.text;
-
-    const placeholderRegex = /\{\{(\w+)\}\}/g;
-    text = text.replace(placeholderRegex, (_, fieldName) => {
-      const value = agentData[fieldName];
-      return value !== undefined ? String(value) : `{{${fieldName}}}`;
-    });
-
-    return text;
-  }
-
-  getActionTemplates(trikId: string, actionName: string): Record<string, ResponseTemplate> | undefined {
-    const manifest = this.triks.get(trikId)?.manifest;
-    if (!manifest) return undefined;
-
-    const action = manifest.actions[actionName];
-    if (!action) return undefined;
-
-    return action.responseTemplates;
   }
 }

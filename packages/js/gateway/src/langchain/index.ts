@@ -1,12 +1,9 @@
 export {
-  createLangChainTools,
-  parseToolName,
-  getToolNameMap,
-  loadLangChainTriks,
-  type LangChainAdapterOptions,
-  type LoadLangChainTriksOptions,
-  type LangChainTriksResult,
-  type PassthroughContent,
+  enhance,
+  getHandoffToolsForAgent,
+  getExposedToolsForAgent,
+  type InvokableAgent,
+  type EnhanceOptions,
+  type EnhancedAgent,
+  type EnhancedResponse,
 } from './adapter.js';
-
-export { jsonSchemaToZod } from './schema-converter.js';

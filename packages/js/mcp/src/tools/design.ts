@@ -1,93 +1,235 @@
 /**
- * Action and Schema Design Tools
+ * Design tools — v2 implementation.
  *
- * Helps design trik actions with proper schemas,
- * enforcing security rules for agentData.
+ * design_tool: Design an internal tool declaration with logTemplate + logSchema.
+ * design_log_schema: Design a logSchema for log template placeholders.
  */
 
-import type {
-  ActionDesignInput,
-  ActionDesignResult,
-  SchemaDesignInput,
-  SchemaDesignResult,
-  FieldDefinition,
-  ResponseMode,
-} from './types.js';
+import type { JSONSchema } from '@trikhub/manifest';
+import type { DesignToolResult, DesignLogSchemaResult } from './types.js';
+
+// ============================================================================
+// Constrained type helpers
+// ============================================================================
+
+/** Allowed safe formats for string fields in logSchema */
+const SAFE_FORMATS = ['id', 'date', 'date-time', 'uuid', 'email', 'url'];
 
 /**
- * Allowed string formats for agentData (safe because constrained)
+ * Check if a JSONSchema type is constrained (safe for log context).
  */
-const ALLOWED_AGENT_STRING_FORMATS = ['id', 'date', 'date-time', 'uuid', 'email', 'url'];
+function isConstrained(schema: JSONSchema): boolean {
+  const type = schema.type;
 
-/**
- * Convert a field definition to JSON Schema
- */
-function fieldToJsonSchema(field: FieldDefinition, forAgentData: boolean): Record<string, unknown> {
-  const schema: Record<string, unknown> = {};
-
-  switch (field.type) {
-    case 'string':
-      schema.type = 'string';
-      if (field.description) schema.description = field.description;
-
-      // For agentData, strings MUST be constrained
-      if (forAgentData) {
-        if (field.values && field.values.length > 0) {
-          schema.enum = field.values;
-        } else {
-          // Default to pattern constraint for safety
-          schema.pattern = '^.{0,500}$';
-          schema.maxLength = 500;
-        }
-      }
-      break;
-
-    case 'number':
-    case 'integer':
-      schema.type = field.type;
-      if (field.description) schema.description = field.description;
-      break;
-
-    case 'boolean':
-      schema.type = 'boolean';
-      if (field.description) schema.description = field.description;
-      break;
-
-    case 'array':
-      schema.type = 'array';
-      schema.items = { type: 'string' }; // Default to string array
-      if (field.description) schema.description = field.description;
-      break;
-
-    case 'object':
-      schema.type = 'object';
-      if (field.description) schema.description = field.description;
-      break;
-
-    default:
-      // Treat unknown types as strings
-      schema.type = 'string';
-      if (forAgentData) {
-        schema.pattern = '^.{0,500}$';
-      }
+  // Non-string primitives are always safe
+  if (type === 'integer' || type === 'number' || type === 'boolean') {
+    return true;
   }
 
-  return schema;
+  // Enums are always safe
+  if (schema.enum) {
+    return true;
+  }
+
+  // Strings must have constraints
+  if (type === 'string') {
+    return !!(schema.enum || schema.format || schema.pattern || schema.maxLength);
+  }
+
+  return false;
 }
 
 /**
- * Build a JSON Schema from field definitions
+ * Build a JSONSchema for a log field definition.
  */
-function buildSchema(
-  fields: FieldDefinition[],
-  schemaType: 'agentData' | 'userContent' | 'input'
-): Record<string, unknown> {
-  const forAgentData = schemaType === 'agentData';
-  const properties: Record<string, unknown> = {};
+function buildLogFieldSchema(field: {
+  name: string;
+  type: string;
+  maxLength?: number;
+  values?: string[];
+  description?: string;
+}): { schema: JSONSchema; warning?: string } {
+  const schema: JSONSchema = { type: field.type };
+
+  if (field.description) {
+    schema.description = field.description;
+  }
+
+  // Handle enums
+  if (field.values && field.values.length > 0) {
+    schema.enum = field.values;
+    return { schema };
+  }
+
+  // Auto-constrain strings
+  if (field.type === 'string') {
+    if (field.maxLength) {
+      schema.maxLength = field.maxLength;
+    } else {
+      // Auto-add a sensible default maxLength
+      schema.maxLength = 200;
+      return {
+        schema,
+        warning: `Field "${field.name}": auto-constrained with maxLength=200. Consider adding enum, pattern, or a specific maxLength.`,
+      };
+    }
+  }
+
+  return { schema };
+}
+
+// ============================================================================
+// design_tool
+// ============================================================================
+
+export function designTool(
+  toolName: string,
+  purpose: string,
+  logFields?: Array<{
+    name: string;
+    type: string;
+    maxLength?: number;
+    values?: string[];
+    description?: string;
+  }>,
+  inputFields?: Array<{
+    name: string;
+    type: string;
+    required?: boolean;
+    maxLength?: number;
+    values?: string[];
+    description?: string;
+  }>,
+  outputFields?: Array<{
+    name: string;
+    type: string;
+    required?: boolean;
+    maxLength?: number;
+    values?: string[];
+    description?: string;
+  }>,
+): DesignToolResult {
+  const warnings: string[] = [];
+  const suggestions: string[] = [];
+
+  // Build the tool declaration
+  const description = purpose.endsWith('.') ? purpose : `${purpose}.`;
+
+  let logTemplate: string | undefined;
+  let logSchema: Record<string, JSONSchema> | undefined;
+
+  if (logFields && logFields.length > 0) {
+    // Build logTemplate from field names
+    const placeholders = logFields.map((f) => `{{${f.name}}}`);
+
+    // Generate a readable template
+    const action = toolName.replace(/([A-Z])/g, ' $1').trim().toLowerCase();
+    logTemplate = `${action.charAt(0).toUpperCase() + action.slice(1)}: ${placeholders.join(', ')}`;
+
+    // Build logSchema
+    logSchema = {};
+    for (const field of logFields) {
+      const { schema, warning } = buildLogFieldSchema(field);
+      logSchema[field.name] = schema;
+      if (warning) {
+        warnings.push(warning);
+      }
+
+      // Validate constrained
+      if (!isConstrained(schema)) {
+        warnings.push(
+          `Field "${field.name}": unconstrained string in logSchema. Add enum, format, pattern, or maxLength.`,
+        );
+      }
+    }
+  } else {
+    suggestions.push(
+      'Consider adding logFields to generate a logTemplate. This provides structured logging in the main agent\'s context.',
+    );
+  }
+
+  // Build inputSchema / outputSchema for tool-mode triks
+  let inputSchema: JSONSchema | undefined;
+  let outputSchema: JSONSchema | undefined;
+
+  if (inputFields && inputFields.length > 0) {
+    inputSchema = buildObjectSchemaFromFields(inputFields);
+  }
+
+  let outputTemplate: string | undefined;
+
+  if (outputFields && outputFields.length > 0) {
+    const schema = buildObjectSchemaFromFields(outputFields);
+    // Validate output fields are agent-safe (stricter than logSchema — no maxLength-only strings)
+    for (const field of outputFields) {
+      if (field.type === 'string' && !field.values) {
+        if (!field.maxLength) {
+          warnings.push(
+            `Output field "${field.name}": unconstrained string is not agent-safe. Use enum (values), format, or pattern.`,
+          );
+        } else {
+          warnings.push(
+            `Output field "${field.name}": string with only maxLength is not agent-safe — use enum, format, or pattern. maxLength alone is only accepted in logSchema.`,
+          );
+        }
+      }
+    }
+    outputSchema = schema;
+
+    // Generate outputTemplate from field names
+    const action = toolName.replace(/([A-Z])/g, ' $1').trim().toLowerCase();
+    const placeholders = outputFields.map((f) => `{{${f.name}}}`);
+    outputTemplate = `${action.charAt(0).toUpperCase() + action.slice(1)}: ${placeholders.join(', ')}`;
+  }
+
+  if (inputFields && !outputFields) {
+    suggestions.push(
+      'Tool-mode triks need both inputSchema and outputSchema. Add outputFields to complete the tool definition.',
+    );
+  }
+
+  // Validate tool name
+  if (toolName.includes(' ') || toolName.includes('-')) {
+    warnings.push('Tool name should be camelCase (e.g., "searchArticles" not "search-articles").');
+  }
+
+  return {
+    toolDeclaration: {
+      description,
+      logTemplate,
+      logSchema,
+      inputSchema,
+      outputSchema,
+      outputTemplate,
+    },
+    warnings,
+    suggestions,
+  };
+}
+
+/**
+ * Build a JSON Schema object from a list of field definitions.
+ */
+function buildObjectSchemaFromFields(
+  fields: Array<{
+    name: string;
+    type: string;
+    required?: boolean;
+    maxLength?: number;
+    values?: string[];
+    description?: string;
+  }>,
+): JSONSchema {
+  const properties: Record<string, JSONSchema> = {};
   const required: string[] = [];
 
   for (const field of fields) {
-    properties[field.name] = fieldToJsonSchema(field, forAgentData);
+    const prop: JSONSchema = { type: field.type };
+    if (field.description) prop.description = field.description;
+    if (field.maxLength) prop.maxLength = field.maxLength;
+    if (field.values && field.values.length > 0) prop.enum = field.values;
+    properties[field.name] = prop;
+
     if (field.required !== false) {
       required.push(field.name);
     }
@@ -100,178 +242,44 @@ function buildSchema(
   };
 }
 
-/**
- * Check if a schema has security issues for agentData
- */
-function checkAgentDataSecurity(schema: Record<string, unknown>): string[] {
-  const notes: string[] = [];
+// ============================================================================
+// design_log_schema
+// ============================================================================
 
-  if (schema.properties && typeof schema.properties === 'object') {
-    for (const [name, propSchema] of Object.entries(schema.properties as Record<string, Record<string, unknown>>)) {
-      if (propSchema.type === 'string') {
-        const hasEnum = Array.isArray(propSchema.enum) && propSchema.enum.length > 0;
-        const hasConst = propSchema.const !== undefined;
-        const hasPattern = typeof propSchema.pattern === 'string';
-        const hasFormat = typeof propSchema.format === 'string' &&
-          ALLOWED_AGENT_STRING_FORMATS.includes(propSchema.format);
-
-        if (!hasEnum && !hasConst && !hasPattern && !hasFormat) {
-          notes.push(
-            `Field "${name}" is an unconstrained string. Added pattern constraint for security.`
-          );
-        }
-      }
-    }
-  }
-
-  return notes;
-}
-
-/**
- * Design a schema with security validation
- */
-export function designSchema(input: SchemaDesignInput): SchemaDesignResult {
-  const schema = buildSchema(input.fields, input.schemaType);
-  const securityNotes: string[] = [];
-  let valid = true;
-
-  // Check security for agentData schemas
-  if (input.schemaType === 'agentData') {
-    const issues = checkAgentDataSecurity(schema);
-    securityNotes.push(...issues);
-
-    // If there were unconstrained strings, they've been auto-fixed
-    if (issues.length > 0) {
-      securityNotes.push(
-        'Note: Pattern constraints were added automatically. Consider using enum for better type safety.'
-      );
-    }
-  }
-
-  return {
-    schema,
-    securityNotes,
-    valid,
-  };
-}
-
-/**
- * Design an action with proper schemas
- */
-export function designAction(input: ActionDesignInput): ActionDesignResult {
+export function designLogSchema(
+  fields: Array<{
+    name: string;
+    type: string;
+    maxLength?: number;
+    values?: string[];
+    description?: string;
+  }>,
+): DesignLogSchemaResult {
   const warnings: string[] = [];
-  const suggestions: string[] = [];
+  const logSchema: Record<string, JSONSchema> = {};
 
-  // Build input schema
-  const inputSchema = buildSchema(input.inputFields, 'input');
-
-  // Separate output fields into agentData and userContent
-  const agentDataFields = input.outputFields.filter((f) => !f.isUserContent);
-  const userContentFields = input.outputFields.filter((f) => f.isUserContent);
-
-  // Build the action definition
-  const actionDefinition: Record<string, unknown> = {
-    description: input.purpose,
-    responseMode: input.responseMode,
-    inputSchema,
-  };
-
-  if (input.responseMode === 'template') {
-    // Template mode requires agentDataSchema and responseTemplates
-    if (agentDataFields.length === 0) {
-      warnings.push('Template mode requires agentDataSchema fields');
-      // Add a default template field
-      agentDataFields.push({
-        name: 'template',
-        type: 'string',
-        values: ['success', 'error'],
-        required: true,
-      });
+  for (const field of fields) {
+    const { schema, warning } = buildLogFieldSchema(field);
+    logSchema[field.name] = schema;
+    if (warning) {
+      warnings.push(warning);
     }
 
-    // Ensure there's a template selector field
-    const hasTemplateField = agentDataFields.some(
-      (f) => f.name === 'template' && f.values && f.values.length > 0
-    );
-    if (!hasTemplateField) {
-      suggestions.push(
-        'Consider adding a "template" field with enum values to select which response template to use'
-      );
-    }
-
-    const agentDataSchema = buildSchema(agentDataFields, 'agentData');
-    actionDefinition.agentDataSchema = agentDataSchema;
-
-    // Check for security issues
-    const securityIssues = checkAgentDataSecurity(agentDataSchema);
-    warnings.push(...securityIssues);
-
-    // Generate response templates based on template field values
-    const templateField = agentDataFields.find((f) => f.name === 'template');
-    const templateValues = templateField?.values || ['success'];
-    const responseTemplates: Record<string, { text: string }> = {};
-
-    for (const value of templateValues) {
-      // Generate placeholder template text
-      const otherFields = agentDataFields
-        .filter((f) => f.name !== 'template')
-        .map((f) => `{{${f.name}}}`)
-        .join(' | ');
-
-      responseTemplates[value] = {
-        text: otherFields || `${input.actionName} completed with status: ${value}`,
-      };
-    }
-
-    actionDefinition.responseTemplates = responseTemplates;
-
-    if (userContentFields.length > 0) {
+    if (!isConstrained(schema)) {
       warnings.push(
-        'Template mode should not have userContent fields. Consider using passthrough mode or moving content to agentData.'
-      );
-    }
-  } else {
-    // Passthrough mode requires userContentSchema with PassthroughContent format
-    // PassthroughContent requires: contentType, content, optional metadata
-
-    // Always use the standard PassthroughContent schema
-    const userContentSchema = {
-      type: 'object',
-      properties: {
-        contentType: { type: 'string', description: 'Type of content (e.g., article, content, error)' },
-        content: { type: 'string', description: 'The actual text content delivered to user' },
-        metadata: { type: 'object', description: 'Optional structured metadata' },
-      },
-      required: ['contentType', 'content'],
-    };
-    actionDefinition.userContentSchema = userContentSchema;
-
-    // Add guidance for implementation
-    suggestions.push(
-      'Passthrough mode requires returning userContent with: { contentType: string, content: string, metadata?: object }'
-    );
-
-    if (userContentFields.length > 0) {
-      suggestions.push(
-        `Your output fields (${userContentFields.map((f) => f.name).join(', ')}) should be included in the 'content' string or 'metadata' object.`
-      );
-    }
-
-    if (agentDataFields.length > 0) {
-      suggestions.push(
-        'Passthrough mode delivers content directly to user. The agent only sees a receipt, not the agentData fields.'
+        `Field "${field.name}": unconstrained string — add enum, format (${SAFE_FORMATS.join(', ')}), pattern, or maxLength.`,
       );
     }
   }
 
-  // General suggestions
-  if (input.inputFields.length === 0) {
-    suggestions.push('Consider adding input fields to make the action more useful');
+  // Check for unsupported types
+  for (const field of fields) {
+    if (field.type === 'array' || field.type === 'object') {
+      warnings.push(
+        `Field "${field.name}": ${field.type} types are not supported in logSchema. Use primitive types (string, integer, number, boolean).`,
+      );
+    }
   }
 
-  return {
-    actionDefinition,
-    warnings,
-    suggestions,
-  };
+  return { logSchema, warnings };
 }

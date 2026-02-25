@@ -28,7 +28,7 @@ Options:
 Environment Variables:
   PORT                 Server port (default: 3000)
   HOST                 Server host (default: 0.0.0.0)
-  SKILLS_DIR           Directory containing skills (default: ./skills)
+  SKILLS_DIR           Directory containing local trik files (optional)
   CONFIG_PATH          Path to .trikhub/config.json for npm-based skills
   BASE_DIR             Base directory for resolving node_modules (default: dirname of CONFIG_PATH)
   AUTH_TOKEN           Bearer token for authentication (optional)
@@ -49,10 +49,7 @@ Examples:
 
 API Endpoints:
   GET  /api/v1/health      Health check
-  GET  /api/v1/tools       List available tools
   GET  /api/v1/triks       List installed triks
-  POST /api/v1/execute     Execute a skill action
-  GET  /api/v1/content/:ref  Retrieve passthrough content
   GET  /docs               Swagger UI documentation
 `);
 }

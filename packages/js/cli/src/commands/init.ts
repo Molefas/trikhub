@@ -13,7 +13,7 @@ import { input, select, confirm } from '@inquirer/prompts';
 import { TrikCategory } from '../types.js';
 import { loadDefaults, saveDefaults } from '../lib/storage.js';
 import { generateTypescriptProject } from '../templates/typescript.js';
-import { generatePythonProject } from '../templates/python.js';
+import type { InitConfig } from '../templates/typescript.js';
 
 type Language = 'ts' | 'py';
 
@@ -128,6 +128,59 @@ export async function initCommand(languageArg: string): Promise<void> {
       default: false,
     });
 
+    // v2 agent prompts
+    const agentMode = await select<'conversational' | 'tool'>({
+      message: 'Agent mode:',
+      choices: [
+        { value: 'conversational', name: 'Conversational (multi-turn ReAct agent)' },
+        { value: 'tool', name: 'Tool (export native tools to main agent)' },
+      ],
+      default: 'conversational',
+    });
+
+    // Handoff description only for conversational mode
+    let handoffDescription = '';
+    if (agentMode === 'conversational') {
+      handoffDescription = await input({
+        message: 'Handoff description (how should the main agent describe this trik?):',
+        validate: (value: string) => {
+          if (value.length < 10) return 'Description must be at least 10 characters';
+          if (value.length > 500) return 'Description must be at most 500 characters';
+          return true;
+        },
+      });
+    }
+
+    // Tool names for tool mode
+    let toolNames: string[] = [];
+    if (agentMode === 'tool') {
+      const toolNamesRaw = await input({
+        message: 'Tool names (comma-separated, camelCase, e.g. "getWeather, getForecast"):',
+        validate: (value: string) => {
+          const names = value.split(',').map((t) => t.trim()).filter(Boolean);
+          if (names.length === 0) return 'At least one tool name is required';
+          for (const n of names) {
+            if (!/^[a-z][a-zA-Z0-9]*$/.test(n)) {
+              return `Invalid tool name "${n}": must be camelCase starting with a lowercase letter`;
+            }
+          }
+          return true;
+        },
+      });
+      toolNames = toolNamesRaw.split(',').map((t) => t.trim()).filter(Boolean);
+    }
+
+    const domainTagsRaw = await input({
+      message: 'Domain tags (comma-separated, e.g. "content curation, article writing"):',
+      validate: (value: string) => {
+        const tags = value.split(',').map((t) => t.trim()).filter(Boolean);
+        if (tags.length === 0) return 'At least one domain tag is required';
+        return true;
+      },
+    });
+
+    const domainTags = domainTagsRaw.split(',').map((t) => t.trim()).filter(Boolean);
+
     // Path selection
     const pathChoice = await select<'current' | 'other'>({
       message: 'Where to create the trik?',
@@ -158,8 +211,8 @@ export async function initCommand(languageArg: string): Promise<void> {
     console.log();
     spinner.start('Creating trik...');
 
-    // Generate files
-    const config = {
+    // Build full config
+    const config: InitConfig = {
       name,
       displayName,
       description,
@@ -168,44 +221,71 @@ export async function initCommand(languageArg: string): Promise<void> {
       category,
       enableStorage,
       enableConfig,
+      agentMode,
+      handoffDescription,
+      domainTags,
+      toolNames,
     };
 
-    const files =
-      language === 'ts'
-        ? generateTypescriptProject(config)
-        : generatePythonProject(config);
-
-    // Write files
-    for (const file of files) {
-      const filePath = join(targetDir, file.path);
-      const dir = join(filePath, '..');
-      await mkdir(dir, { recursive: true });
-      await writeFile(filePath, file.content, 'utf-8');
+    // Only TypeScript is supported for now
+    if (language === 'py') {
+      spinner.stop();
+      console.log(chalk.yellow('\n  Python trik init is not yet supported. Use TypeScript for now.\n'));
+      return;
     }
 
-    // Save author defaults for next time
-    if (authorName || authorGithub) {
-      saveDefaults({
-        authorName: authorName || defaults.authorName,
-        authorGithub: authorGithub || defaults.authorGithub,
-      });
+    // Generate project files
+    const files = generateTypescriptProject(config);
+
+    // Create target directory and write all files
+    await mkdir(targetDir, { recursive: true });
+
+    for (const [relativePath, content] of Object.entries(files)) {
+      const filePath = join(targetDir, relativePath);
+      const fileDir = join(filePath, '..');
+      await mkdir(fileDir, { recursive: true });
+      await writeFile(filePath, content, 'utf-8');
     }
 
-    spinner.succeed(`Created trik: ${chalk.green(name)}`);
+    spinner.succeed('Trik created');
 
-    // Print next steps
+    // Install dependencies
+    const { execSync } = await import('node:child_process');
+    let packageManager = 'npm';
+    try {
+      execSync('pnpm --version', { stdio: 'ignore' });
+      packageManager = 'pnpm';
+    } catch {
+      // pnpm not available, use npm
+    }
+
+    spinner.start(`Installing dependencies with ${packageManager}...`);
+    try {
+      execSync(`${packageManager} install`, { cwd: targetDir, stdio: 'ignore' });
+      spinner.succeed('Dependencies installed');
+    } catch {
+      spinner.warn(`Failed to install dependencies. Run \`${packageManager} install\` manually.`);
+    }
+
+    // Save author defaults for reuse
+    saveDefaults({ authorName, authorGithub });
+
+    // Show success message
     console.log();
-    console.log(chalk.bold('  Next steps:'));
+    console.log(chalk.green.bold('  Your trik is ready!'));
     console.log();
-    console.log(chalk.dim(`  cd ${name}`));
-    if (language === 'ts') {
-      console.log(chalk.dim('  npm install'));
-      console.log(chalk.dim('  npm run build'));
-      console.log(chalk.dim('  npm test              # Test your trik locally'));
+    console.log(chalk.dim('  Next steps:'));
+    console.log(`    cd ${name}`);
+    if (agentMode === 'tool') {
+      console.log('    Edit src/agent.ts to implement your tool handlers');
     } else {
-      console.log(chalk.dim('  python test.py        # Test your trik locally'));
+      console.log('    Edit src/agent.ts to implement your agent logic');
+      console.log('    Add tools in src/tools/');
+      console.log('    Customize src/prompts/system.md');
     }
-    console.log(chalk.dim('  trik publish          # When ready to publish'));
+    console.log(`    ${packageManager === 'pnpm' ? 'pnpm' : 'npm run'} build`);
+    console.log('    trik lint .');
+    console.log('    trik publish');
     console.log();
   } catch (error) {
     spinner.fail('Failed to create trik');

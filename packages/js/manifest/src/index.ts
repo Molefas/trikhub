@@ -1,61 +1,41 @@
-// Types
+// Core manifest types
 export type {
   JSONSchema,
   TrikManifest,
+  // Agent types
+  AgentMode,
+  AgentDefinition,
+  ModelPreferences,
+  ToolDeclaration,
+  // Capabilities
   TrikCapabilities,
   TrikLimits,
+  SessionCapabilities,
+  StorageCapabilities,
+  // Entry point
   TrikEntry,
   TrikRuntime,
-  ExecuteRequest,
-  ExecuteResponse,
-  SuccessResponse,
-  ClarificationResponse,
-  ErrorResponse,
-  ClarifyRequest,
-  ClarificationQuestion,
-  ClarificationAnswer,
-  GatewayResult,
-  GatewaySuccess,
-  GatewaySuccessTemplate,
-  GatewaySuccessPassthrough,
-  GatewayError,
-  GatewayClarification,
-  GatewayErrorCode,
-  // Type-directed privilege separation types
-  AllowedAgentStringFormat,
-  ResponseMode,
-  ResponseTemplate,
-  ActionDefinition,
-  // Session types
-  SessionCapabilities,
-  SessionHistoryEntry,
-  TrikSession,
-  SessionContext,
-  GraphInput,
-  GraphResult,
-  // Passthrough types
-  PassthroughContent,
-  PassthroughDeliveryReceipt,
-  UserContentReference,
-  // Configuration types
+  // Configuration
   ConfigRequirement,
   TrikConfig,
+  // Runtime communication
   TrikConfigContext,
-  // Storage types
-  StorageCapabilities,
   TrikStorageContext,
+  TrikContext,
+  TrikAgent,
+  TrikResponse,
+  ToolCallRecord,
+  ToolExecutionResult,
+  // Gateway session
+  HandoffLogType,
+  HandoffLogEntry,
+  HandoffSession,
 } from './types.js';
 
 // Validation
 export {
   validateManifest,
+  diagnoseError,
   validateData,
-  createValidator,
-  SchemaValidator,
   type ValidationResult,
-  // Security validation utilities
-  ALLOWED_STRING_FORMATS,
-  isConstrainedString,
-  findUnconstrainedStrings,
-  validateAgentDataSecurity,
 } from './validator.js';

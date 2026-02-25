@@ -1,7 +1,7 @@
 {
   "name": "@trikhub/server",
   "version": "0.11.0",
-  "description": "HTTP server for TrikHub - secure skill execution gateway for AI agents",
+  "description": "HTTP server for TrikHub - handoff routing gateway for AI agents",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -52,7 +52,6 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
     "@fastify/swagger": "^9.4.2",
     "@fastify/swagger-ui": "^5.2.1",
     "@trikhub/gateway": "workspace:*",

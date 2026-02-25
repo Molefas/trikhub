@@ -37,4 +37,4 @@ coverage/
 tests/e2e
 
 # Docs
-docs/
+docs/*

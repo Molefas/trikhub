@@ -30,15 +30,12 @@
     "@trikhub/manifest": "workspace:*",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
-    "conf": "^13.0.1",
     "ora": "^8.0.1",
-    "semver": "^7.6.3",
-    "tar": "^7.4.0"
+    "semver": "^7.6.3"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
-    "@types/semver": "^7.5.8",
-    "@types/tar": "^6.1.13"
+    "@types/semver": "^7.5.8"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -59,7 +56,7 @@
     "trikhub",
     "trik",
     "ai",
-    "skills",
+    "agent",
     "cli"
   ],
   "author": "Molefas",

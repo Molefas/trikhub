@@ -8,9 +8,8 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface, type Interface } from 'node:readline';
 import { EventEmitter } from 'node:events';
-import type { TrikConfigContext, TrikStorageContext, SessionHistoryEntry } from '@trikhub/manifest';
+import type { TrikStorageContext } from '@trikhub/manifest';
 import {
-  createInvokeRequest,
   createHealthRequest,
   createShutdownRequest,
   createSuccessResponse,
@@ -21,8 +20,6 @@ import {
   WorkerErrorCodes,
   type JsonRpcRequest,
   type JsonRpcResponse,
-  type InvokeParams,
-  type InvokeResult,
   type HealthResult,
   type StorageMethod,
 } from './worker-protocol.js';
@@ -36,18 +33,6 @@ export interface PythonWorkerConfig {
   invokeTimeoutMs?: number;
   /** Whether to enable debug logging */
   debug?: boolean;
-}
-
-export interface ExecutePythonTrikOptions {
-  /** Session context if session is enabled */
-  session?: {
-    sessionId: string;
-    history: SessionHistoryEntry[];
-  };
-  /** Configuration context for API keys */
-  config?: TrikConfigContext;
-  /** Storage context for persistent data */
-  storage?: TrikStorageContext;
 }
 
 type PendingRequest = {
@@ -191,45 +176,6 @@ export class PythonWorker extends EventEmitter {
           reject(error);
         });
     });
-  }
-
-  /**
-   * Execute a Python trik.
-   */
-  async invoke(
-    trikPath: string,
-    action: string,
-    input: unknown,
-    options: ExecutePythonTrikOptions = {}
-  ): Promise<InvokeResult> {
-    if (!this.isReady) {
-      await this.start();
-    }
-
-    // Store storage context for proxy calls during execution
-    this.currentStorageContext = options.storage ?? null;
-
-    const params: InvokeParams = {
-      trikPath,
-      action,
-      input,
-      session: options.session,
-      config: options.config ? this.configContextToRecord(options.config) : undefined,
-    };
-
-    const request = createInvokeRequest(params);
-
-    try {
-      const response = await this.sendRequest(request, this.config.invokeTimeoutMs);
-
-      if (response.error) {
-        throw new Error(`Invoke failed: ${response.error.message} (code: ${response.error.code})`);
-      }
-
-      return response.result as InvokeResult;
-    } finally {
-      this.currentStorageContext = null;
-    }
   }
 
   /**
@@ -463,16 +409,6 @@ export class PythonWorker extends EventEmitter {
     }
   }
 
-  private configContextToRecord(config: TrikConfigContext): Record<string, string> {
-    const result: Record<string, string> = {};
-    for (const key of config.keys()) {
-      const value = config.get(key);
-      if (value !== undefined) {
-        result[key] = value;
-      }
-    }
-    return result;
-  }
 }
 
 // Singleton worker manager for efficiency

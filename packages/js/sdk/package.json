@@ -1,13 +1,10 @@
 {
-  "name": "@trikhub/mcp",
-  "version": "0.2.0",
-  "description": "MCP server for AI-assisted trik authoring",
+  "name": "@trikhub/sdk",
+  "version": "0.11.0",
+  "description": "SDK for building triks — wrapAgent(), wrapToolHandlers(), transfer_back tool, and tool call interception",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": {
-    "trikhub-mcp": "./dist/index.js"
-  },
   "exports": {
     ".": {
       "import": "./dist/index.js",
@@ -21,25 +18,25 @@
   ],
   "keywords": [
     "ai",
-    "mcp",
-    "model-context-protocol",
-    "trik",
-    "trikhub",
     "agent",
-    "authoring",
-    "typescript"
+    "trik",
+    "sdk",
+    "langchain",
+    "langgraph",
+    "typescript",
+    "trikhub"
   ],
   "author": "Molefas",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Molefas/trikhub.git",
-    "directory": "packages/js/mcp"
+    "directory": "packages/js/sdk"
   },
   "bugs": {
     "url": "https://github.com/Molefas/trikhub/issues"
   },
-  "homepage": "https://github.com/Molefas/trikhub/tree/main/packages/js/mcp#readme",
+  "homepage": "https://github.com/Molefas/trikhub/tree/main/packages/js/sdk#readme",
   "publishConfig": {
     "access": "public"
   },
@@ -48,15 +45,17 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "node --import tsx src/index.ts",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.26.0",
-    "@trikhub/manifest": "workspace:*",
-    "zod": "^3.25.0"
+    "@trikhub/manifest": "workspace:*"
   },
   "devDependencies": {
-    "tsx": "^4.19.0"
+    "@langchain/core": "^0.3.0",
+    "zod": "^3.0.0"
+  },
+  "peerDependencies": {
+    "@langchain/core": ">=0.3.0",
+    "zod": ">=3.0.0"
   }
 }

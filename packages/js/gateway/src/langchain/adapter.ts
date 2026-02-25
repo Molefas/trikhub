@@ -1,268 +1,467 @@
-import { tool, type DynamicStructuredTool } from '@langchain/core/tools';
-import { z, type ZodTypeAny } from 'zod';
-import { TrikGateway, type ToolDefinition } from '../gateway.js';
-import type { PassthroughContent } from '@trikhub/manifest';
+import { DynamicStructuredTool } from '@langchain/core/tools';
+import { z } from 'zod';
+import type { BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import {
+  TrikGateway,
+  type TrikGatewayConfig,
+  type LoadFromConfigOptions,
+  type HandoffToolDefinition,
+} from '../gateway.js';
 import { jsonSchemaToZod } from './schema-converter.js';
 
-// Re-export for convenience
-export type { PassthroughContent } from '@trikhub/manifest';
+// ============================================================================
+// Types
+// ============================================================================
 
-export interface LangChainAdapterOptions {
-  /** Get session ID for a trik (for multi-turn conversations) */
-  getSessionId?: (trikId: string) => string | undefined;
-  /** Store session ID for a trik */
-  setSessionId?: (trikId: string, sessionId: string) => void;
-  /** Callback when passthrough content is delivered */
-  onPassthrough?: (content: PassthroughContent) => void;
-  /** Enable debug logging */
-  debug?: boolean;
+/**
+ * Any agent with a LangGraph-compatible invoke method.
+ */
+export interface InvokableAgent {
+  invoke(
+    input: { messages: BaseMessage[] },
+    config?: unknown
+  ): Promise<{ messages: BaseMessage[] }>;
 }
 
 /**
- * Options for the simplified loadLangChainTriks function
+ * Options for enhance().
  */
-export interface LoadLangChainTriksOptions {
-  /**
-   * Callback when passthrough content is delivered.
-   * Passthrough content bypasses the agent and goes directly to the user.
-   */
-  onPassthrough?: (content: PassthroughContent) => void;
-
-  /**
-   * Enable debug logging
-   */
+export interface EnhanceOptions {
+  /** Gateway configuration (config store, storage provider, etc.) */
+  gateway?: TrikGatewayConfig;
+  /** Config file loading options */
+  config?: LoadFromConfigOptions;
+  /** Pre-built TrikGateway instance (skips creating a new one) */
+  gatewayInstance?: TrikGateway;
+  /** Enable debug logging for handoff events */
   debug?: boolean;
-
-  /**
-   * Path to the .trikhub/config.json file.
-   * Defaults to .trikhub/config.json in the current working directory.
-   */
-  configPath?: string;
-
-  /**
-   * Base directory for resolving node_modules.
-   * Defaults to the directory containing the config file.
-   */
-  baseDir?: string;
+  /** Enable verbose logging — dumps full message history on each agent invocation */
+  verbose?: boolean;
 }
 
 /**
- * Result from loadLangChainTriks
+ * Response from the enhanced agent.
  */
-export interface LangChainTriksResult {
-  /**
-   * LangChain tools ready to bind to a model
-   */
-  tools: DynamicStructuredTool[];
+export interface EnhancedResponse {
+  /** The message to show the user */
+  message: string;
+  /** Where the response came from: "main", a trik ID, or "system" */
+  source: string;
+}
 
-  /**
-   * The gateway instance for advanced operations.
-   * Use this if you need direct access to gateway methods.
-   */
+/**
+ * An enhanced agent with handoff routing.
+ */
+export interface EnhancedAgent {
+  /** Process a user message through the routing layer */
+  processMessage(message: string, sessionId?: string): Promise<EnhancedResponse>;
+  /** Access the underlying gateway */
   gateway: TrikGateway;
-
-  /**
-   * List of loaded trik IDs (for logging/display)
-   */
-  loadedTriks: string[];
+  /** Get the list of loaded trik IDs */
+  getLoadedTriks(): string[];
 }
 
-function fillTemplate(template: string, data: Record<string, unknown>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (_, key) =>
-    String(data[key] ?? `{{${key}}}`)
-  );
-}
+// ============================================================================
+// Debug & Verbose Loggers
+// ============================================================================
 
-function toToolName(gatewayName: string): string {
-  return gatewayName
-    .replace(/\//g, '_')
-    .replace(/-/g, '_')
-    .replace(/:/g, '__');
-}
+type LogFn = (...args: unknown[]) => void;
 
-export function parseToolName(toolName: string): { trikId: string; actionName: string } {
-  const parts = toolName.split('__');
-  if (parts.length !== 2) {
-    throw new Error(`Invalid tool name format: ${toolName}`);
-  }
-
-  return {
-    trikId: parts[0],
-    actionName: parts[1],
+function createDebugLogger(enabled: boolean): LogFn {
+  if (!enabled) return (..._args: unknown[]) => {};
+  return (...args: unknown[]) => {
+    console.log('\x1b[36m[trikhub]\x1b[0m', ...args);
   };
 }
 
-function createToolFromDefinition(
-  toolDef: ToolDefinition,
-  gateway: TrikGateway,
-  options: LangChainAdapterOptions
-): DynamicStructuredTool {
-  const { getSessionId, setSessionId, onPassthrough, debug } = options;
-  const langChainName = toToolName(toolDef.name);
-
-  const [trikIdPart, actionName] = toolDef.name.split(':');
-  const trikId = trikIdPart;
-
-  const zodSchema = jsonSchemaToZod(toolDef.inputSchema) as z.ZodObject<Record<string, ZodTypeAny>>;
-
-  return tool(
-    async (input: Record<string, unknown>) => {
-      if (debug) {
-        console.log(`[Tool] ${toolDef.name}: ${JSON.stringify(input)}`);
-      }
-
-      const sessionId = getSessionId?.(trikId);
-      const result = await gateway.execute<Record<string, unknown>>(
-        trikId,
-        actionName,
-        input,
-        { sessionId }
-      );
-
-      if (!result.success) {
-        return JSON.stringify({
-          success: false,
-          error: 'error' in result ? result.error : 'Unknown error',
-        });
-      }
-
-      if ('sessionId' in result && result.sessionId) {
-        setSessionId?.(trikId, result.sessionId);
-        if (debug) {
-          console.log(`[Tool] Session tracked: ${result.sessionId}`);
-        }
-      }
-
-      if (result.responseMode === 'passthrough') {
-        const delivery = gateway.deliverContent(result.userContentRef);
-
-        if (!delivery) {
-          return JSON.stringify({
-            success: false,
-            error: 'Content not found or expired',
-          });
-        }
-
-        if (debug) {
-          console.log(`[Tool] Auto-delivered passthrough content: ${delivery.receipt.contentType}`);
-        }
-
-        if (onPassthrough) {
-          onPassthrough(delivery.content);
-        }
-        return JSON.stringify({
-          success: true,
-          response: 'Delivered directly to the user',
-        });
-      }
-
-      const response = result.templateText
-        ? fillTemplate(result.templateText, result.agentData as Record<string, unknown>)
-        : JSON.stringify(result.agentData);
-
-      if (debug) {
-        console.log(`[Tool] Auto-filled template response: ${response}`);
-      }
-
-      return JSON.stringify({
-        success: true,
-        response,
-      });
-    },
-    {
-      name: langChainName,
-      description: toolDef.description,
-      schema: zodSchema,
-    }
-  );
-}
-
-export function createLangChainTools(
-  gateway: TrikGateway,
-  options: LangChainAdapterOptions = {}
-): DynamicStructuredTool[] {
-  const { debug } = options;
-  const toolDefs = gateway.getToolDefinitions();
-
-  if (debug) {
-    console.log(`[LangChainAdapter] Creating ${toolDefs.length} tools from gateway:`);
-    for (const def of toolDefs) {
-      console.log(`  - ${def.name} (${def.responseMode})`);
-    }
-  }
-
-  return toolDefs.map((def) => createToolFromDefinition(def, gateway, options));
-}
-
-export function getToolNameMap(gateway: TrikGateway): Map<string, string> {
-  const toolDefs = gateway.getToolDefinitions();
-  const map = new Map<string, string>();
-
-  for (const def of toolDefs) {
-    const langChainName = toToolName(def.name);
-    map.set(langChainName, def.name);
-  }
-
-  return map;
+function createVerboseLogger(enabled: boolean): LogFn {
+  if (!enabled) return (..._args: unknown[]) => {};
+  return (...args: unknown[]) => {
+    console.log('\x1b[35m[trikhub:verbose]\x1b[0m', ...args);
+  };
 }
 
 /**
- * Load triks and create LangChain tools with minimal boilerplate.
+ * Dump a message list in a human-readable format.
+ */
+function dumpMessages(verbose: LogFn, label: string, messages: BaseMessage[]): void {
+  verbose(`--- ${label} (${messages.length} messages) ---`);
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    const type = msg._getType();
+    const text = extractTextContent(msg.content as string | Array<Record<string, unknown>>);
+    const truncated = text.length > 200 ? text.slice(0, 200) + '...' : text;
+
+    // Show tool calls if present
+    const toolCalls = (msg as AIMessage).tool_calls;
+    if (toolCalls && toolCalls.length > 0) {
+      const calls = toolCalls.map((tc: { name: string }) => tc.name).join(', ');
+      verbose(`  [${i}] ${type}: "${truncated}" [tool_calls: ${calls}]`);
+    } else {
+      verbose(`  [${i}] ${type}: "${truncated}"`);
+    }
+  }
+  verbose(`--- end ${label} ---`);
+}
+
+// ============================================================================
+// Handoff Tool Prefix
+// ============================================================================
+
+const HANDOFF_TOOL_PREFIX = 'talk_to_';
+
+// ============================================================================
+// enhance()
+// ============================================================================
+
+/**
+ * Wrap a LangGraph agent with handoff routing to triks.
  *
- * This is the recommended way to integrate Triks with LangChain.
- * For more control, use createLangChainTools() directly.
+ * This is the main public API for host app developers. It:
+ * 1. Creates a TrikGateway and loads triks
+ * 2. Generates handoff tools (one per loaded trik) and adds them to the agent
+ * 3. Returns an EnhancedAgent that handles the full routing lifecycle
  *
  * @example
  * ```typescript
- * const { tools, gateway, loadedTriks } = await loadLangChainTriks({
- *   onPassthrough: (content) => console.log('Passthrough:', content.content),
- *   debug: true,
+ * import { createReactAgent } from '@langchain/langgraph/prebuilt';
+ * import { enhance } from '@trikhub/gateway/langchain';
+ *
+ * const myAgent = createReactAgent({ model, tools: myTools });
+ * const app = await enhance(myAgent, {
+ *   gateway: { triksDirectory: '~/.trikhub/triks' },
  * });
  *
- * const model = new ChatAnthropic().bindTools(tools);
+ * const response = await app.processMessage("find me AI articles");
+ * // response.message - what to show the user
+ * // response.source  - "main" or trik ID
  * ```
  */
-export async function loadLangChainTriks(
-  options: LoadLangChainTriksOptions = {}
-): Promise<LangChainTriksResult> {
-  const { onPassthrough, debug, configPath, baseDir } = options;
+export async function enhance(
+  agent: InvokableAgent,
+  options: EnhanceOptions = {}
+): Promise<EnhancedAgent> {
+  const debug = createDebugLogger(options.debug ?? options.verbose ?? false);
+  const verbose = createVerboseLogger(options.verbose ?? false);
 
-  // Create gateway and initialize (loads secrets from .trikhub/secrets.json)
-  const gateway = new TrikGateway();
+  // Set up gateway
+  const gateway = options.gatewayInstance ?? new TrikGateway(options.gateway);
   await gateway.initialize();
 
-  // Load triks from config
-  const manifests = await gateway.loadTriksFromConfig({
-    configPath,
-    baseDir,
-  });
-
-  const loadedTriks = manifests.map((m) => m.id);
-
-  if (debug) {
-    console.log(
-      `[loadLangChainTriks] Loaded ${loadedTriks.length} triks: ${loadedTriks.join(', ')}`
-    );
+  // Load triks from config (skip if a pre-built gateway was provided — caller already loaded triks)
+  if (!options.gatewayInstance) {
+    await gateway.loadTriksFromConfig(options.config);
   }
 
-  // Internal session management
-  const sessions = new Map<string, string>();
-
-  // Create LangChain tools with internal session management
-  const tools = createLangChainTools(gateway, {
-    getSessionId: (trikId) => sessions.get(trikId),
-    setSessionId: (trikId, sessionId) => sessions.set(trikId, sessionId),
-    onPassthrough,
-    debug,
-  });
-
-  if (debug) {
-    console.log(`[loadLangChainTriks] Created ${tools.length} tools`);
-  }
+  // Per-session message history for the main agent
+  const mainMessages = new Map<string, BaseMessage[]>();
 
   return {
-    tools,
     gateway,
-    loadedTriks,
+
+    getLoadedTriks(): string[] {
+      return gateway.getLoadedTriks();
+    },
+
+    async processMessage(
+      message: string,
+      sessionId: string = 'default'
+    ): Promise<EnhancedResponse> {
+      // Route through gateway first
+      const route = await gateway.routeMessage(message, sessionId);
+
+      switch (route.target) {
+        case 'trik': {
+          debug(`Routed to trik: ${route.trikId} (turn in progress)`);
+          return {
+            message: route.response.message,
+            source: route.trikId,
+          };
+        }
+
+        case 'transfer_back': {
+          debug(`Transfer back from: ${route.trikId}`);
+          debug(`Transfer-back summary:\n${route.summary}`);
+          injectSummaryIntoHistory(mainMessages, sessionId, route.summary, debug);
+          // If the trik provided a farewell message, show it; otherwise show a system message
+          if (route.message.trim()) {
+            return {
+              message: route.message,
+              source: route.trikId,
+            };
+          }
+          return {
+            message: '[Returned to main agent]',
+            source: 'system',
+          };
+        }
+
+        case 'force_back': {
+          debug(`Force /back from: ${route.trikId}`);
+          debug(`Force-back summary:\n${route.summary}`);
+          injectSummaryIntoHistory(mainMessages, sessionId, route.summary, debug);
+          return {
+            message: '[Returned to main agent]',
+            source: 'system',
+          };
+        }
+
+        case 'main': {
+          debug('Routing to main agent');
+          return await invokeMainAgent(
+            agent,
+            gateway,
+            mainMessages,
+            sessionId,
+            message,
+            debug,
+            verbose
+          );
+        }
+      }
+    },
   };
+}
+
+// ============================================================================
+// Main Agent Invocation
+// ============================================================================
+
+/**
+ * Invoke the main agent with the user's message.
+ * If the agent calls a talk_to_X handoff tool, intercept it and start a handoff.
+ */
+async function invokeMainAgent(
+  agent: InvokableAgent,
+  gateway: TrikGateway,
+  mainMessages: Map<string, BaseMessage[]>,
+  sessionId: string,
+  message: string,
+  debug: LogFn,
+  verbose: LogFn
+): Promise<EnhancedResponse> {
+  // Get or create session message history
+  let messages = mainMessages.get(sessionId);
+  if (!messages) {
+    messages = [];
+    mainMessages.set(sessionId, messages);
+  }
+
+  // Add user message
+  messages.push(new HumanMessage(message));
+
+  verbose(`Main agent input (session: ${sessionId})`);
+  dumpMessages(verbose, 'main agent messages', messages);
+
+  // Invoke agent
+  const result = await agent.invoke({ messages });
+  const newMessages = result.messages;
+
+  verbose('Main agent output');
+  dumpMessages(verbose, 'main agent result', newMessages);
+
+  // Check for handoff tool calls in the response
+  const handoffCall = findHandoffToolCall(newMessages, messages.length - 1);
+
+  if (handoffCall) {
+    const trikId = handoffCall.toolName.slice(HANDOFF_TOOL_PREFIX.length);
+    const context = handoffCall.context;
+
+    debug(`Handoff detected → ${trikId} (context: "${context.slice(0, 80)}${context.length > 80 ? '...' : ''}")`);
+
+    const handoffResult = await gateway.startHandoff(trikId, context, sessionId);
+
+    if (handoffResult.target === 'transfer_back') {
+      debug(`Immediate transfer back from: ${trikId}`);
+      debug(`Transfer-back summary:\n${handoffResult.summary}`);
+      mainMessages.set(sessionId, newMessages);
+      injectSummaryIntoHistory(mainMessages, sessionId, handoffResult.summary, debug);
+      return {
+        message: handoffResult.message,
+        source: handoffResult.trikId,
+      };
+    }
+
+    debug(`Handoff active → ${trikId}`);
+    mainMessages.set(sessionId, newMessages);
+    return {
+      message: handoffResult.response.message,
+      source: handoffResult.trikId,
+    };
+  }
+
+  // No handoff — normal main agent response
+  mainMessages.set(sessionId, newMessages);
+
+  const responseText = extractLastAIMessage(newMessages);
+  return {
+    message: responseText,
+    source: 'main',
+  };
+}
+
+/**
+ * Inject a handoff session summary into the main agent's message history
+ * so it has context for future turns, without invoking the main agent.
+ */
+function injectSummaryIntoHistory(
+  mainMessages: Map<string, BaseMessage[]>,
+  sessionId: string,
+  summary: string,
+  debug: LogFn
+): void {
+  let messages = mainMessages.get(sessionId);
+  if (!messages) {
+    messages = [];
+    mainMessages.set(sessionId, messages);
+  }
+
+  messages.push(new HumanMessage(
+    `[System: Trik handoff completed. Session summary:\n${summary}]`
+  ));
+
+  debug('Injected transfer-back summary into main agent history');
+}
+
+// ============================================================================
+// Handoff Tool Building
+// ============================================================================
+
+/**
+ * Convert gateway HandoffToolDefinitions into LangChain DynamicStructuredTools.
+ * These tools don't actually execute — they're intercepted by enhance().
+ */
+function buildHandoffTools(definitions: HandoffToolDefinition[]): DynamicStructuredTool[] {
+  return definitions.map((def) =>
+    new DynamicStructuredTool({
+      name: def.name,
+      description: def.description,
+      schema: z.object({
+        context: z.string().describe('Context about what the user needs from this agent'),
+      }),
+      func: async ({ context }) => {
+        // This is a placeholder — the actual handoff is intercepted by enhance()
+        // If this ever executes, it means the interception failed
+        return `Handoff initiated with context: ${context}`;
+      },
+    })
+  );
+}
+
+/**
+ * Get handoff tools as an array for binding to agents.
+ * Call this after enhance() to get the tools that should be added to your agent.
+ */
+export function getHandoffToolsForAgent(gateway: TrikGateway): DynamicStructuredTool[] {
+  return buildHandoffTools(gateway.getHandoffTools());
+}
+
+// ============================================================================
+// Exposed Tool Building (tool-mode triks)
+// ============================================================================
+
+/**
+ * Convert gateway ExposedToolDefinitions into LangChain DynamicStructuredTools.
+ * These tools call gateway.executeExposedTool() which returns a template-filled string.
+ */
+function buildExposedTools(gateway: TrikGateway): DynamicStructuredTool[] {
+  const definitions = gateway.getExposedTools();
+
+  return definitions.map((def) =>
+    new DynamicStructuredTool({
+      name: def.toolName,
+      description: def.description,
+      schema: jsonSchemaToZod(def.inputSchema) as z.ZodObject<z.ZodRawShape>,
+      func: async (input: Record<string, unknown>) => {
+        return await gateway.executeExposedTool(def.trikId, def.toolName, input);
+      },
+    })
+  );
+}
+
+/**
+ * Get exposed tools from tool-mode triks as an array for binding to agents.
+ * These appear as native tools on the main agent (no handoff, no session).
+ */
+export function getExposedToolsForAgent(gateway: TrikGateway): DynamicStructuredTool[] {
+  return buildExposedTools(gateway);
+}
+
+// ============================================================================
+// Message Parsing Helpers
+// ============================================================================
+
+interface HandoffToolCall {
+  toolName: string;
+  context: string;
+  toolCallId: string;
+}
+
+/**
+ * Check if a message is an AI message using duck typing.
+ * Avoids instanceof failures when multiple copies of @langchain/core exist.
+ */
+function isAIMessage(msg: BaseMessage): boolean {
+  return msg._getType() === 'ai';
+}
+
+/**
+ * Find a handoff tool call (talk_to_X) in new messages.
+ */
+function findHandoffToolCall(
+  messages: BaseMessage[],
+  startIndex: number
+): HandoffToolCall | null {
+  for (let i = startIndex; i < messages.length; i++) {
+    const msg = messages[i];
+    if (!isAIMessage(msg)) continue;
+
+    const toolCalls = (msg as AIMessage).tool_calls;
+    if (toolCalls && toolCalls.length > 0) {
+      for (const tc of toolCalls) {
+        if (tc.name.startsWith(HANDOFF_TOOL_PREFIX)) {
+          return {
+            toolName: tc.name,
+            context: (tc.args as Record<string, string>).context ?? '',
+            toolCallId: tc.id ?? '',
+          };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract text from message content, handling both string and array-of-blocks formats.
+ */
+function extractTextContent(content: string | Array<Record<string, unknown>>): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .filter((block): block is { type: 'text'; text: string } =>
+        typeof block === 'object' && block !== null && block.type === 'text' && typeof block.text === 'string'
+      )
+      .map((block) => block.text)
+      .join('');
+  }
+  return '';
+}
+
+/**
+ * Extract the text content from the last AI message in a message list.
+ * Uses duck typing to avoid instanceof issues with duplicate @langchain/core packages.
+ */
+function extractLastAIMessage(messages: BaseMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (!isAIMessage(msg)) continue;
+
+    const text = extractTextContent(msg.content as string | Array<Record<string, unknown>>);
+    if (text.length > 0) return text;
+  }
+  return '';
 }

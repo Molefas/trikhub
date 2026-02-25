@@ -1,16 +1,17 @@
-// Gateway (local filesystem execution)
+// Gateway
 export {
   TrikGateway,
   type TrikGatewayConfig,
-  type ExecuteTrikOptions,
-  type GatewayResultWithSession,
-  // Trik discovery types
-  type ToolDefinition,
-  type TrikInfo,
-  type GetToolDefinitionsOptions,
-  // Config-based loading types
   type TrikHubConfig,
   type LoadFromConfigOptions,
+  // Route result types
+  type RouteResult,
+  type RouteToMain,
+  type RouteToTrik,
+  type RouteTransferBack,
+  type RouteForceBack,
+  type HandoffToolDefinition,
+  type ExposedToolDefinition,
 } from './gateway.js';
 
 // Session storage
@@ -36,7 +37,6 @@ export {
 export {
   PythonWorker,
   type PythonWorkerConfig,
-  type ExecutePythonTrikOptions,
   getSharedPythonWorker,
   shutdownSharedPythonWorker,
 } from './python-worker.js';
@@ -49,11 +49,12 @@ export {
   type JsonRpcError,
   // Worker methods
   type WorkerMethod,
-  type InvokeParams,
+  // v2 protocol types
+  type ProcessMessageInput,
+  type ProcessMessageResult,
   type HealthParams,
   type ShutdownParams,
   // Response types
-  type InvokeResult,
   type HealthResult,
   // Storage proxy types
   type StorageMethod,
@@ -67,7 +68,7 @@ export {
   WorkerErrorCodes,
   // Message builders
   createRequest,
-  createInvokeRequest,
+  createProcessMessageRequest,
   createHealthRequest,
   createShutdownRequest,
   createStorageRequest,
@@ -83,32 +84,18 @@ export {
 // Re-export types from trik-manifest for convenience
 export type {
   TrikManifest,
-  ActionDefinition,
-  ResponseMode,
+  TrikAgent,
+  TrikContext,
+  TrikResponse,
+  ToolCallRecord,
   JSONSchema,
-  ResponseTemplate,
-  GatewayResult,
-  GatewaySuccess,
-  GatewaySuccessTemplate,
-  GatewaySuccessPassthrough,
-  GatewayError,
-  GatewayClarification,
-  ClarificationQuestion,
-  ClarificationAnswer,
-  // Session types
   SessionCapabilities,
-  SessionHistoryEntry,
-  TrikSession,
-  SessionContext,
-  // Passthrough types
-  PassthroughContent,
-  PassthroughDeliveryReceipt,
-  UserContentReference,
-  // Config types
   ConfigRequirement,
   TrikConfig,
   TrikConfigContext,
-  // Storage types
   StorageCapabilities,
   TrikStorageContext,
+  HandoffLogEntry,
+  HandoffSession,
+  ToolExecutionResult,
 } from '@trikhub/manifest';

@@ -4,8 +4,11 @@
  * Shows detailed information about a trik.
  */
 
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 import chalk from 'chalk';
 import ora from 'ora';
+import { validateManifest } from '@trikhub/manifest';
 import { parseTrikName } from '../types.js';
 import { registry } from '../lib/registry.js';
 import { isTrikInstalled, getInstalledTrik, getTrikPath } from '../lib/storage.js';
@@ -57,6 +60,38 @@ export async function infoCommand(
       );
       console.log(chalk.dim(`  Path: ${getTrikPath(fullName)}`));
       console.log();
+    }
+
+    // V2 Agent Info (from local manifest)
+    if (isInstalled) {
+      const trikPath = getTrikPath(fullName);
+      const manifestPath = join(trikPath, 'manifest.json');
+      if (existsSync(manifestPath)) {
+        try {
+          const manifestData = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+          const agent = manifestData.agent;
+          if (agent) {
+            console.log(chalk.bold('Agent Info'));
+            console.log(`  Mode: ${chalk.cyan(agent.mode)}`);
+            if (agent.domain && agent.domain.length > 0) {
+              console.log(`  Domain: ${agent.domain.join(', ')}`);
+            }
+            if (manifestData.tools) {
+              const toolNames = Object.keys(manifestData.tools);
+              console.log(`  Tools: ${toolNames.join(', ')}`);
+            }
+            const validation = validateManifest(manifestData);
+            if (validation.qualityScore !== undefined) {
+              const score = validation.qualityScore;
+              const color = score >= 80 ? chalk.green : score >= 50 ? chalk.yellow : chalk.red;
+              console.log(`  Quality: ${color(`${score}/100`)}`);
+            }
+            console.log();
+          }
+        } catch {
+          // Manifest read/parse failed, skip v2 info
+        }
+      }
     }
 
     // Stats

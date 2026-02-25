@@ -1,120 +1,89 @@
 /**
- * Shared types for MCP tools
+ * Shared types for v2 MCP tools.
  */
 
-export type TrikComplexity = 'simple' | 'moderate' | 'complex';
-export type TrikArchitecture = 'simple' | 'langgraph';
-export type ResponseMode = 'template' | 'passthrough';
+import type { JSONSchema } from '@trikhub/manifest';
 
-export interface SuggestedAction {
-  name: string;
-  purpose: string;
-  complexity: TrikComplexity;
-  responseMode?: ResponseMode;
-}
+// ============================================================================
+// analyze_trik_requirements
+// ============================================================================
 
-export interface SuggestedCapabilities {
-  storage: boolean;
-  session: boolean;
-  config: string[];
-}
-
-export interface AnalysisResult {
-  suggestedActions: SuggestedAction[];
-  recommendedArchitecture: TrikArchitecture;
-  architectureReason: string;
-  suggestedCapabilities: SuggestedCapabilities;
+export interface AnalyzeResult {
+  suggestedMode: 'conversational' | 'tool';
+  modeReason: string;
+  suggestedHandoffDescription: string;
+  suggestedDomain: string[];
+  suggestedTools: Array<{
+    name: string;
+    description: string;
+    hasLogTemplate: boolean;
+  }>;
+  suggestedCapabilities: {
+    storage: boolean;
+    session: boolean;
+    config: Array<{ key: string; description: string }>;
+  };
   clarifyingQuestions: string[];
 }
 
-export interface ValidationError {
-  path: string;
-  message: string;
-  fix?: string;
-}
+// ============================================================================
+// design_tool
+// ============================================================================
 
-export interface ValidationWarning {
-  path: string;
-  message: string;
-  suggestion?: string;
-}
-
-export interface ValidationResult {
-  valid: boolean;
-  errors: ValidationError[];
-  warnings: ValidationWarning[];
-  securityScore: number;
-}
-
-export interface FieldDefinition {
-  name: string;
-  type: string;
-  required?: boolean;
-  description?: string;
-  values?: string[]; // For enums
-  isUserContent?: boolean; // For output fields
-}
-
-export interface ActionDesignInput {
-  actionName: string;
-  purpose: string;
-  responseMode: ResponseMode;
-  inputFields: FieldDefinition[];
-  outputFields: FieldDefinition[];
-}
-
-export interface ActionDesignResult {
-  actionDefinition: Record<string, unknown>;
+export interface DesignToolResult {
+  toolDeclaration: {
+    description: string;
+    logTemplate?: string;
+    logSchema?: Record<string, JSONSchema>;
+    inputSchema?: JSONSchema;
+    outputSchema?: JSONSchema;
+    outputTemplate?: string;
+  };
   warnings: string[];
   suggestions: string[];
 }
 
-export interface SchemaDesignInput {
-  fields: FieldDefinition[];
-  schemaType: 'agentData' | 'userContent' | 'input';
+// ============================================================================
+// design_log_schema
+// ============================================================================
+
+export interface DesignLogSchemaResult {
+  logSchema: Record<string, JSONSchema>;
+  warnings: string[];
 }
 
-export interface SchemaDesignResult {
-  schema: Record<string, unknown>;
-  securityNotes: string[];
-  valid: boolean;
-}
+// ============================================================================
+// scaffold_trik
+// ============================================================================
 
-export type TrikCategory =
-  | 'utilities'
-  | 'productivity'
-  | 'developer'
-  | 'data'
-  | 'search'
-  | 'content'
-  | 'communication'
-  | 'finance'
-  | 'entertainment'
-  | 'education'
-  | 'other';
-
-export interface ScaffoldInput {
-  name: string;
-  displayName: string;
-  description: string;
-  language: 'ts' | 'py';
-  category: TrikCategory;
-  architecture: TrikArchitecture;
-  actions: Record<string, unknown>[];
-  capabilities: {
-    storage?: boolean;
-    session?: boolean;
-    config?: Array<{ key: string; description: string }>;
-  };
-}
-
-export interface GeneratedFile {
+export interface ScaffoldFile {
   path: string;
   content: string;
 }
 
 export interface ScaffoldResult {
-  files: GeneratedFile[];
+  files: ScaffoldFile[];
   nextSteps: string[];
-  implementationNotes: Record<string, string>;
+}
+
+// ============================================================================
+// validate_manifest
+// ============================================================================
+
+export interface ValidateResult {
+  valid: boolean;
+  errors: Array<{ path: string; message: string; fix: string }>;
+  warnings: Array<{ path: string; message: string; suggestion?: string }>;
+  qualityScore: number;
+}
+
+// ============================================================================
+// diagnose_error
+// ============================================================================
+
+export interface DiagnoseResult {
+  explanation: string;
+  rootCause: string;
+  suggestedFix: string;
+  relatedDocs: string[];
 }
