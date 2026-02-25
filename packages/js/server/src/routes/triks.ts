@@ -283,8 +283,8 @@ export async function triksRoutes(
     {
       schema: {
         tags: ['triks'],
-        summary: 'Reload skills',
-        description: 'Reloads all skills from the config without restarting the server',
+        summary: 'Reload triks',
+        description: 'Reloads all triks from the config without restarting the server',
         response: {
           200: reloadResponseSchema,
           500: reloadResponseSchema,

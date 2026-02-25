@@ -1,5 +1,5 @@
 import Ajv from 'ajv';
-import type { ValidateFunction, ErrorObject } from 'ajv';
+import type { ErrorObject } from 'ajv';
 import type { JSONSchema } from './types.js';
 
 // Create Ajv instance
@@ -239,8 +239,8 @@ function isAgentSafeType(schema: JSONSchema): boolean {
 // ============================================================================
 
 /**
- * Recursively validate that all string properties in an outputSchema are constrained.
- * Uses the same constrained-type rules as logSchema.
+ * Recursively validate that all string properties in an outputSchema are agent-safe.
+ * Stricter than logSchema: rejects maxLength-only strings (still free-form).
  */
 function validateOutputSchemaConstraints(
   toolName: string,
@@ -261,7 +261,7 @@ function validateOutputSchemaConstraints(
       if (!isAgentSafeType(propSchema as JSONSchema)) {
         issues.push({
           type: 'error',
-          message: `${propPath}: string with only maxLength is not agent-safe — use enum, format, or pattern`,
+          message: `${propPath}: unconstrained string is not agent-safe — use enum, format, or pattern`,
         });
       }
     }
@@ -720,18 +720,12 @@ export function diagnoseError(errorMessage: string): DiagnosisResult | null {
 }
 
 // ============================================================================
-// Utility Exports (kept from v1 for downstream use)
+// Data Validation
 // ============================================================================
 
 /**
- * Create a validator function for a given JSON Schema
- */
-export function createValidator(schema: JSONSchema): ValidateFunction {
-  return ajv.compile(schema);
-}
-
-/**
- * Validate data against a JSON Schema
+ * Validate data against a JSON Schema.
+ * Used by the gateway for tool-mode input/output validation.
  */
 export function validateData(schema: JSONSchema, data: unknown): ValidationResult {
   const validate = ajv.compile(schema);
@@ -743,37 +737,4 @@ export function validateData(schema: JSONSchema, data: unknown): ValidationResul
     valid: false,
     errors: formatErrors(validate.errors),
   };
-}
-
-/**
- * Validator class that caches compiled schemas
- */
-export class SchemaValidator {
-  private cache = new Map<string, ValidateFunction>();
-
-  getValidator(schemaId: string, schema: JSONSchema): ValidateFunction {
-    const cached = this.cache.get(schemaId);
-    if (cached) {
-      return cached;
-    }
-    const validator = ajv.compile(schema);
-    this.cache.set(schemaId, validator);
-    return validator;
-  }
-
-  validate(schemaId: string, schema: JSONSchema, data: unknown): ValidationResult {
-    const validator = this.getValidator(schemaId, schema);
-    const valid = validator(data);
-    if (valid) {
-      return { valid: true };
-    }
-    return {
-      valid: false,
-      errors: formatErrors(validator.errors),
-    };
-  }
-
-  clear(): void {
-    this.cache.clear();
-  }
 }

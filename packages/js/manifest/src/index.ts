@@ -37,7 +37,5 @@ export {
   validateManifest,
   diagnoseError,
   validateData,
-  createValidator,
-  SchemaValidator,
   type ValidationResult,
 } from './validator.js';

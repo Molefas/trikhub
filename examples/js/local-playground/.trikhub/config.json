@@ -1,6 +1,8 @@
 {
   "triks": [
-    "@molefas/trik-content-hoarder",
-    "@molefas/trik-demo-notes"
-  ]
+    "@Molefas/trik-hash"
+  ],
+  "trikhub": {
+    "@Molefas/trik-hash": "1.0.0"
+  }
 }

@@ -19,7 +19,7 @@ const FIX_MAP: Array<{ pattern: RegExp; fix: string }> = [
   },
   {
     pattern: /agent.*required|required.*agent/i,
-    fix: 'Add an "agent" object with "mode", "handoffDescription", and "domain" fields.',
+    fix: 'Add an "agent" object with "mode" and "domain" fields. Add "handoffDescription" if using conversational mode.',
   },
   {
     pattern: /handoffDescription.*minLength|handoffDescription.*short/i,
@@ -63,7 +63,7 @@ const FIX_MAP: Array<{ pattern: RegExp; fix: string }> = [
   },
   {
     pattern: /outputSchema.*unconstrained/i,
-    fix: 'Output schema strings must be constrained (enum, maxLength, pattern, or format) for security.',
+    fix: 'Output schema strings must be agent-safe: use enum, pattern, or format. maxLength alone is not sufficient for outputSchema.',
   },
   {
     pattern: /outputTemplate.*required|required.*outputTemplate/i,

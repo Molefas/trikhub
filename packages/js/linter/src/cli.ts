@@ -24,7 +24,6 @@ Rules:
   entry-point-exists     Entry point in manifest must exist
   no-forbidden-imports   Block dangerous Node.js modules
   no-dynamic-code        Block eval() and Function constructor
-  undeclared-tool        Tools used must be declared in manifest
   no-process-env         Warn on process.env access
 `);
     process.exit(0);

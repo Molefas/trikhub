@@ -57,7 +57,7 @@ All configuration is done via environment variables:
 |----------|---------|-------------|
 | `PORT` | `3000` | Server port |
 | `HOST` | `0.0.0.0` | Server host |
-| `SKILLS_DIR` | `./skills` | Directory containing local triks |
+| `SKILLS_DIR` | - | Directory containing local triks (optional) |
 | `CONFIG_PATH` | - | Path to `.trikhub/config.json` for npm-installed triks |
 | `AUTH_TOKEN` | - | Bearer token for authentication (optional) |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |

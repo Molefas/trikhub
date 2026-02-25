@@ -30,7 +30,7 @@ const server = new McpServer({
 
 server.tool(
   'analyze_trik_requirements',
-  'Analyze a user description and suggest trik architecture, actions, and capabilities. Call this first to understand what to build.',
+  'Analyze a user description and suggest trik architecture, agent mode, tools, and capabilities. Call this first to understand what to build.',
   {
     description: z.string().describe('What the user wants the trik to do'),
     constraints: z.string().optional().describe('Any specific requirements (API, language, etc)'),
@@ -243,7 +243,7 @@ const MANIFEST_SCHEMA_DOC = `# TrikHub v2 Manifest Schema
 | description | string | What the trik does |
 | version | string | Semantic version |
 | agent | AgentDefinition | How this trik operates as an agent |
-| entry | EntryPoint | Module entry point |
+| entry | EntryDefinition | Module entry point |
 
 ## Optional Fields
 
@@ -271,6 +271,14 @@ const MANIFEST_SCHEMA_DOC = `# TrikHub v2 Manifest Schema
 *Conversational mode requires one of systemPrompt or systemPromptFile (not both).
 Tool-mode triks should NOT have handoffDescription or systemPrompt.
 
+### Model Preferences
+
+| Field | Type | Description |
+|-------|------|-------------|
+| provider | string | Provider hint: "anthropic", "openai", "any" |
+| capabilities | string[] | Required model capabilities, e.g. ["tool_use"] |
+| temperature | number | Temperature for generation (0.0-2.0) |
+
 ## Tool Declaration
 
 | Field | Type | Required | Description |
@@ -281,6 +289,31 @@ Tool-mode triks should NOT have handoffDescription or systemPrompt.
 | inputSchema | JSONSchema | Tool-mode only | JSON Schema for tool input |
 | outputSchema | JSONSchema | Tool-mode only | JSON Schema for tool output (agent-safe types) |
 | outputTemplate | string | Tool-mode only | Template with {{placeholders}} for output sent to LLM |
+
+## Entry Definition
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| module | string | Yes | Path to compiled module (relative to trik directory) |
+| export | string | Yes | Export name (usually "default") |
+| runtime | "node" \\| "python" | No | Runtime environment (defaults to "node") |
+
+## Capabilities
+
+### Session
+
+| Field | Type | Description |
+|-------|------|-------------|
+| enabled | boolean | Whether session state is enabled |
+| maxDurationMs | number | Maximum session duration in ms (default: 30 minutes) |
+
+### Storage
+
+| Field | Type | Description |
+|-------|------|-------------|
+| enabled | boolean | Whether persistent storage is enabled |
+| maxSizeBytes | number | Maximum storage size in bytes (default: 100MB) |
+| persistent | boolean | Whether storage persists across sessions (default: true) |
 
 ## Configuration
 

@@ -28,7 +28,7 @@ Options:
 Environment Variables:
   PORT                 Server port (default: 3000)
   HOST                 Server host (default: 0.0.0.0)
-  SKILLS_DIR           Directory containing skills (default: ./skills)
+  SKILLS_DIR           Directory containing local trik files (optional)
   CONFIG_PATH          Path to .trikhub/config.json for npm-based skills
   BASE_DIR             Base directory for resolving node_modules (default: dirname of CONFIG_PATH)
   AUTH_TOKEN           Bearer token for authentication (optional)

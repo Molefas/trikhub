@@ -19,12 +19,15 @@ async function main() {
   console.log("LangGraph Agent CLI with TrikHub Handoff Support");
   console.log("Loading...\n");
 
-  const { app, loadedTriks, provider } = await initializeAgent();
+  const { app, handoffTools, exposedTools, provider } = await initializeAgent();
 
   console.log(`LLM: ${provider.provider} (${provider.model})`);
   console.log(`Built-in tools: get_weather, calculate, search_web`);
-  if (loadedTriks.length > 0) {
-    console.log(`Triks (handoff): ${loadedTriks.join(', ')}`);
+  if (handoffTools.length > 0) {
+    console.log(`Handoff triks: ${handoffTools.join(', ')}`);
+  }
+  if (exposedTools.length > 0) {
+    console.log(`Tool-mode triks: ${exposedTools.join(', ')}`);
   }
   console.log('Type "/back" to return from a trik handoff, "exit" to quit.\n');
 

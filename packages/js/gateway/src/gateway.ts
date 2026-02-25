@@ -300,7 +300,7 @@ export class TrikGateway {
 
   /**
    * Generate handoff tool definitions — one per loaded conversational trik.
-   * These get added to the main agent's tool set by enhance() (Phase 5).
+   * These get added to the main agent's tool set by the LangChain adapter.
    */
   getHandoffTools(): HandoffToolDefinition[] {
     const tools: HandoffToolDefinition[] = [];

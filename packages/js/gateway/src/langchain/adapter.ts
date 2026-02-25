@@ -1,13 +1,12 @@
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { BaseMessage } from '@langchain/core/messages';
-import { AIMessage, ToolMessage, HumanMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import {
   TrikGateway,
   type TrikGatewayConfig,
   type LoadFromConfigOptions,
   type HandoffToolDefinition,
-  type ExposedToolDefinition,
 } from '../gateway.js';
 import { jsonSchemaToZod } from './schema-converter.js';
 
@@ -158,12 +157,6 @@ export async function enhance(
   // Per-session message history for the main agent
   const mainMessages = new Map<string, BaseMessage[]>();
 
-  // Build the handoff tools as LangChain DynamicStructuredTools
-  const handoffTools = buildHandoffTools(gateway.getHandoffTools());
-
-  // Build exposed tools from tool-mode triks
-  const exposedTools = buildExposedTools(gateway);
-
   return {
     gateway,
 
@@ -222,7 +215,6 @@ export async function enhance(
             mainMessages,
             sessionId,
             message,
-            handoffTools,
             debug,
             verbose
           );
@@ -246,7 +238,6 @@ async function invokeMainAgent(
   mainMessages: Map<string, BaseMessage[]>,
   sessionId: string,
   message: string,
-  handoffTools: DynamicStructuredTool[],
   debug: LogFn,
   verbose: LogFn
 ): Promise<EnhancedResponse> {

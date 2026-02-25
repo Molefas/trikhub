@@ -37,7 +37,6 @@ export {
 export {
   PythonWorker,
   type PythonWorkerConfig,
-  type ExecutePythonTrikOptions,
   getSharedPythonWorker,
   shutdownSharedPythonWorker,
 } from './python-worker.js';

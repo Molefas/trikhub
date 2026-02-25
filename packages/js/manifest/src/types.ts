@@ -66,8 +66,8 @@ export interface AgentDefinition {
 
 /**
  * Tool declaration in the manifest.
- * Describes an internal tool the agent uses — not the tool's runtime schema
- * (which lives in code), but metadata for logging and quality scoring.
+ * For conversational mode: metadata for logging and quality scoring (runtime schemas live in code).
+ * For tool mode: the full runtime contract — inputSchema, outputSchema, and outputTemplate are required.
  */
 export interface ToolDeclaration {
   /** What this tool does */

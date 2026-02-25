@@ -131,11 +131,12 @@ trik install @scope/trik-name --version 1.2.3
 
 The install process:
 
-1. **Tries npm registry first** - If the package is published to npm, installs via your package manager (npm/pnpm/yarn)
-2. **Falls back to TrikHub registry** - For GitHub-only packages, downloads from GitHub
-3. Adds the dependency to `package.json`
-4. **Validates** the trik (manifest structure, security rules)
-5. Registers the trik in `.trikhub/config.json`
+1. **Checks TrikHub registry first** - The primary source for triks
+2. **Same-language triks**: adds git URL to `package.json` and installs via npm/pnpm/yarn
+3. **Cross-language triks**: downloads to `.trikhub/triks/`
+4. **Falls back to npm** - If not found on TrikHub, tries npm as fallback
+5. **Validates** the trik (manifest structure, security rules)
+6. Registers the trik in `.trikhub/config.json`
 
 ### `trik search <query>`
 
@@ -251,8 +252,8 @@ your-trik/
 Your `manifest.json` must pass v2 validation:
 
 - `schemaVersion: 2` required
-- `agent` block with `mode`, `handoffDescription`, and `domain` required
-- Conversational mode requires `systemPrompt` or `systemPromptFile`
+- `agent` block with `mode` and `domain` required
+- Conversational mode requires `handoffDescription` and `systemPrompt`/`systemPromptFile`
 - Log schema strings must be constrained (enum, format, pattern, or maxLength)
 
 ## Authentication

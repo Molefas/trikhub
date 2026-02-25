@@ -1,4 +1,3 @@
-import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { ToolCallRecord } from '@trikhub/manifest';
 import { TRANSFER_BACK_TOOL_NAME } from './transfer-back.js';
@@ -15,13 +14,23 @@ export interface ExtractedToolInfo {
   responseMessage: string;
 }
 
+// ============================================================================
+// Duck-typed message checks (avoids instanceof failures across packages)
+// ============================================================================
+
+function isToolMessage(msg: BaseMessage): boolean {
+  return msg._getType() === 'tool';
+}
+
+function isAIMessage(msg: BaseMessage): boolean {
+  return msg._getType() === 'ai';
+}
+
 /**
  * Extract tool call records and transfer-back signal from LangGraph message history.
  *
- * Parses messages starting from `startIndex` to find:
- * 1. AIMessage tool_calls → matched with ToolMessage results → ToolCallRecord[]
- * 2. Whether transfer_back was called → transferBack flag
- * 3. The last AIMessage text content → responseMessage
+ * Uses duck typing (_getType()) instead of instanceof to handle cases where
+ * the trik's @langchain/core is a different package instance than the SDK's.
  *
  * @param messages - Full message history from agent.invoke()
  * @param startIndex - Index to start scanning from (skip previously processed messages)
@@ -38,23 +47,25 @@ export function extractToolInfo(
   const toolResults = new Map<string, string>();
   for (let i = startIndex; i < messages.length; i++) {
     const msg = messages[i];
-    if (msg instanceof ToolMessage) {
+    if (isToolMessage(msg)) {
+      const toolCallId = (msg as unknown as { tool_call_id: string }).tool_call_id;
       const content =
         typeof msg.content === 'string'
           ? msg.content
           : JSON.stringify(msg.content);
-      toolResults.set(msg.tool_call_id, content);
+      toolResults.set(toolCallId, content);
     }
   }
 
   // Extract tool calls from AI messages and capture the final response
   for (let i = startIndex; i < messages.length; i++) {
     const msg = messages[i];
-    if (!(msg instanceof AIMessage)) continue;
+    if (!isAIMessage(msg)) continue;
 
     // Process tool calls if present
-    if (msg.tool_calls && msg.tool_calls.length > 0) {
-      for (const tc of msg.tool_calls) {
+    const toolCallsArr = (msg as unknown as { tool_calls?: Array<{ id?: string; name: string; args?: Record<string, unknown> }> }).tool_calls;
+    if (toolCallsArr && toolCallsArr.length > 0) {
+      for (const tc of toolCallsArr) {
         if (tc.name === TRANSFER_BACK_TOOL_NAME) {
           transferBack = true;
           continue;
@@ -86,11 +97,33 @@ export function extractToolInfo(
     }
 
     // Capture text content from AI messages (last one wins)
-    const content = msg.content;
-    if (typeof content === 'string' && content.length > 0) {
-      responseMessage = content;
+    const text = extractTextContent(msg.content);
+    if (text.length > 0) {
+      responseMessage = text;
     }
   }
 
   return { toolCalls, transferBack, responseMessage };
+}
+
+/**
+ * Extract text from message content, handling both string and array-of-blocks formats.
+ */
+function extractTextContent(content: unknown): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .filter(
+        (block): block is { type: 'text'; text: string } =>
+          typeof block === 'object' &&
+          block !== null &&
+          block.type === 'text' &&
+          typeof block.text === 'string'
+      )
+      .map((block) => block.text)
+      .join('');
+  }
+  return '';
 }

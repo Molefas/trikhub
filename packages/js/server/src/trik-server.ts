@@ -1,6 +1,5 @@
 import type { FastifyInstance } from 'fastify';
 import type { TrikGateway } from '@trikhub/gateway';
-import { FileConfigStore } from '@trikhub/gateway';
 import { createServer } from './server.js';
 import { SkillLoader, type LoadResult } from './services/skill-loader.js';
 
@@ -45,18 +44,6 @@ export interface TrikServerOptions {
 
   /** Allowlist of trik IDs (optional) */
   allowedSkills?: string[];
-}
-
-/**
- * Events emitted by TrikServer
- */
-export interface TrikServerEvents {
-  initialized: () => void;
-  started: (url: string) => void;
-  stopped: () => void;
-  error: (error: Error) => void;
-  trikLoaded: (trikId: string) => void;
-  trikFailed: (trikId: string, error: string) => void;
 }
 
 /**
@@ -167,7 +154,7 @@ export class TrikServer {
 
     this.gateway = this.skillLoader.getGateway();
 
-    // Load secrets (this is the step that was being forgotten!)
+    // Load secrets before discovering triks (config values may be needed at load time)
     const configStore = this.gateway.getConfigStore();
     await configStore.load();
 

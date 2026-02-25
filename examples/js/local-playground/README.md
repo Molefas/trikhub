@@ -1,9 +1,10 @@
 # TrikHub Local Playground
-This demo shows how to enhance an existing LangGraph agent with TrikHub handoff support using the v2 `enhance()` API. The agent gains the ability to hand off conversations to specialist trik agents and receive control back seamlessly.
+This demo shows how to enhance an existing LangGraph agent with TrikHub support using the v2 `enhance()` API. The agent gains the ability to hand off conversations to specialist trik agents (conversational mode) and use trik-provided tools directly (tool mode).
 
 ## What You'll Learn
-- How to enhance an agent with TrikHub handoff support using `enhance()`
+- How to enhance an agent with TrikHub support using `enhance()`
 - How the handoff routing model works (`talk_to_X` tools, `transfer_back`)
+- How tool-mode triks expose native tools to the main agent
 - How to use `/back` to force a transfer-back from any trik handoff
 
 ## Architecture
@@ -28,40 +29,28 @@ This demo shows how to enhance an existing LangGraph agent with TrikHub handoff 
 
 ## Quick Start
 
-**1. Install dependencies**
-
-From the monorepo root:
-
-## Clone the repository
+**1. Clone and build**
 
 ```bash
 git clone https://github.com/molefas/trikhub.git
 cd trikhub
-```
-
-## Setup
-
-```bash
-# Install dependencies and build packages
 pnpm install
 pnpm build
-
-# Navigate to the example
-cd examples/js/local-playground
-
-# Install dependencies just for the demo
-npm install
-
-# Provide an LLM key to the main Agent
-cp .env.example .env
-# Edit .env and add your LLM's API KEY
 ```
 
+**2. Set up the playground**
+
 ```bash
-# Provide an LLM key to the Trik Agent
-cd .trikhub
-cp secrets.json.example secrets.json
-# Edit secrets.json with your LLM's API KEY
+cd examples/js/local-playground
+npm install
+
+# Provide an LLM key to the main agent
+cp .env.example .env
+# Edit .env and add your API key
+
+# Provide an LLM key for trik agents
+cp .trikhub/secrets.json.example .trikhub/secrets.json
+# Edit secrets.json with the trik's API key
 ```
 
 **3. Run the agent**
@@ -74,9 +63,13 @@ You should see:
 
 ```
 LangGraph Agent CLI with TrikHub Handoff Support
+Loading...
 
-Loaded 1 trik(s).
-Type your message, /back to return from handoff, or "exit" to quit.
+LLM: openai (gpt-4o-mini)
+Built-in tools: get_weather, calculate, search_web
+Handoff triks: talk_to_content_hoarder
+Tool-mode triks: searchArticles
+Type "/back" to return from a trik handoff, "exit" to quit.
 
 You:
 ```
@@ -128,25 +121,22 @@ I've shipped a few basic Triks for this example:
 You can find more details on how to interact with each Trik in their documentations.
 Find more about these on [Trikhub.com](https://trikhub.com).
 
-## Handoff Model
+## Trik Modes
 
-The v2 architecture uses a handoff routing model instead of the v1 template/passthrough modes.
+TrikHub v2 supports two modes for triks:
 
-### talk_to_X tools
+### Conversational Mode (Handoff)
 
-When triks are loaded, the gateway generates a `talk_to_<trik-name>` tool for each trik. The main agent calls these tools to hand off the conversation to a specialist trik agent. For example, installing a content-hoarder trik creates a `talk_to_content_hoarder` tool.
+Conversational triks are full agents that take over the conversation. The gateway generates a `talk_to_<trik-name>` tool for each one.
 
-### transfer_back
+- **talk_to_X**: The main agent calls this tool to hand off to a specialist trik agent
+- **transfer_back**: The trik agent calls this when it has finished, returning control to the main agent
+- **/back command**: Type `/back` in the CLI to force a transfer-back if the trik doesn't return on its own
+- **Session state**: Triks remember context within a session
 
-Each trik agent has a `transfer_back` tool it can call when it has finished its task. This returns control to the main agent with the trik's response.
+### Tool Mode (Exposed Tools)
 
-### /back command
-
-If a trik agent does not transfer back on its own, the user can type `/back` in the CLI to force a transfer-back. This is useful when the trik enters a loop or you simply want to return to the main agent.
-
-### Session State
-
-Triks remember context within a session. When you say "the healthcare one", the trik resolves this reference using the history of your conversation.
+Tool-mode triks export individual tools that appear as native tools on the main agent. No handoff occurs — the main agent calls the tool directly and receives a structured response. The trik's `outputTemplate` controls what the main agent sees.
 
 ## Project Structure
 
@@ -155,11 +145,11 @@ local-playground/
 ├── src/
 │   ├── cli.ts          # Interactive REPL
 │   ├── agent.ts        # LangGraph workflow with enhance()
-│   └── tools.ts        # Built-in tools + trik loader
-│   └── llm.ts          # LangGraph model selection based on key provided
+│   ├── tools.ts        # Built-in demo tools (weather, calc, search)
+│   └── llm.ts          # Multi-provider LLM selection
 ├── .trikhub/
-│   └── config.json     # Installed triks (once there are Triks installed)
-│   └── secrets.json    # Secrets segregation per Trik
+│   ├── config.json     # Installed triks (created by `trik install`)
+│   └── secrets.json    # Per-trik API keys and secrets
 ├── .env.example        # Environment template
 └── package.json
 ```
@@ -212,11 +202,7 @@ The JavaScript gateway can execute Python triks through a worker subprocess. Thi
      "triks": [
        "@molefas/trik-article-search",
        "@molefas/trik-article-search-py"
-     ],
-     "trikhub": {
-       "@molefas/trik-article-search": "1.0.1",
-       "@molefas/trik-article-search-py": "1.0.0"
-     }
+     ]
    }
    ```
 

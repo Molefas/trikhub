@@ -10,7 +10,6 @@ import {
   type LintResult,
   checkForbiddenImports,
   checkDynamicCodeExecution,
-  checkUndeclaredTools,
   checkProcessEnvAccess,
 } from './rules.js';
 
@@ -135,19 +134,23 @@ export class TrikLinter {
    * Find all TypeScript files in the trik directory
    */
   private async findSourceFiles(trikPath: string): Promise<string[]> {
-    const fs = await import('node:fs/promises');
-    const entries = await fs.readdir(trikPath, { withFileTypes: true });
-
     const tsFiles: string[] = [];
-    for (const entry of entries) {
-      if (entry.isFile() && (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx'))) {
-        // Skip test files and declaration files
-        if (!entry.name.includes('.test.') && !entry.name.includes('.spec.') && !entry.name.endsWith('.d.ts')) {
-          tsFiles.push(join(trikPath, entry.name));
+
+    const scanDir = async (dir: string) => {
+      const entries = await readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory() && entry.name === 'src') {
+          await scanDir(join(dir, entry.name));
+        } else if (entry.isFile() && (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx'))) {
+          // Skip test files and declaration files
+          if (!entry.name.includes('.test.') && !entry.name.includes('.spec.') && !entry.name.endsWith('.d.ts')) {
+            tsFiles.push(join(dir, entry.name));
+          }
         }
       }
-    }
+    };
 
+    await scanDir(trikPath);
     return tsFiles;
   }
 
@@ -323,7 +326,7 @@ export class TrikLinter {
       });
     }
 
-    // 6. Analyze each source file
+    // 7. Analyze each source file
     for (const filePath of sourceFiles) {
       const content = await readFile(filePath, 'utf-8');
       const sourceFile = this.parseTypeScript(filePath, content);
@@ -336,11 +339,6 @@ export class TrikLinter {
       // Check dynamic code execution
       if (!this.shouldSkipRule('no-dynamic-code')) {
         results.push(...checkDynamicCodeExecution(sourceFile));
-      }
-
-      // Check undeclared tools
-      if (!this.shouldSkipRule('undeclared-tool')) {
-        results.push(...checkUndeclaredTools(sourceFile, []));
       }
 
       // Check process.env access
@@ -365,7 +363,7 @@ export class TrikLinter {
    * Lint manifest with privilege separation rules
    */
   private lintManifest(_manifest: TrikManifest, _manifestPath: string): LintResult[] {
-    // Stub — v1 TDPS rules removed in P1, v2 quality rules in P2
+    // Stub — manifest-level quality rules (beyond schema validation) to be added here
     return [];
   }
 

@@ -204,7 +204,7 @@ const systemPrompt = readFileSync(join(__dirname, '../src/prompts/system.md'), '
 
 export default wrapAgent((context: TrikContext) => {
 ${destructureStr}  const model = new ChatAnthropic({
-    modelName: 'claude-sonnet-4-20250514',
+    modelName: 'claude-sonnet-4-6',
     anthropicApiKey: ${hasConfig ? "config.get('ANTHROPIC_API_KEY')" : "process.env.ANTHROPIC_API_KEY"},
   });
 

@@ -8,7 +8,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface, type Interface } from 'node:readline';
 import { EventEmitter } from 'node:events';
-import type { TrikConfigContext, TrikStorageContext } from '@trikhub/manifest';
+import type { TrikStorageContext } from '@trikhub/manifest';
 import {
   createHealthRequest,
   createShutdownRequest,
@@ -33,13 +33,6 @@ export interface PythonWorkerConfig {
   invokeTimeoutMs?: number;
   /** Whether to enable debug logging */
   debug?: boolean;
-}
-
-export interface ExecutePythonTrikOptions {
-  /** Configuration context for API keys */
-  config?: TrikConfigContext;
-  /** Storage context for persistent data */
-  storage?: TrikStorageContext;
 }
 
 type PendingRequest = {
@@ -184,8 +177,6 @@ export class PythonWorker extends EventEmitter {
         });
     });
   }
-
-  // invoke() stub — v1 action-based execution removed in P1. v2 processMessage() in P3.
 
   /**
    * Check worker health.
@@ -418,16 +409,6 @@ export class PythonWorker extends EventEmitter {
     }
   }
 
-  private configContextToRecord(config: TrikConfigContext): Record<string, string> {
-    const result: Record<string, string> = {};
-    for (const key of config.keys()) {
-      const value = config.get(key);
-      if (value !== undefined) {
-        result[key] = value;
-      }
-    }
-    return result;
-  }
 }
 
 // Singleton worker manager for efficiency

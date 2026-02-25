@@ -132,6 +132,19 @@ const ERROR_PATTERNS: ErrorPattern[] = [
     },
   },
 
+  // Linter: has-source-files
+  {
+    pattern: /no typescript source files|has-source-files/i,
+    diagnosis: {
+      explanation:
+        'The linter checks that the trik directory contains TypeScript source files. It scans the root and src/ directory for .ts/.tsx files (excluding .test., .spec., and .d.ts).',
+      rootCause: 'No TypeScript source files were found in the trik root or src/ directory.',
+      suggestedFix:
+        'Ensure your source files are in the trik root or in a src/ subdirectory. If you use a different layout, check that .ts files exist in one of these locations.',
+      relatedDocs: ['https://trikhub.dev/docs/creating-triks/structure'],
+    },
+  },
+
   // Entry point errors
   {
     pattern: /entry.*not found|module.*not found|cannot find.*entry/i,

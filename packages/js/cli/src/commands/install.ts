@@ -650,8 +650,11 @@ export async function installCommand(
     let versionSpec = options.version;
 
     // Handle @scope/name@version format
+    // For scoped packages (@scope/name@version), the version @ comes after the /
     const atIndex = trikInput.lastIndexOf('@');
-    if (atIndex > 0 && !trikInput.startsWith('@', atIndex)) {
+    const slashIndex = trikInput.indexOf('/');
+    const isVersionSuffix = atIndex > 0 && (!trikInput.startsWith('@') || atIndex > slashIndex);
+    if (isVersionSuffix) {
       packageName = trikInput.substring(0, atIndex);
       versionSpec = versionSpec ?? trikInput.substring(atIndex + 1);
     }

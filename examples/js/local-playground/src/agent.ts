@@ -42,6 +42,8 @@ export async function initializeAgent() {
   return {
     app,
     loadedTriks: app.getLoadedTriks(),
+    handoffTools: handoffTools.map((t) => t.name),
+    exposedTools: exposedTools.map((t) => t.name),
     provider: providerInfo,
   };
 }
