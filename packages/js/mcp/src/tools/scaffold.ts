@@ -139,8 +139,8 @@ function generateManifest(input: ScaffoldInput): string {
   // Limits and entry
   manifest.limits = { maxTurnTimeMs: 30000 };
   manifest.entry = {
-    module: input.language === 'ts' ? './dist/agent.js' : `./${input.name.replace(/-/g, '_')}/agent.py`,
-    export: 'default',
+    module: input.language === 'ts' ? './dist/agent.js' : './src/agent.py',
+    export: input.language === 'ts' ? 'default' : 'agent',
     ...(input.language === 'py' ? { runtime: 'python' } : {}),
   };
 
@@ -340,41 +340,218 @@ dist/
 `;
 }
 
-function generatePyAgent(input: ScaffoldInput): string {
-  const moduleName = input.name.replace(/-/g, '_');
+function generatePyConversationalAgent(input: ScaffoldInput): string {
   return `"""
-${input.displayName} — agent entry point.
+${input.displayName} — conversational agent
+
+Uses LangGraph ReAct pattern with the TrikHub SDK.
 """
 
-from typing import Any
+from __future__ import annotations
+
+from langchain_anthropic import ChatAnthropic
+from langgraph.prebuilt import create_react_agent
+
+from trikhub.sdk import wrap_agent, transfer_back_tool
+from trikhub.manifest import TrikContext
+
+from .tools.example import example_tool
 
 
-async def process_message(message: str, context: dict[str, Any]) -> dict[str, Any]:
-    """Process a user message and return a response."""
-    # TODO: Implement your agent logic here
-    return {
-        "message": f"Received: {message}",
-        "transferBack": False,
-        "toolCalls": [],
-    }
+def create_agent(context: TrikContext):
+    """Factory that creates a new agent per session."""
+    model = ChatAnthropic(model="claude-sonnet-4-20250514")
+
+    tools = [example_tool, transfer_back_tool]
+
+    return create_react_agent(
+        model,
+        tools=tools,
+    )
 
 
-# Default export for TrikHub
-default = process_message
+# Export wrapped agent for the TrikHub worker
+agent = wrap_agent(create_agent)
+`;
+}
+
+function generatePyToolAgent(input: ScaffoldInput): string {
+  const tools = input.tools || [{ name: 'exampleTool', description: 'An example tool' }];
+
+  const handlerFuncs = tools
+    .map((t) => {
+      const handlerName = `handle_${toSnakeCase(t.name)}`;
+      return `
+async def ${handlerName}(input_data: dict, context) -> dict:
+    """Handle ${t.name} tool calls."""
+    query = input_data.get("query", "")
+    return {"result": f"Processed: {query}"}
+`;
+    })
+    .join('\n');
+
+  const handlerMap = tools
+    .map((t) => `    "${t.name}": handle_${toSnakeCase(t.name)},`)
+    .join('\n');
+
+  return `"""
+${input.displayName} — tool mode agent
+
+Exports native tools via wrap_tool_handlers from the TrikHub SDK.
+"""
+
+from __future__ import annotations
+
+from trikhub.sdk import wrap_tool_handlers
+
+${handlerFuncs}
+
+# Export wrapped tool handlers for the TrikHub worker
+agent = wrap_tool_handlers({
+${handlerMap}
+})
+`;
+}
+
+function generatePyExampleTool(): string {
+  return `"""Example tool for the conversational agent."""
+
+from langchain_core.tools import tool
+
+
+@tool
+def example_tool(query: str) -> str:
+    """Search for information about a topic.
+
+    Args:
+        query: The search query.
+    """
+    return f"Result for: {query}"
+`;
+}
+
+function generatePySystemPrompt(input: ScaffoldInput): string {
+  return `You are ${input.displayName}, a helpful assistant.
+
+${input.description}
+
+When you have finished helping the user, use the transfer_back tool to return control to the main agent.
+`;
+}
+
+function generatePyTestFile(input: ScaffoldInput): string {
+  if (input.mode === 'tool') {
+    const toolName = (input.tools || [{ name: 'exampleTool' }])[0].name;
+    return `"""Local test script — run with: python test.py"""
+
+import asyncio
+from src.agent import agent
+
+
+async def main():
+    result = await agent.execute_tool(
+        "${toolName}",
+        {"query": "hello world"},
+        context=None,
+    )
+    print(result)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+`;
+  }
+
+  return `"""Local test script — run with: python test.py"""
+
+import asyncio
+from src.agent import agent
+
+
+async def main():
+    result = await agent.process_message(
+        "Hello! What can you do?",
+        session_id="test-session",
+        context=None,
+    )
+    print(result)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 `;
 }
 
 function generatePyProjectToml(input: ScaffoldInput): string {
-  return `[project]
+  const isConversational = input.mode === 'conversational';
+  const deps = isConversational
+    ? `    "trikhub-sdk>=0.1.0",
+    "langchain-anthropic>=0.3.0",
+    "langgraph>=0.2.0",`
+    : `    "trikhub-sdk>=0.1.0",`;
+
+  return `[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
 name = "${input.name}"
 version = "0.1.0"
 description = "${input.description}"
+readme = "README.md"
 requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+${deps}
+]
 
-[build-system]
-requires = ["setuptools>=68.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/**",
+    "manifest.json",
+    "trikhub.json",
+    "README.md",
+]
 `;
+}
+
+function generatePyTrikhubJson(input: ScaffoldInput): string {
+  return JSON.stringify(
+    {
+      displayName: input.displayName,
+      shortDescription: input.description,
+      categories: [input.category],
+      keywords: [input.name],
+      repository: `https://github.com/your-username/${input.name}`,
+    },
+    null,
+    2,
+  );
+}
+
+function generatePyGitignore(): string {
+  return `__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+.venv/
+venv/
+.DS_Store
+`;
+}
+
+/** Convert camelCase to snake_case */
+function toSnakeCase(name: string): string {
+  return name.replace(/([A-Z])/g, (_, c, i) => (i > 0 ? '_' : '') + c.toLowerCase());
 }
 
 // ============================================================================
@@ -445,18 +622,68 @@ export function scaffoldTrik(input: ScaffoldInput): ScaffoldResult {
       nextSteps.push('6. Publish with `trik publish`');
     }
   } else {
-    // Python project
-    const moduleName = input.name.replace(/-/g, '_');
+    // Python project — v2 SDK patterns (wrap_agent / wrap_tool_handlers)
+    if (input.mode === 'conversational') {
+      files.push({
+        path: 'src/agent.py',
+        content: generatePyConversationalAgent(input),
+      });
 
-    files.push({
-      path: `${moduleName}/agent.py`,
-      content: generatePyAgent(input),
-    });
+      files.push({
+        path: 'src/tools/example.py',
+        content: generatePyExampleTool(),
+      });
 
-    files.push({
-      path: `${moduleName}/__init__.py`,
-      content: `"""${input.displayName}"""\n`,
-    });
+      files.push({
+        path: 'src/tools/__init__.py',
+        content: '',
+      });
+
+      files.push({
+        path: 'src/__init__.py',
+        content: '',
+      });
+
+      files.push({
+        path: 'src/prompts/system.md',
+        content: generatePySystemPrompt(input),
+      });
+
+      // Separate tool files for conversational mode
+      for (const tool of input.tools || []) {
+        if (tool.name !== 'exampleTool') {
+          files.push({
+            path: `src/tools/${toSnakeCase(tool.name)}.py`,
+            content: `"""${tool.name} tool implementation."""
+
+from langchain_core.tools import tool
+
+
+@tool
+def ${toSnakeCase(tool.name)}(query: str) -> str:
+    """${tool.description}
+
+    Args:
+        query: Input for ${tool.name}.
+    """
+    # TODO: Implement ${tool.name}
+    return f"Result for: {query}"
+`,
+          });
+        }
+      }
+    } else {
+      // Tool mode
+      files.push({
+        path: 'src/agent.py',
+        content: generatePyToolAgent(input),
+      });
+
+      files.push({
+        path: 'src/__init__.py',
+        content: '',
+      });
+    }
 
     files.push({
       path: 'pyproject.toml',
@@ -464,14 +691,33 @@ export function scaffoldTrik(input: ScaffoldInput): ScaffoldResult {
     });
 
     files.push({
-      path: '.gitignore',
-      content: `__pycache__/\n*.pyc\n.env\ndist/\n*.egg-info/\n`,
+      path: 'trikhub.json',
+      content: generatePyTrikhubJson(input),
     });
 
-    nextSteps.push('1. Implement your agent logic in the agent.py file');
-    nextSteps.push('2. Add any required Python dependencies to pyproject.toml');
-    nextSteps.push('3. Test with `trik lint .` to validate your manifest');
-    nextSteps.push('4. Publish with `trik publish`');
+    files.push({
+      path: 'test.py',
+      content: generatePyTestFile(input),
+    });
+
+    files.push({
+      path: '.gitignore',
+      content: generatePyGitignore(),
+    });
+
+    if (input.mode === 'tool') {
+      nextSteps.push('1. Run `pip install -e .` to install in development mode');
+      nextSteps.push('2. Implement your tool handlers in src/agent.py');
+      nextSteps.push('3. Update inputSchema/outputSchema in manifest.json');
+      nextSteps.push('4. Run `python test.py` to test locally');
+      nextSteps.push('5. Publish with `trik publish`');
+    } else {
+      nextSteps.push('1. Run `pip install -e .` to install in development mode');
+      nextSteps.push('2. Implement your tools in src/tools/');
+      nextSteps.push('3. Customize the system prompt in src/prompts/system.md');
+      nextSteps.push('4. Run `python test.py` to test locally');
+      nextSteps.push('5. Publish with `trik publish`');
+    }
   }
 
   // Config secrets template

@@ -52,6 +52,8 @@ export {
   // v2 protocol types
   type ProcessMessageInput,
   type ProcessMessageResult,
+  type ExecuteToolInput,
+  type ExecuteToolResult,
   type HealthParams,
   type ShutdownParams,
   // Response types
@@ -69,6 +71,7 @@ export {
   // Message builders
   createRequest,
   createProcessMessageRequest,
+  createExecuteToolRequest,
   createHealthRequest,
   createShutdownRequest,
   createStorageRequest,

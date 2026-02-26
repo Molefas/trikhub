@@ -9,6 +9,7 @@ import {
   type TrikRuntime,
   type TrikAgent,
   type TrikContext,
+  type TrikConfigContext,
   type TrikResponse,
   type ToolCallRecord,
   type ToolDeclaration,
@@ -663,7 +664,7 @@ export class TrikGateway {
     if (runtime === 'python') {
       // Python triks use the worker protocol — create a proxy TrikAgent
       await this.ensurePythonWorker();
-      const agent = this.createPythonAgentProxy(manifest);
+      const agent = this.createPythonAgentProxy(manifest, trikPath);
       this.triks.set(manifest.id, { manifest, agent, path: trikPath, runtime });
     } else {
       // Node triks — dynamic import and extract TrikAgent
@@ -715,13 +716,76 @@ export class TrikGateway {
   /**
    * Create a proxy TrikAgent for Python triks that delegates to the worker protocol.
    */
-  private createPythonAgentProxy(manifest: TrikManifest): TrikAgent {
-    return {
-      processMessage: async (_message: string, _context: TrikContext): Promise<TrikResponse> => {
-        // Python worker integration deferred — types prepared now
-        throw new Error(`Python trik "${manifest.id}" execution not yet implemented`);
-      },
-    };
+  private createPythonAgentProxy(manifest: TrikManifest, trikPath: string): TrikAgent {
+    const agent: TrikAgent = {};
+
+    if (manifest.agent.mode === 'conversational') {
+      agent.processMessage = async (message: string, context: TrikContext): Promise<TrikResponse> => {
+        const worker = await this.ensurePythonWorker();
+
+        // Set storage context so the worker can proxy storage calls
+        worker.setStorageContext(context.storage);
+        try {
+          const result = await worker.processMessage({
+            trikPath,
+            message,
+            sessionId: context.sessionId,
+            config: this.configToRecord(context.config),
+            storageNamespace: manifest.id,
+          });
+
+          return {
+            message: result.message,
+            transferBack: result.transferBack,
+            toolCalls: result.toolCalls,
+          };
+        } finally {
+          worker.setStorageContext(null);
+        }
+      };
+    }
+
+    if (manifest.agent.mode === 'tool') {
+      agent.executeTool = async (
+        toolName: string,
+        input: Record<string, unknown>,
+        context: TrikContext
+      ): Promise<ToolExecutionResult> => {
+        const worker = await this.ensurePythonWorker();
+
+        worker.setStorageContext(context.storage);
+        try {
+          const result = await worker.executeTool({
+            trikPath,
+            toolName,
+            input,
+            sessionId: context.sessionId,
+            config: this.configToRecord(context.config),
+            storageNamespace: manifest.id,
+          });
+
+          return { output: result.output };
+        } finally {
+          worker.setStorageContext(null);
+        }
+      };
+    }
+
+    return agent;
+  }
+
+  /**
+   * Convert TrikConfigContext to a plain Record for the worker protocol.
+   */
+  private configToRecord(config: TrikConfigContext): Record<string, string> {
+    const record: Record<string, string> = {};
+    for (const key of config.keys()) {
+      const value = config.get(key);
+      if (value !== undefined) {
+        record[key] = value;
+      }
+    }
+    return record;
   }
 
   /**

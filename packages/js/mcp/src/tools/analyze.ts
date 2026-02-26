@@ -25,6 +25,17 @@ const TOOL_MODE_KEYWORDS = [
   'native tool', 'api', 'fetch', 'weather', 'data lookup',
 ];
 
+const PYTHON_KEYWORDS = [
+  'python', 'pip', 'pypi', 'django', 'flask', 'fastapi', 'pandas',
+  'numpy', 'scipy', 'pytorch', 'tensorflow', 'pydantic', 'asyncio',
+  'langchain python', 'python sdk', '.py',
+];
+
+const TYPESCRIPT_KEYWORDS = [
+  'typescript', 'javascript', 'node', 'npm', 'deno', 'bun', 'react',
+  'next.js', 'express', 'nestjs', 'zod', 'prisma', '.ts', '.js',
+];
+
 const STORAGE_KEYWORDS = [
   'remember', 'save', 'store', 'persist', 'history', 'cache', 'track',
   'log', 'bookmark', 'favorite', 'preference', 'database', 'data',
@@ -164,10 +175,13 @@ export function analyzeTrikRequirements(
   description: string,
   constraints?: string,
 ): AnalyzeResult {
-  const conversationalScore = countKeywords(description, CONVERSATIONAL_KEYWORDS);
-  const toolModeScore = countKeywords(description, TOOL_MODE_KEYWORDS);
-  const storageScore = countKeywords(description, STORAGE_KEYWORDS);
-  const sessionScore = countKeywords(description, SESSION_KEYWORDS);
+  const text = `${description} ${constraints || ''}`;
+  const conversationalScore = countKeywords(text, CONVERSATIONAL_KEYWORDS);
+  const toolModeScore = countKeywords(text, TOOL_MODE_KEYWORDS);
+  const storageScore = countKeywords(text, STORAGE_KEYWORDS);
+  const sessionScore = countKeywords(text, SESSION_KEYWORDS);
+  const pythonScore = countKeywords(text, PYTHON_KEYWORDS);
+  const tsScore = countKeywords(text, TYPESCRIPT_KEYWORDS);
 
   const isConversational = conversationalScore >= toolModeScore;
   const suggestedMode = isConversational ? 'conversational' : 'tool';
@@ -175,6 +189,13 @@ export function analyzeTrikRequirements(
   const modeReason = isConversational
     ? `Conversational mode recommended: description suggests interactive, multi-turn interactions (matched ${conversationalScore} conversational keywords vs ${toolModeScore} tool-mode keywords).`
     : `Tool mode recommended: description suggests native tools that export to the main agent (matched ${toolModeScore} tool-mode keywords vs ${conversationalScore} conversational keywords).`;
+
+  const suggestedLanguage: 'ts' | 'py' = pythonScore > tsScore ? 'py' : 'ts';
+  const languageReason = pythonScore > tsScore
+    ? `Python suggested: description mentions Python-related technologies (matched ${pythonScore} Python keywords vs ${tsScore} TypeScript keywords).`
+    : pythonScore === tsScore && pythonScore === 0
+      ? 'TypeScript suggested by default. Both Python and TypeScript are fully supported — specify your preference in constraints.'
+      : `TypeScript suggested: description mentions JS/TS-related technologies (matched ${tsScore} TypeScript keywords vs ${pythonScore} Python keywords).`;
 
   const tools = extractTools(description);
   const domain = extractDomainTags(description);
@@ -211,6 +232,8 @@ export function analyzeTrikRequirements(
   return {
     suggestedMode,
     modeReason,
+    suggestedLanguage,
+    languageReason,
     suggestedHandoffDescription: isConversational ? generateHandoffDescription(description) : '',
     suggestedDomain: domain,
     suggestedTools: tools,

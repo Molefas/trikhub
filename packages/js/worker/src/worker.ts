@@ -1,9 +1,15 @@
 #!/usr/bin/env node
 /**
- * JavaScript Worker for TrikHub
+ * JavaScript Worker for TrikHub (v2 Protocol)
  *
  * This module implements the worker process that executes JavaScript triks.
- * It communicates with the Python gateway via stdin/stdout using JSON-RPC 2.0.
+ * It communicates with the gateway via stdin/stdout using JSON-RPC 2.0.
+ *
+ * v2 Protocol methods:
+ *   - processMessage: Execute a conversational trik agent
+ *   - executeTool: Execute a tool-mode trik
+ *   - health: Health check
+ *   - shutdown: Graceful shutdown
  *
  * Usage:
  *    node -m @trikhub/worker-js
@@ -16,7 +22,13 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
-import type { TrikManifest } from '@trikhub/manifest';
+import type {
+  TrikManifest,
+  TrikAgent,
+  TrikContext,
+  TrikConfigContext,
+  TrikStorageContext,
+} from '@trikhub/manifest';
 
 // ============================================================================
 // JSON-RPC 2.0 Types
@@ -56,9 +68,7 @@ const WorkerErrorCodes = {
 
   // Custom worker errors
   TRIK_NOT_FOUND: 1001,
-  ACTION_NOT_FOUND: 1002,
   EXECUTION_TIMEOUT: 1003,
-  SCHEMA_VALIDATION_FAILED: 1004,
   WORKER_NOT_READY: 1005,
   STORAGE_ERROR: 1006,
 } as const;
@@ -122,10 +132,10 @@ function createStorageRequest(
 
 /**
  * Proxy for storage operations.
- * Storage calls are forwarded to the Python gateway via stdout,
+ * Storage calls are forwarded to the gateway via stdout,
  * and responses are received via stdin.
  */
-class StorageProxy {
+class StorageProxy implements TrikStorageContext {
   private pendingRequests = new Map<
     string,
     { resolve: (value: unknown) => void; reject: (error: Error) => void }
@@ -136,7 +146,7 @@ class StorageProxy {
     this.writeToStdout = writeToStdout;
   }
 
-  async get(key: string): Promise<unknown> {
+  async get(key: string): Promise<unknown | null> {
     const request = createStorageRequest('storage.get', { key });
     const response = await this.sendAndWait(request);
     return (response as Record<string, unknown>)?.value ?? null;
@@ -167,10 +177,11 @@ class StorageProxy {
     return ((response as Record<string, unknown>)?.keys as string[]) ?? [];
   }
 
-  async getMany(keys: string[]): Promise<Record<string, unknown>> {
+  async getMany(keys: string[]): Promise<Map<string, unknown>> {
     const request = createStorageRequest('storage.getMany', { keys });
     const response = await this.sendAndWait(request);
-    return ((response as Record<string, unknown>)?.values as Record<string, unknown>) ?? {};
+    const values = ((response as Record<string, unknown>)?.values as Record<string, unknown>) ?? {};
+    return new Map(Object.entries(values));
   }
 
   async setMany(entries: Record<string, unknown>): Promise<void> {
@@ -201,27 +212,21 @@ class StorageProxy {
 }
 
 // ============================================================================
-// Trik Loader
+// Trik Loader (v2)
 // ============================================================================
 
-interface TrikGraph {
-  invoke(input: unknown): Promise<unknown> | unknown;
-}
-
 /**
- * Loads and caches JavaScript trik modules.
+ * Loads and caches JavaScript trik TrikAgent instances.
  */
 class TrikLoader {
-  private cache = new Map<string, TrikGraph>();
+  private cache = new Map<string, TrikAgent>();
 
-  async load(trikPath: string, exportName = 'graph'): Promise<TrikGraph> {
-    const cacheKey = `${trikPath}:${exportName}`;
-    const cached = this.cache.get(cacheKey);
+  async load(trikPath: string): Promise<TrikAgent> {
+    const cached = this.cache.get(trikPath);
     if (cached) {
       return cached;
     }
 
-    // Find the manifest
     const trikDir = resolve(trikPath);
     const manifestPath = join(trikDir, 'manifest.json');
 
@@ -234,8 +239,8 @@ class TrikLoader {
 
     // Get entry info from manifest
     const entry = manifest.entry;
-    let modulePath = entry?.module ?? './graph.js';
-    const actualExportName = entry?.export ?? exportName;
+    let modulePath = entry?.module ?? './dist/index.js';
+    const exportName = entry?.export ?? 'agent';
 
     // Resolve relative path
     if (modulePath.startsWith('./')) {
@@ -249,36 +254,84 @@ class TrikLoader {
 
     // Import the module dynamically
     const moduleUrl = pathToFileURL(moduleFile).href;
-    const module = await import(moduleUrl);
+    const mod = await import(moduleUrl);
 
-    // Get the exported graph
-    const graph = module[actualExportName] as TrikGraph | undefined;
-    if (!graph) {
-      throw new Error(`Module does not export '${actualExportName}'`);
+    // Get the exported TrikAgent
+    const agent = (mod[exportName] ?? mod.default) as TrikAgent | undefined;
+    if (!agent) {
+      throw new Error(`Module does not export '${exportName}'`);
     }
 
-    this.cache.set(cacheKey, graph);
-    return graph;
+    // Validate that the agent has at least one method
+    if (typeof agent.processMessage !== 'function' && typeof agent.executeTool !== 'function') {
+      throw new Error(
+        `Export '${exportName}' is not a valid TrikAgent (missing processMessage or executeTool)`
+      );
+    }
+
+    this.cache.set(trikPath, agent);
+    return agent;
   }
 }
 
 // ============================================================================
-// JavaScript Worker
+// Context Builder
 // ============================================================================
 
-interface InvokeParams {
-  trikPath: string;
-  action: string;
-  input?: unknown;
-  session?: {
-    sessionId: string;
+/**
+ * Build a TrikConfigContext from a plain config record.
+ */
+function buildConfigContext(config: Record<string, string>): TrikConfigContext {
+  return {
+    get: (key: string) => config[key],
+    has: (key: string) => key in config,
+    keys: () => Object.keys(config),
   };
-  config?: Record<string, string>;
 }
 
 /**
- * JavaScript worker process for executing triks.
- * Communicates with the Python gateway via stdin/stdout using JSON-RPC 2.0.
+ * Build a TrikContext for passing to the trik agent.
+ */
+function buildTrikContext(
+  sessionId: string,
+  config: Record<string, string>,
+  storage: TrikStorageContext
+): TrikContext {
+  return {
+    sessionId,
+    config: buildConfigContext(config),
+    storage,
+  };
+}
+
+// ============================================================================
+// v2 Protocol Params
+// ============================================================================
+
+interface ProcessMessageParams {
+  trikPath: string;
+  message: string;
+  sessionId: string;
+  config: Record<string, string>;
+  storageNamespace: string;
+}
+
+interface ExecuteToolParams {
+  trikPath: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  sessionId: string;
+  config: Record<string, string>;
+  storageNamespace: string;
+}
+
+// ============================================================================
+// JavaScript Worker (v2)
+// ============================================================================
+
+/**
+ * JavaScript worker process for executing triks via v2 protocol.
+ * Communicates with the gateway via stdin/stdout using JSON-RPC 2.0.
  */
 class JavaScriptWorker {
   private trikLoader = new TrikLoader();
@@ -304,7 +357,7 @@ class JavaScriptWorker {
       if (!trimmedLine) continue;
 
       // Don't await - let the readline loop continue so we can receive
-      // storage proxy responses while an invoke is in progress
+      // storage proxy responses while a request is in progress
       this.handleMessage(trimmedLine).catch((error) => {
         const errorResponse = createErrorResponse(
           'unknown',
@@ -350,8 +403,10 @@ class JavaScriptWorker {
         return this.handleHealth(request);
       case 'shutdown':
         return this.handleShutdown(request);
-      case 'invoke':
-        return await this.handleInvoke(request);
+      case 'processMessage':
+        return await this.handleProcessMessage(request);
+      case 'executeTool':
+        return await this.handleExecuteTool(request);
       default:
         return createErrorResponse(
           request.id,
@@ -376,11 +431,10 @@ class JavaScriptWorker {
     return createSuccessResponse(request.id, { acknowledged: true });
   }
 
-  private async handleInvoke(request: JsonRpcRequest): Promise<JsonRpcResponse> {
-    const params = (request.params ?? {}) as unknown as InvokeParams;
+  private async handleProcessMessage(request: JsonRpcRequest): Promise<JsonRpcResponse> {
+    const params = (request.params ?? {}) as unknown as ProcessMessageParams;
 
-    const trikPath = params.trikPath;
-    if (!trikPath) {
+    if (!params.trikPath) {
       return createErrorResponse(
         request.id,
         WorkerErrorCodes.INVALID_PARAMS,
@@ -388,45 +442,96 @@ class JavaScriptWorker {
       );
     }
 
-    const action = params.action;
-    if (!action) {
+    if (!params.message && params.message !== '') {
       return createErrorResponse(
         request.id,
         WorkerErrorCodes.INVALID_PARAMS,
-        'Missing action parameter'
+        'Missing message parameter'
       );
     }
 
     try {
-      // Load the trik
-      const graph = await this.trikLoader.load(trikPath);
+      const agent = await this.trikLoader.load(params.trikPath);
 
-      // Build the input for the trik
-      const trikInput: Record<string, unknown> = {
-        action,
-        input: params.input,
-      };
-
-      if (params.session) {
-        trikInput.session = params.session;
+      if (typeof agent.processMessage !== 'function') {
+        return createErrorResponse(
+          request.id,
+          WorkerErrorCodes.INTERNAL_ERROR,
+          'Trik does not implement processMessage (not a conversational trik)'
+        );
       }
 
-      if (params.config) {
-        // Create a config context object similar to TrikConfigContext
-        trikInput.config = {
-          get: (key: string) => params.config?.[key],
-          has: (key: string) => key in (params.config ?? {}),
-          keys: () => Object.keys(params.config ?? {}),
-        };
+      const context = buildTrikContext(
+        params.sessionId,
+        params.config ?? {},
+        this.storageProxy
+      );
+
+      const response = await agent.processMessage(params.message, context);
+
+      return createSuccessResponse(request.id, {
+        message: response.message,
+        transferBack: response.transferBack,
+        toolCalls: response.toolCalls,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not found')) {
+        return createErrorResponse(
+          request.id,
+          WorkerErrorCodes.TRIK_NOT_FOUND,
+          error.message
+        );
       }
 
-      // Add storage proxy
-      trikInput.storage = this.storageProxy;
+      return createErrorResponse(
+        request.id,
+        WorkerErrorCodes.INTERNAL_ERROR,
+        `Execution error: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
 
-      // Execute the trik
-      const result = await Promise.resolve(graph.invoke(trikInput));
+  private async handleExecuteTool(request: JsonRpcRequest): Promise<JsonRpcResponse> {
+    const params = (request.params ?? {}) as unknown as ExecuteToolParams;
 
-      return createSuccessResponse(request.id, result);
+    if (!params.trikPath) {
+      return createErrorResponse(
+        request.id,
+        WorkerErrorCodes.INVALID_PARAMS,
+        'Missing trikPath parameter'
+      );
+    }
+
+    if (!params.toolName) {
+      return createErrorResponse(
+        request.id,
+        WorkerErrorCodes.INVALID_PARAMS,
+        'Missing toolName parameter'
+      );
+    }
+
+    try {
+      const agent = await this.trikLoader.load(params.trikPath);
+
+      if (typeof agent.executeTool !== 'function') {
+        return createErrorResponse(
+          request.id,
+          WorkerErrorCodes.INTERNAL_ERROR,
+          'Trik does not implement executeTool (not a tool-mode trik)'
+        );
+      }
+
+      const context = buildTrikContext(
+        params.sessionId,
+        params.config ?? {},
+        this.storageProxy
+      );
+
+      const result = await agent.executeTool(params.toolName, params.input ?? {}, context);
+
+      return createSuccessResponse(request.id, {
+        output: result.output,
+      });
     } catch (error) {
       if (error instanceof Error && error.message.includes('not found')) {
         return createErrorResponse(

@@ -11,6 +11,8 @@ import type { JSONSchema } from '@trikhub/manifest';
 export interface AnalyzeResult {
   suggestedMode: 'conversational' | 'tool';
   modeReason: string;
+  suggestedLanguage: 'ts' | 'py';
+  languageReason: string;
   suggestedHandoffDescription: string;
   suggestedDomain: string[];
   suggestedTools: Array<{

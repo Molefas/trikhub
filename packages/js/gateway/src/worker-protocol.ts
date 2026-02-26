@@ -38,13 +38,15 @@ export interface JsonRpcError {
 // Worker Request Types
 // ============================================================================
 
-export type WorkerMethod = 'processMessage' | 'health' | 'shutdown';
+export type WorkerMethod = 'processMessage' | 'executeTool' | 'health' | 'shutdown';
 
 /**
  * Input for processMessage — the v2 protocol.
  * Replaces v1's InvokeParams (action-based execution).
  */
 export interface ProcessMessageInput {
+  /** Path to the trik directory (so the worker can load the trik module) */
+  trikPath: string;
   /** The user's message to process */
   message: string;
   /** Session identifier for conversation continuity */
@@ -66,6 +68,32 @@ export interface ProcessMessageResult {
   transferBack: boolean;
   /** Tool calls made during processing (for log template filling) */
   toolCalls?: ToolCallRecord[];
+}
+
+/**
+ * Input for executeTool — tool-mode trik execution via worker protocol.
+ */
+export interface ExecuteToolInput {
+  /** Path to the trik directory (so the worker can load the trik module) */
+  trikPath: string;
+  /** The tool to execute */
+  toolName: string;
+  /** Input parameters for the tool */
+  input: Record<string, unknown>;
+  /** Session identifier */
+  sessionId: string;
+  /** Configuration context (API keys, tokens) */
+  config: Record<string, string>;
+  /** Storage namespace for the trik */
+  storageNamespace: string;
+}
+
+/**
+ * Result from executeTool — tool-mode trik execution result.
+ */
+export interface ExecuteToolResult {
+  /** The structured output from the tool */
+  output: Record<string, unknown>;
 }
 
 export interface HealthParams {
@@ -166,6 +194,12 @@ export function createProcessMessageRequest(
   input: ProcessMessageInput
 ): JsonRpcRequest {
   return createRequest('processMessage', input);
+}
+
+export function createExecuteToolRequest(
+  input: ExecuteToolInput
+): JsonRpcRequest {
+  return createRequest('executeTool', input);
 }
 
 export function createHealthRequest(): JsonRpcRequest {
