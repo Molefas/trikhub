@@ -12,7 +12,7 @@
  * 4. Update .trikhub/config.json with the trik
  */
 
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -179,26 +179,6 @@ async function writeNpmConfig(config: NpmTriksConfig, baseDir: string): Promise<
 }
 
 /**
- * Check if a package in node_modules is a valid trik
- */
-async function isTrikPackage(packagePath: string): Promise<boolean> {
-  const manifestPath = join(packagePath, 'manifest.json');
-
-  if (!existsSync(manifestPath)) {
-    return false;
-  }
-
-  try {
-    const content = await readFile(manifestPath, 'utf-8');
-    const manifest = JSON.parse(content);
-    const validation = validateManifest(manifest);
-    return validation.valid;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Add a trik to the config
  * @param trikhubVersion - If provided, marks this as a TrikHub-only package (not on npm)
  * @param runtime - The trik runtime (node or python) - used for cross-language uninstall
@@ -317,32 +297,6 @@ async function removeFromNodeModules(packageName: string, baseDir: string): Prom
     const { rm } = await import('node:fs/promises');
     await rm(packagePath, { recursive: true, force: true });
   }
-}
-
-/**
- * Try to install from npm registry
- */
-async function tryNpmInstall(
-  pm: PackageManager,
-  packageSpec: string,
-  baseDir: string
-): Promise<{ success: boolean; notFound: boolean }> {
-  // Use --prefix to explicitly set install directory (npm can ignore cwd in some contexts)
-  const args = pm === 'npm' ? ['install', '--prefix', baseDir, packageSpec] : ['add', packageSpec];
-
-  // Run silently to capture output
-  const result = await runCommand(pm, args, baseDir, { silent: true });
-
-  if (result.code === 0) {
-    return { success: true, notFound: false };
-  }
-
-  // Check if it's a 404 (not found) error
-  const isNotFound = result.stderr.includes('404') ||
-    result.stderr.includes('Not found') ||
-    result.stderr.includes('is not in this registry');
-
-  return { success: false, notFound: isNotFound };
 }
 
 /**
@@ -715,56 +669,8 @@ export async function installCommand(
         }
       }
     } else {
-      // Not on TrikHub registry - try npm as fallback for third-party packages
-      if (projectType === 'node') {
-        // Ensure node_modules exists
-        const nodeModulesPath = join(baseDir, 'node_modules');
-        if (!existsSync(nodeModulesPath)) {
-          mkdirSync(nodeModulesPath, { recursive: true });
-        }
-
-        // Detect package manager
-        const pm = detectPackageManager(baseDir);
-        spinner.info(`Not found on TrikHub, trying npm...`);
-        spinner.info(`Using ${chalk.cyan(pm)} as package manager`);
-
-        const packageSpec = versionSpec ? `${packageName}@${versionSpec}` : packageName;
-
-        // Try npm registry
-        spinner.start(`Looking for ${chalk.cyan(packageSpec)} on npm...`);
-        const npmResult = await tryNpmInstall(pm, packageSpec, baseDir);
-
-        if (npmResult.success) {
-          spinner.succeed(`Installed ${chalk.green(packageName)} from npm`);
-
-          // Check if the installed package is a trik and register it
-          spinner.start('Checking if package is a trik...');
-          const packagePath = join(baseDir, 'node_modules', ...packageName.split('/'));
-
-          if (await isTrikPackage(packagePath)) {
-            await addTrikToConfig(packageName, baseDir);
-            spinner.succeed(`Registered ${chalk.green(packageName)} as a trik`);
-
-            console.log();
-            console.log(chalk.dim(`  Added to: package.json`));
-            console.log(chalk.dim(`  Registered in: .trikhub/config.json`));
-            console.log();
-            console.log(chalk.dim('The trik will be available to your AI agent.'));
-          } else {
-            spinner.info(`${chalk.yellow(packageName)} installed but is not a trik (no manifest.json)`);
-            console.log(chalk.dim('\nThe package was added to your dependencies.'));
-          }
-        } else {
-          spinner.fail(`${chalk.red(packageName)} not found on TrikHub or npm`);
-          process.exit(1);
-        }
-      } else {
-        // Python project - not yet implemented
-        spinner.fail('Python project installation not yet implemented in this CLI');
-        console.log(chalk.dim('\nUse pip to install Python triks directly:'));
-        console.log(chalk.dim(`  pip install ${packageName}`));
-        process.exit(1);
-      }
+      spinner.fail(`${chalk.red(packageName)} not found on TrikHub registry`);
+      process.exit(1);
     }
 
   } catch (error) {
