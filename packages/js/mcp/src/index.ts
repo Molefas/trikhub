@@ -295,7 +295,7 @@ Tool-mode triks should NOT have handoffDescription or systemPrompt.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | module | string | Yes | Path to compiled module (relative to trik directory) |
-| export | string | Yes | Export name (usually "default") |
+| export | string | Yes | Export name ("default" for TypeScript, "agent" for Python) |
 | runtime | "node" \\| "python" | No | Runtime environment (defaults to "node") |
 
 ## Capabilities
@@ -385,6 +385,33 @@ Integer, number, and boolean fields are always safe.
 }
 \`\`\`
 
+#### Python Conversational Example
+
+\`\`\`json
+{
+  "schemaVersion": 2,
+  "id": "my-assistant",
+  "name": "My Assistant",
+  "description": "A conversational assistant for specific tasks",
+  "version": "1.0.0",
+  "agent": {
+    "mode": "conversational",
+    "handoffDescription": "Handles specific tasks with multi-turn conversations",
+    "systemPromptFile": "./src/prompts/system.md",
+    "model": { "capabilities": ["tool_use"] },
+    "domain": ["specific-domain"]
+  },
+  "tools": {
+    "doThing": {
+      "description": "Does the thing",
+      "logTemplate": "Did thing: {{result}}",
+      "logSchema": { "result": { "type": "string", "maxLength": 100 } }
+    }
+  },
+  "entry": { "module": "./src/agent.py", "export": "agent", "runtime": "python" }
+}
+\`\`\`
+
 ### Tool Mode
 
 \`\`\`json
@@ -418,6 +445,42 @@ Integer, number, and boolean fields are always safe.
     }
   },
   "entry": { "module": "./dist/index.js", "export": "default" }
+}
+\`\`\`
+
+#### Python Tool Mode Example
+
+\`\`\`json
+{
+  "schemaVersion": 2,
+  "id": "my-tool",
+  "name": "My Tool",
+  "description": "A tool that returns structured data to the main agent",
+  "version": "1.0.0",
+  "agent": {
+    "mode": "tool",
+    "domain": ["utilities"]
+  },
+  "tools": {
+    "lookup": {
+      "description": "Look up a value by ID",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "id": { "type": "string", "format": "uuid" } },
+        "required": ["id"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "enum": ["found", "not_found"] },
+          "category": { "type": "string", "enum": ["A", "B", "C"] }
+        },
+        "required": ["status"]
+      },
+      "outputTemplate": "Lookup {{status}}: category={{category}}"
+    }
+  },
+  "entry": { "module": "./src/tools.py", "export": "agent", "runtime": "python" }
 }
 \`\`\`
 `;
