@@ -8,7 +8,6 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import chalk from 'chalk';
 import ora from 'ora';
-import { validateManifest } from '@trikhub/manifest';
 import { parseTrikName } from '../types.js';
 import { registry } from '../lib/registry.js';
 import { isTrikInstalled, getInstalledTrik, getTrikPath } from '../lib/storage.js';
@@ -79,12 +78,6 @@ export async function infoCommand(
             if (manifestData.tools) {
               const toolNames = Object.keys(manifestData.tools);
               console.log(`  Tools: ${toolNames.join(', ')}`);
-            }
-            const validation = validateManifest(manifestData);
-            if (validation.qualityScore !== undefined) {
-              const score = validation.qualityScore;
-              const color = score >= 80 ? chalk.green : score >= 50 ? chalk.yellow : chalk.red;
-              console.log(`  Quality: ${color(`${score}/100`)}`);
             }
             console.log();
           }

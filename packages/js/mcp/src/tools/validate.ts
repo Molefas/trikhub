@@ -1,8 +1,8 @@
 /**
  * validate_manifest — v2 implementation.
  *
- * Validates a v2 manifest using the @trikhub/manifest validator,
- * reports errors with fix suggestions, and returns quality score.
+ * Validates a v2 manifest using the @trikhub/manifest validator
+ * and reports errors with fix suggestions.
  */
 
 import { validateManifest } from '@trikhub/manifest';
@@ -141,7 +141,6 @@ export function validateTrikManifest(
         },
       ],
       warnings: [],
-      qualityScore: 0,
     };
   }
 
@@ -194,6 +193,5 @@ export function validateTrikManifest(
     valid: result.valid,
     errors,
     warnings,
-    qualityScore: result.qualityScore ?? 0,
   };
 }

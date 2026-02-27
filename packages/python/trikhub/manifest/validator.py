@@ -1,10 +1,9 @@
 """
 TrikHub v2 Manifest Validator
 
-Three-level validation mirroring packages/js/manifest/src/validator.ts:
+Two-level validation mirroring packages/js/manifest/src/validator.ts:
 1. JSON Schema structural validation
 2. Semantic validation (mode consistency, log templates, constrained types)
-3. Quality score calculation
 """
 
 from __future__ import annotations
@@ -28,7 +27,6 @@ class ValidationResult:
     valid: bool
     errors: list[str] | None = None
     warnings: list[str] | None = None
-    qualityScore: int | None = None
 
 
 # ============================================================================
@@ -409,89 +407,6 @@ def _validate_semantics(manifest: dict[str, Any]) -> list[_SemanticIssue]:
 
 
 # ============================================================================
-# Quality Score
-# ============================================================================
-
-
-def _calculate_quality_score(manifest: dict[str, Any]) -> int:
-    """Calculate the quality score for a manifest (0-100)."""
-    score = 100
-    agent = manifest["agent"]
-    mode = agent["mode"]
-    tools = manifest.get("tools")
-
-    if mode == "tool":
-        # Tool mode scoring
-        domain = agent.get("domain")
-        if not domain or len(domain) == 0:
-            score -= 15
-
-        if domain:
-            if any(tag.lower() in GENERIC_DOMAIN_TAGS for tag in domain):
-                score -= 5
-
-        entry = manifest.get("entry")
-        if not entry or not entry.get("module"):
-            score -= 25
-
-        if not manifest.get("limits"):
-            score -= 10
-
-        if not tools or len(tools) == 0:
-            score -= 30
-
-        if tools:
-            for tool_def in tools.values():
-                if not tool_def.get("description"):
-                    score -= 5
-                if not tool_def.get("inputSchema"):
-                    score -= 10
-                if not tool_def.get("outputSchema"):
-                    score -= 10
-                if not tool_def.get("outputTemplate"):
-                    score -= 10
-    else:
-        # Conversational mode scoring
-        if not agent.get("handoffDescription"):
-            score -= 30
-        elif len(agent["handoffDescription"]) < 20:
-            score -= 15
-
-        domain = agent.get("domain")
-        if not domain or len(domain) == 0:
-            score -= 15
-
-        if not agent.get("systemPrompt") and not agent.get("systemPromptFile"):
-            score -= 25
-
-        entry = manifest.get("entry")
-        if not entry or not entry.get("module"):
-            score -= 25
-
-        if not manifest.get("limits"):
-            score -= 10
-
-        if domain:
-            if any(tag.lower() in GENERIC_DOMAIN_TAGS for tag in domain):
-                score -= 5
-
-        if tools:
-            for tool_def in tools.values():
-                if not tool_def.get("description"):
-                    score -= 5
-                if not tool_def.get("logTemplate"):
-                    score -= 3
-
-                log_schema = tool_def.get("logSchema")
-                if log_schema:
-                    for field_schema in log_schema.values():
-                        if not _is_constrained_type(field_schema):
-                            score -= 10
-
-    return max(0, score)
-
-
-# ============================================================================
 # Public API
 # ============================================================================
 
@@ -509,10 +424,9 @@ def validate_manifest(manifest: Any) -> ValidationResult:
     """
     Validate a v2 trik manifest.
 
-    Performs three levels of validation:
+    Performs two levels of validation:
     1. JSON Schema structure validation
     2. Semantic validation (mode consistency, log templates, constrained strings)
-    3. Quality score calculation
     """
     # 1. Structural validation via JSON Schema
     errors = list(_compiled_manifest_validator.iter_errors(manifest))
@@ -527,14 +441,10 @@ def validate_manifest(manifest: Any) -> ValidationResult:
     semantic_errors = [i.message for i in issues if i.type == "error"]
     warnings = [i.message for i in issues if i.type == "warning"]
 
-    # 3. Quality score
-    quality_score = _calculate_quality_score(manifest)
-
     return ValidationResult(
         valid=len(semantic_errors) == 0,
         errors=semantic_errors if semantic_errors else None,
         warnings=warnings if warnings else None,
-        qualityScore=quality_score,
     )
 
 

@@ -177,7 +177,7 @@ server.tool(
 
 server.tool(
   'validate_manifest',
-  'Validate a trik manifest against schema and security rules. Returns errors, warnings, and quality score.',
+  'Validate a trik manifest against schema and security rules. Returns errors and warnings.',
   {
     manifest: z.string().describe('The manifest.json content as a string'),
     strict: z.boolean().optional().describe('Enable additional warnings'),

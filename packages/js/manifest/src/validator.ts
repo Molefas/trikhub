@@ -13,7 +13,6 @@ export interface ValidationResult {
   valid: boolean;
   errors?: string[];
   warnings?: string[];
-  qualityScore?: number;
 }
 
 // ============================================================================
@@ -462,121 +461,6 @@ function validateSemantics(manifest: Record<string, unknown>): SemanticIssue[] {
 }
 
 // ============================================================================
-// Quality Score
-// ============================================================================
-
-/**
- * Calculate the quality score for a manifest (0-100).
- */
-function calculateQualityScore(manifest: Record<string, unknown>): number {
-  let score = 100;
-  const agent = manifest.agent as Record<string, unknown>;
-  const mode = agent.mode as string;
-  const tools = manifest.tools as Record<string, Record<string, unknown>> | undefined;
-
-  if (mode === 'tool') {
-    // Tool mode scoring
-    // Missing domain tags: -15
-    const domain = agent.domain as string[] | undefined;
-    if (!domain || domain.length === 0) {
-      score -= 15;
-    }
-
-    // Generic domain tags: -5
-    if (domain) {
-      const hasGeneric = domain.some((tag) => GENERIC_DOMAIN_TAGS.has((tag as string).toLowerCase()));
-      if (hasGeneric) {
-        score -= 5;
-      }
-    }
-
-    // Missing entry.module: -25
-    const entry = manifest.entry as Record<string, unknown> | undefined;
-    if (!entry?.module) {
-      score -= 25;
-    }
-
-    // Missing limits: -10
-    if (!manifest.limits) {
-      score -= 10;
-    }
-
-    // No tools: -30
-    if (!tools || Object.keys(tools).length === 0) {
-      score -= 30;
-    }
-
-    // Tool-level deductions for tool mode
-    if (tools) {
-      for (const [_toolName, toolDef] of Object.entries(tools)) {
-        if (!toolDef.description) score -= 5;
-        if (!toolDef.inputSchema) score -= 10;
-        if (!toolDef.outputSchema) score -= 10;
-        if (!toolDef.outputTemplate) score -= 10;
-      }
-    }
-  } else {
-    // Conversational mode scoring
-    // Missing handoffDescription: -30
-    if (!agent.handoffDescription) {
-      score -= 30;
-    } else if ((agent.handoffDescription as string).length < 20) {
-      // handoffDescription too short: -15
-      score -= 15;
-    }
-
-    // Missing domain tags: -15
-    const domain = agent.domain as string[] | undefined;
-    if (!domain || domain.length === 0) {
-      score -= 15;
-    }
-
-    // Missing systemPrompt for conversational: -25
-    if (!agent.systemPrompt && !agent.systemPromptFile) {
-      score -= 25;
-    }
-
-    // Missing entry.module: -25
-    const entry = manifest.entry as Record<string, unknown> | undefined;
-    if (!entry?.module) {
-      score -= 25;
-    }
-
-    // Missing limits: -10
-    if (!manifest.limits) {
-      score -= 10;
-    }
-
-    // Generic domain tags: -5
-    if (domain) {
-      const hasGeneric = domain.some((tag) => GENERIC_DOMAIN_TAGS.has((tag as string).toLowerCase()));
-      if (hasGeneric) {
-        score -= 5;
-      }
-    }
-
-    // Tool-level deductions for conversational mode
-    if (tools) {
-      for (const [_toolName, toolDef] of Object.entries(tools)) {
-        if (!toolDef.description) score -= 5;
-        if (!toolDef.logTemplate) score -= 3;
-
-        const logSchema = toolDef.logSchema as Record<string, JSONSchema> | undefined;
-        if (logSchema) {
-          for (const [_field, fieldSchema] of Object.entries(logSchema)) {
-            if (!isConstrainedType(fieldSchema)) {
-              score -= 10;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return Math.max(0, score);
-}
-
-// ============================================================================
 // Public API
 // ============================================================================
 
@@ -594,10 +478,9 @@ function formatErrors(errors: ErrorObject[] | null | undefined): string[] {
 /**
  * Validate a v2 trik manifest.
  *
- * Performs three levels of validation:
+ * Performs two levels of validation:
  * 1. JSON Schema structure validation
  * 2. Semantic validation (mode consistency, log templates, constrained strings)
- * 3. Quality score calculation
  */
 export function validateManifest(manifest: unknown): ValidationResult {
   // 1. Structural validation via JSON Schema
@@ -614,14 +497,10 @@ export function validateManifest(manifest: unknown): ValidationResult {
   const errors = issues.filter((i) => i.type === 'error').map((i) => i.message);
   const warnings = issues.filter((i) => i.type === 'warning').map((i) => i.message);
 
-  // 3. Quality score
-  const qualityScore = calculateQualityScore(manifest as Record<string, unknown>);
-
   return {
     valid: errors.length === 0,
     errors: errors.length > 0 ? errors : undefined,
     warnings: warnings.length > 0 ? warnings : undefined,
-    qualityScore,
   };
 }
 
