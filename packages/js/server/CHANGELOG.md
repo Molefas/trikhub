@@ -1,5 +1,24 @@
 # @trikhub/server
 
+## 0.13.0
+
+### Minor Changes
+
+- [#47](https://github.com/Molefas/trikhub/pull/47) [`aa00d87`](https://github.com/Molefas/trikhub/commit/aa00d875c23e5ecd389b3da075fcc0726f6777fb) Thanks [@Molefas](https://github.com/Molefas)! - Add Python v2 parity with consolidated packages and unified release
+
+  - Cross-language trik execution: JS gateway runs Python triks and vice versa
+  - Consolidated Python package structure (single `trikhub` package on PyPI)
+  - Unified versioning: all JS and Python packages share the same version
+  - Fixed MCP scaffold to reference correct Python package name
+  - Reverted JS CLI Python project workaround (use Python CLI for Python projects)
+
+### Patch Changes
+
+- Updated dependencies [[`aa00d87`](https://github.com/Molefas/trikhub/commit/aa00d875c23e5ecd389b3da075fcc0726f6777fb)]:
+  - @trikhub/gateway@0.13.0
+  - @trikhub/linter@0.13.0
+  - @trikhub/manifest@0.13.0
+
 ## 0.12.0
 
 ### Minor Changes

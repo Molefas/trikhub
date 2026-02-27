@@ -7,7 +7,7 @@ Provides Python support for the TrikHub ecosystem:
 - CLI for managing Python triks
 """
 
-__version__ = "0.12.0"
+__version__ = "0.13.0"
 
 from trikhub.gateway.gateway import TrikGateway
 
