@@ -1,8 +1,0 @@
-{
-  "triks": [
-    "@Molefas/trik-hash"
-  ],
-  "trikhub": {
-    "@Molefas/trik-hash": "1.0.0"
-  }
-}

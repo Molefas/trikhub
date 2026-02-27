@@ -39,26 +39,43 @@ async function fileExists(path: string): Promise<boolean> {
 /**
  * Find the manifest.json file in a trik repository
  *
- * Node.js packages: manifest.json at root
- * Python packages: manifest.json inside package subdirectory
+ * Node.js packages: manifest.json at root (no pyproject.toml/setup.py)
+ * Python packages: manifest.json at root with pyproject.toml/setup.py,
+ *                  or manifest.json inside package subdirectory
  */
 async function findManifestPath(repoDir: string): Promise<ManifestLocation | null> {
-  // First, check for manifest.json at root (Node.js pattern)
-  const rootManifest = join(repoDir, 'manifest.json');
-  if (await fileExists(rootManifest)) {
-    return {
-      manifestPath: rootManifest,
-      manifestDir: repoDir,
-      packageType: 'node',
-    };
-  }
-
-  // Check if this is a Python package (has pyproject.toml or setup.py)
   const hasPyproject = await fileExists(join(repoDir, 'pyproject.toml'));
   const hasSetupPy = await fileExists(join(repoDir, 'setup.py'));
 
+  // Check for manifest.json at root
+  const rootManifest = join(repoDir, 'manifest.json');
+  if (await fileExists(rootManifest)) {
+    // Determine package type: if pyproject.toml/setup.py exists or manifest
+    // entry.runtime is "python", treat as Python package
+    let packageType: PackageType = 'node';
+    if (hasPyproject || hasSetupPy) {
+      packageType = 'python';
+    } else {
+      // Also check manifest entry.runtime as a fallback
+      try {
+        const content = await readFile(rootManifest, 'utf-8');
+        const manifest = JSON.parse(content);
+        if (manifest.entry?.runtime === 'python') {
+          packageType = 'python';
+        }
+      } catch {
+        // Parse error - default to node
+      }
+    }
+    return {
+      manifestPath: rootManifest,
+      manifestDir: repoDir,
+      packageType,
+    };
+  }
+
+  // Python package with manifest inside subdirectory
   if (hasPyproject || hasSetupPy) {
-    // Python package: search subdirectories for manifest.json
     try {
       const entries = await readdir(repoDir, { withFileTypes: true });
       for (const entry of entries) {

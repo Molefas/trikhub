@@ -173,7 +173,21 @@ local-playground/
 
 The JavaScript gateway can execute Python triks through a worker subprocess. This allows you to use triks written in either language from a single agent.
 
-### Installing a Python Trik
+### Local Python Trik Example
+
+This playground includes a local Python trik at `.trikhub/triks/python-text-utils/` that demonstrates cross-language execution. It provides two tool-mode tools:
+
+- **wordCount**: Count words, characters, and lines in text
+- **slugify**: Convert text to a URL-friendly slug
+
+The trik uses the v2 Python SDK (`wrap_tool_handlers`) and is loaded automatically by the gateway when listed in `.trikhub/config.json`. Try it:
+
+```
+You: Count the words in "Hello world, this is a test"
+Assistant: Text stats: 6 words, 27 characters, 1 lines
+```
+
+### Installing a Python Trik from Registry
 
 1. Ensure Python 3.10+ is installed
 2. Install the Python trik using the CLI:

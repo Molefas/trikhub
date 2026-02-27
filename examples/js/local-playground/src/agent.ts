@@ -7,7 +7,7 @@ import { createLLM, getProviderInfo } from './llm.js';
 const SYSTEM_PROMPT = `You are a helpful assistant with access to various tools.
 You can check the weather, do math calculations, and search the web.
 When the user asks about content curation, article writing, hoarding content, RSS feeds, or voice profiles, use the appropriate talk_to tool to hand off to a specialist agent.
-Any additional tools provided by installed triks are available as native tools — use them directly.`;
+Any additional tools provided by installed triks (including Python triks like text utilities) are available as native tools — use them directly.`;
 
 export async function initializeAgent() {
   const model = await createLLM();

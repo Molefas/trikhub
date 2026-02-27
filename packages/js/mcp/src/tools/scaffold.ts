@@ -46,7 +46,7 @@ interface ScaffoldInput {
 // Template generators
 // ============================================================================
 
-function generateManifest(input: ScaffoldInput): string {
+function generateManifest(input: ScaffoldInput, pkgName?: string): string {
   const manifest: Record<string, unknown> = {
     schemaVersion: 2,
     id: input.name,
@@ -60,7 +60,11 @@ function generateManifest(input: ScaffoldInput): string {
         ? { handoffDescription: input.handoffDescription }
         : {}),
       ...(input.mode === 'conversational'
-        ? { systemPromptFile: './src/prompts/system.md' }
+        ? {
+            systemPromptFile: input.language === 'py' && pkgName
+              ? `./src/${pkgName}/prompts/system.md`
+              : './src/prompts/system.md',
+          }
         : {}),
       ...(input.mode === 'conversational'
         ? { model: { capabilities: ['tool_use'] } }
@@ -100,14 +104,39 @@ function generateManifest(input: ScaffoldInput): string {
         };
       }
       if (input.mode === 'tool' && !tool.outputSchema) {
-        toolDef.outputSchema = {
-          type: 'object',
-          properties: {
-            status: { type: 'string', enum: ['success', 'error'] },
-            resultId: { type: 'string', format: 'id' },
-          },
-          required: ['status'],
-        };
+        // Derive outputSchema from outputTemplate placeholders when available
+        const placeholders = tool.outputTemplate
+          ? extractTemplatePlaceholders(tool.outputTemplate)
+          : [];
+        if (placeholders.length > 0) {
+          // Use placeholder names — add format:'id' for *Id fields, enum for *status fields
+          const properties: Record<string, unknown> = {};
+          for (const p of placeholders) {
+            if (p.toLowerCase().endsWith('id')) {
+              properties[p] = { type: 'string', format: 'id' };
+            } else if (p === 'status' || p === 'match') {
+              properties[p] = p === 'match'
+                ? { type: 'boolean' }
+                : { type: 'string', enum: ['success', 'error'] };
+            } else {
+              properties[p] = { type: 'string', maxLength: 500 };
+            }
+          }
+          toolDef.outputSchema = {
+            type: 'object',
+            properties,
+            required: placeholders,
+          };
+        } else {
+          toolDef.outputSchema = {
+            type: 'object',
+            properties: {
+              status: { type: 'string', enum: ['success', 'error'] },
+              resultId: { type: 'string', format: 'id' },
+            },
+            required: ['status'],
+          };
+        }
       }
       if (input.mode === 'tool' && !tool.outputTemplate) {
         toolDef.outputTemplate = `${tool.name}: {{status}} ({{resultId}})`;
@@ -139,7 +168,9 @@ function generateManifest(input: ScaffoldInput): string {
   // Limits and entry
   manifest.limits = { maxTurnTimeMs: 30000 };
   manifest.entry = {
-    module: input.language === 'ts' ? './dist/agent.js' : `./${input.name.replace(/-/g, '_')}/agent.py`,
+    module: input.language === 'ts'
+      ? './dist/agent.js'
+      : `./src/${pkgName}/main.py`,
     export: 'default',
     ...(input.language === 'py' ? { runtime: 'python' } : {}),
   };
@@ -340,41 +371,344 @@ dist/
 `;
 }
 
-function generatePyAgent(input: ScaffoldInput): string {
-  const moduleName = input.name.replace(/-/g, '_');
-  return `"""
-${input.displayName} — agent entry point.
+function generatePyConversationalAgent(input: ScaffoldInput, pkgName: string): string {
+  const hasStorage = input.capabilities?.storage;
+  const tools = input.tools || [];
+
+  const storageImport = hasStorage ? ', TrikStorageContext' : '';
+
+  if (hasStorage && tools.length > 0) {
+    // Closure-based pattern: tools closed over storage
+    const toolFuncs = tools.map((t) => {
+      const snakeName = toSnakeCase(t.name);
+      return `
+    @tool
+    async def ${snakeName}(query: str) -> str:
+        """${t.description}"""
+        # TODO: Implement ${t.name} using storage
+        raise NotImplementedError("TODO: implement ${snakeName}")
+`;
+    }).join('');
+
+    const toolList = tools.map((t) => `        ${toSnakeCase(t.name)},`).join('\n');
+
+    return `"""
+${input.displayName} — conversational trik.
+
+${input.description}
+Uses the wrap_agent() pattern for multi-turn conversation via handoff.
 """
 
+from __future__ import annotations
+
+import os
+from pathlib import Path
 from typing import Any
 
+from langchain_anthropic import ChatAnthropic
+from langchain_core.tools import tool
+from langgraph.prebuilt import create_react_agent
 
-async def process_message(message: str, context: dict[str, Any]) -> dict[str, Any]:
-    """Process a user message and return a response."""
-    # TODO: Implement your agent logic here
-    return {
-        "message": f"Received: {message}",
-        "transferBack": False,
-        "toolCalls": [],
-    }
+from trikhub.sdk import wrap_agent, transfer_back_tool, TrikContext${storageImport}
 
 
-# Default export for TrikHub
-default = process_message
+_PROMPT_PATH = Path(__file__).parent / "prompts" / "system.md"
+_SYSTEM_PROMPT = _PROMPT_PATH.read_text(encoding="utf-8")
+
+
+def _build_tools(storage: TrikStorageContext):
+${toolFuncs}
+    return [
+${toolList}
+    ]
+
+
+default = wrap_agent(lambda context: create_react_agent(
+    model=ChatAnthropic(
+        model="claude-sonnet-4-20250514",
+        api_key=os.environ.get("ANTHROPIC_API_KEY"),
+    ),
+    tools=[*_build_tools(context.storage), transfer_back_tool],
+    prompt=_SYSTEM_PROMPT,
+))
+`;
+  }
+
+  // No storage — module-level tools
+  const toolFuncs = tools.length > 0
+    ? tools.map((t) => {
+        const snakeName = toSnakeCase(t.name);
+        return `
+@tool
+async def ${snakeName}(query: str) -> str:
+    """${t.description}"""
+    # TODO: Implement ${t.name}
+    raise NotImplementedError("TODO: implement ${snakeName}")
+`;
+      }).join('')
+    : `
+@tool
+async def example_tool(query: str) -> str:
+    """An example tool. Replace with your actual tools."""
+    # TODO: Implement your tool logic
+    return f"Result for: {query}"
+`;
+
+  const toolList = tools.length > 0
+    ? tools.map((t) => `    ${toSnakeCase(t.name)},`).join('\n')
+    : '    example_tool,';
+
+  return `"""
+${input.displayName} — conversational trik.
+
+${input.description}
+Uses the wrap_agent() pattern for multi-turn conversation via handoff.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from langchain_anthropic import ChatAnthropic
+from langchain_core.tools import tool
+from langgraph.prebuilt import create_react_agent
+
+from trikhub.sdk import wrap_agent, transfer_back_tool, TrikContext
+
+
+_PROMPT_PATH = Path(__file__).parent / "prompts" / "system.md"
+_SYSTEM_PROMPT = _PROMPT_PATH.read_text(encoding="utf-8")
+
+${toolFuncs}
+
+default = wrap_agent(lambda context: create_react_agent(
+    model=ChatAnthropic(
+        model="claude-sonnet-4-20250514",
+        api_key=os.environ.get("ANTHROPIC_API_KEY"),
+    ),
+    tools=[
+${toolList}
+        transfer_back_tool,
+    ],
+    prompt=_SYSTEM_PROMPT,
+))
 `;
 }
 
-function generatePyProjectToml(input: ScaffoldInput): string {
-  return `[project]
+function generatePyToolAgent(input: ScaffoldInput): string {
+  const tools = input.tools || [{ name: 'exampleTool', description: 'An example tool' }];
+
+  const handlerFuncs = tools
+    .map((t) => {
+      const handlerName = `handle_${toSnakeCase(t.name)}`;
+      return `
+async def ${handlerName}(input: dict[str, Any], context: TrikContext) -> dict[str, Any]:
+    """Handle ${t.name} tool calls."""
+    # TODO: Implement ${t.name}
+    # Access input fields via: input["fieldName"]
+    raise NotImplementedError("TODO: implement ${handlerName}")
+`;
+    })
+    .join('\n');
+
+  const handlerMap = tools
+    .map((t) => `    "${t.name}": handle_${toSnakeCase(t.name)},`)
+    .join('\n');
+
+  return `"""
+${input.displayName} — tool-mode trik.
+
+${input.description}
+Uses wrap_tool_handlers() for native tool export.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from trikhub.sdk import wrap_tool_handlers, TrikContext
+
+${handlerFuncs}
+
+default = wrap_tool_handlers({
+${handlerMap}
+})
+`;
+}
+
+function generatePyExampleTool(): string {
+  return `"""Example tool for the conversational agent."""
+
+from langchain_core.tools import tool
+
+
+@tool
+def example_tool(query: str) -> str:
+    """Search for information about a topic.
+
+    Args:
+        query: The search query.
+    """
+    return f"Result for: {query}"
+`;
+}
+
+function generatePySystemPrompt(input: ScaffoldInput): string {
+  const toolList = (input.tools || [])
+    .map((t) => `- **${t.name}**: ${t.description}`)
+    .join('\n') || '- (add your tool descriptions here)';
+
+  return `# ${input.displayName}
+
+You are ${input.displayName}, a specialized assistant for ${input.description.toLowerCase().replace(/\.$/, '')}.
+
+## Your tools
+
+${toolList}
+
+## Guidelines
+
+- Focus on tasks within your domain: ${input.domain.join(', ')}
+- When the user's request is outside your expertise, use \`transfer_back\` to return to the main agent
+- Provide clear, concise responses
+- Ask for clarification if a request is ambiguous
+
+## When to transfer back
+
+Use \`transfer_back\` when:
+- The user asks for something outside your domain
+- You've completed the task and the user wants something different
+- The user explicitly asks to go back to the main agent
+`;
+}
+
+function generatePyTestFile(input: ScaffoldInput, pkgName: string): string {
+  if (input.mode === 'tool') {
+    const toolName = (input.tools || [{ name: 'exampleTool' }])[0].name;
+    return `"""Local test script — run with: python test.py
+
+Requires: pip install -e .
+Note: context=None only works for handlers that don't use storage/config.
+For storage-dependent triks, test via the gateway instead.
+"""
+
+import asyncio
+from ${pkgName}.main import default
+
+
+async def main():
+    result = await default.execute_tool(
+        "${toolName}",
+        {"query": "hello world"},  # Replace with actual input fields
+        context=None,
+    )
+    print(result)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+`;
+  }
+
+  return `"""Local test script — run with: python test.py
+
+Requires: pip install -e .
+"""
+
+import asyncio
+from ${pkgName}.main import default
+
+
+async def main():
+    result = await default.process_message(
+        "Hello! What can you do?",
+        session_id="test-session",
+        context=None,
+    )
+    print(result)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+`;
+}
+
+function generatePyProjectToml(input: ScaffoldInput, pkgName: string): string {
+  const isConversational = input.mode === 'conversational';
+  const deps = isConversational
+    ? `    "trikhub>=0.6.0",
+    "langchain-anthropic>=0.3.0",
+    "langchain-core>=0.3.0",
+    "langgraph>=0.2.0",`
+    : `    "trikhub>=0.6.0",`;
+
+  return `[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
 name = "${input.name}"
 version = "0.1.0"
 description = "${input.description}"
 requires-python = ">=3.10"
+license = "MIT"
 
-[build-system]
-requires = ["setuptools>=68.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+dependencies = [
+${deps}
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["${pkgName}*"]
 `;
+}
+
+function generatePyTrikhubJson(input: ScaffoldInput): string {
+  return JSON.stringify(
+    {
+      displayName: input.displayName,
+      shortDescription: input.description,
+      categories: [input.category],
+      keywords: [input.name],
+      repository: `https://github.com/your-username/${input.name}`,
+    },
+    null,
+    2,
+  );
+}
+
+function generatePyGitignore(): string {
+  return `__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+.venv/
+venv/
+.DS_Store
+`;
+}
+
+/** Convert camelCase to snake_case */
+function toSnakeCase(name: string): string {
+  return name.replace(/([A-Z])/g, (_, c, i) => (i > 0 ? '_' : '') + c.toLowerCase());
+}
+
+/** Derive Python package name from trik name (hyphens → underscores) */
+function toPythonPackageName(name: string): string {
+  return name.replace(/-/g, '_');
+}
+
+/** Extract {{placeholder}} names from an outputTemplate string */
+function extractTemplatePlaceholders(template: string): string[] {
+  const matches = template.matchAll(/\{\{(\w+)\}\}/g);
+  return [...new Set([...matches].map((m) => m[1]))];
 }
 
 // ============================================================================
@@ -384,11 +718,12 @@ build-backend = "setuptools.backends._legacy:_Backend"
 export function scaffoldTrik(input: ScaffoldInput): ScaffoldResult {
   const files: ScaffoldFile[] = [];
   const nextSteps: string[] = [];
+  const pkgName = input.language === 'py' ? toPythonPackageName(input.name) : '';
 
   // Generate manifest
   files.push({
     path: 'manifest.json',
-    content: generateManifest(input),
+    content: generateManifest(input, pkgName),
   });
 
   if (input.language === 'ts') {
@@ -445,33 +780,63 @@ export function scaffoldTrik(input: ScaffoldInput): ScaffoldResult {
       nextSteps.push('6. Publish with `trik publish`');
     }
   } else {
-    // Python project
-    const moduleName = input.name.replace(/-/g, '_');
+    // Python project — v2 SDK patterns (wrap_agent / wrap_tool_handlers)
+    if (input.mode === 'conversational') {
+      files.push({
+        path: `src/${pkgName}/main.py`,
+        content: generatePyConversationalAgent(input, pkgName),
+      });
 
-    files.push({
-      path: `${moduleName}/agent.py`,
-      content: generatePyAgent(input),
-    });
+      files.push({
+        path: `src/${pkgName}/__init__.py`,
+        content: '',
+      });
 
-    files.push({
-      path: `${moduleName}/__init__.py`,
-      content: `"""${input.displayName}"""\n`,
-    });
+      files.push({
+        path: `src/${pkgName}/prompts/system.md`,
+        content: generatePySystemPrompt(input),
+      });
+    } else {
+      // Tool mode
+      files.push({
+        path: `src/${pkgName}/main.py`,
+        content: generatePyToolAgent(input),
+      });
+
+      files.push({
+        path: `src/${pkgName}/__init__.py`,
+        content: '',
+      });
+    }
 
     files.push({
       path: 'pyproject.toml',
-      content: generatePyProjectToml(input),
+      content: generatePyProjectToml(input, pkgName),
+    });
+
+    files.push({
+      path: 'test.py',
+      content: generatePyTestFile(input, pkgName),
     });
 
     files.push({
       path: '.gitignore',
-      content: `__pycache__/\n*.pyc\n.env\ndist/\n*.egg-info/\n`,
+      content: generatePyGitignore(),
     });
 
-    nextSteps.push('1. Implement your agent logic in the agent.py file');
-    nextSteps.push('2. Add any required Python dependencies to pyproject.toml');
-    nextSteps.push('3. Test with `trik lint .` to validate your manifest');
-    nextSteps.push('4. Publish with `trik publish`');
+    if (input.mode === 'tool') {
+      nextSteps.push('1. Run `pip install -e .` to install in development mode');
+      nextSteps.push(`2. Implement your tool handlers in src/${pkgName}/main.py`);
+      nextSteps.push('3. Update inputSchema/outputSchema in manifest.json');
+      nextSteps.push('4. Run `python test.py` to test locally');
+      nextSteps.push('5. Publish with `trik publish`');
+    } else {
+      nextSteps.push('1. Run `pip install -e .` to install in development mode');
+      nextSteps.push(`2. Implement your tools in src/${pkgName}/main.py`);
+      nextSteps.push(`3. Customize the system prompt in src/${pkgName}/prompts/system.md`);
+      nextSteps.push('4. Run `python test.py` to test locally');
+      nextSteps.push('5. Publish with `trik publish`');
+    }
   }
 
   // Config secrets template

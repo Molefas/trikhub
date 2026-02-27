@@ -1,327 +1,545 @@
 """
-LangChain adapter for TrikHub.
-
-This module provides utilities for converting TrikHub tools to LangChain tools,
-making it easy to integrate triks with LangChain-based agents.
+LangChain/LangGraph adapter — enhance() wraps an agent with TrikHub handoff routing.
 
 Mirrors packages/js/gateway/src/langchain/adapter.ts
+
+Usage:
+    from langchain_core.messages import HumanMessage
+    from langgraph.prebuilt import create_react_agent
+    from trikhub.langchain import enhance, get_handoff_tools_for_agent
+
+    agent = create_react_agent(model=model, tools=my_tools)
+    app = await enhance(agent)
+    response = await app.process_message("find me AI articles")
 """
 
 from __future__ import annotations
 
-import json
-import re
+import sys
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Protocol, runtime_checkable
 
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.tools import StructuredTool
+from pydantic import BaseModel, Field
 
 from trikhub.gateway import (
+    HandoffToolDefinition,
+    LoadFromConfigOptions,
     TrikGateway,
     TrikGatewayConfig,
-    ToolDefinition,
-    ExecuteTrikOptions,
-    LoadFromConfigOptions,
-    GatewayResultWithSession,
 )
-from trikhub.manifest import (
-    PassthroughContent,
-    GatewaySuccessTemplate,
-    GatewaySuccessPassthrough,
-    GatewayError,
-)
+
 from trikhub.langchain.schema_converter import json_schema_to_pydantic
 
 
-@dataclass
-class LangChainAdapterOptions:
-    """Options for creating LangChain tools from a gateway."""
+# ============================================================================
+# Types
+# ============================================================================
 
-    # Get session ID for a trik (for multi-turn conversations)
-    get_session_id: Callable[[str], str | None] | None = None
-    # Store session ID for a trik
-    set_session_id: Callable[[str, str], None] | None = None
-    # Callback when passthrough content is delivered
-    on_passthrough: Callable[[PassthroughContent], None] | None = None
-    # Enable debug logging
+
+@runtime_checkable
+class InvokableAgent(Protocol):
+    """Any agent with a LangGraph-compatible invoke method."""
+
+    async def ainvoke(
+        self, input: dict[str, Any], config: Any = None
+    ) -> dict[str, Any]: ...
+
+
+@dataclass
+class EnhanceOptions:
+    """Options for enhance()."""
+
+    gateway: TrikGatewayConfig | None = None
+    config: LoadFromConfigOptions | None = None
+    triks_directory: str | None = None
+    gateway_instance: TrikGateway | None = None
     debug: bool = False
+    verbose: bool = False
+
+
+@dataclass
+class EnhancedResponse:
+    """Response from the enhanced agent."""
+
+    message: str
+    """The message to show the user."""
+    source: str
+    """Where the response came from: "main", a trik ID, or "system"."""
+
+
+class EnhancedAgent:
+    """An enhanced agent with handoff routing."""
+
+    def __init__(
+        self,
+        gateway: TrikGateway,
+        _process_message: Any,
+    ) -> None:
+        self.gateway = gateway
+        self._process_message = _process_message
+
+    async def process_message(
+        self, message: str, session_id: str = "default"
+    ) -> EnhancedResponse:
+        """Process a user message through the routing layer."""
+        return await self._process_message(message, session_id)
+
+    def get_loaded_triks(self) -> list[str]:
+        """Get the list of loaded trik IDs."""
+        return self.gateway.get_loaded_triks()
+
+
+# ============================================================================
+# Debug & Verbose Loggers
+# ============================================================================
+
+
+def _create_debug_logger(enabled: bool) -> Any:
+    if not enabled:
+        return lambda *args: None
+
+    def _log(*args: Any) -> None:
+        print("\033[36m[trikhub]\033[0m", *args, file=sys.stderr)
+
+    return _log
+
+
+def _create_verbose_logger(enabled: bool) -> Any:
+    if not enabled:
+        return lambda *args: None
+
+    def _log(*args: Any) -> None:
+        print("\033[35m[trikhub:verbose]\033[0m", *args, file=sys.stderr)
+
+    return _log
+
+
+def _dump_messages(
+    verbose: Any, label: str, messages: list[BaseMessage]
+) -> None:
+    verbose(f"--- {label} ({len(messages)} messages) ---")
+    for i, msg in enumerate(messages):
+        msg_type = msg.type
+        text = _extract_text_content(msg.content)
+        truncated = text[:200] + "..." if len(text) > 200 else text
+
+        tool_calls = getattr(msg, "tool_calls", None)
+        if tool_calls:
+            calls = ", ".join(tc["name"] for tc in tool_calls)
+            verbose(f"  [{i}] {msg_type}: \"{truncated}\" [tool_calls: {calls}]")
+        else:
+            verbose(f'  [{i}] {msg_type}: "{truncated}"')
+    verbose(f"--- end {label} ---")
+
+
+# ============================================================================
+# Constants
+# ============================================================================
+
+HANDOFF_TOOL_PREFIX = "talk_to_"
+
+
+# ============================================================================
+# enhance()
+# ============================================================================
+
+
+async def enhance(
+    agent: InvokableAgent,
+    options: EnhanceOptions | None = None,
+) -> EnhancedAgent:
+    """
+    Wrap a LangGraph agent with handoff routing to triks.
+
+    This is the main public API for host app developers. It:
+    1. Creates a TrikGateway and loads triks
+    2. Generates handoff tools (one per loaded trik) and adds them to the agent
+    3. Returns an EnhancedAgent that handles the full routing lifecycle
+
+    Example::
+
+        from langgraph.prebuilt import create_react_agent
+        from trikhub.langchain import enhance
+
+        agent = create_react_agent(model=model, tools=my_tools)
+        app = await enhance(agent)
+        response = await app.process_message("find me AI articles")
+        # response.message - what to show the user
+        # response.source  - "main" or trik ID
+    """
+    opts = options or EnhanceOptions()
+    debug = _create_debug_logger(opts.debug or opts.verbose)
+    verbose = _create_verbose_logger(opts.verbose)
+
+    # Set up gateway
+    gateway = opts.gateway_instance or TrikGateway(opts.gateway)
+    await gateway.initialize()
+
+    # Load triks (skip if a pre-built gateway was provided)
+    if not opts.gateway_instance:
+        if opts.config:
+            await gateway.load_triks_from_config(opts.config)
+        elif opts.triks_directory:
+            await gateway.load_triks_from_directory(opts.triks_directory)
+
+    # Per-session message history for the main agent
+    main_messages: dict[str, list[BaseMessage]] = {}
+
+    async def _process_message(
+        message: str, session_id: str = "default"
+    ) -> EnhancedResponse:
+        # Route through gateway first
+        route = await gateway.route_message(message, session_id)
+
+        if route.target == "trik":
+            debug(f"Routed to trik: {route.trik_id} (turn in progress)")
+            return EnhancedResponse(
+                message=route.response.message,
+                source=route.trik_id,
+            )
+
+        if route.target == "transfer_back":
+            debug(f"Transfer back from: {route.trik_id}")
+            debug(f"Transfer-back summary:\n{route.summary}")
+            _inject_summary_into_history(
+                main_messages, session_id, route.summary, debug
+            )
+            if route.message.strip():
+                return EnhancedResponse(
+                    message=route.message,
+                    source=route.trik_id,
+                )
+            return EnhancedResponse(
+                message="[Returned to main agent]",
+                source="system",
+            )
+
+        if route.target == "force_back":
+            debug(f"Force /back from: {route.trik_id}")
+            debug(f"Force-back summary:\n{route.summary}")
+            _inject_summary_into_history(
+                main_messages, session_id, route.summary, debug
+            )
+            return EnhancedResponse(
+                message="[Returned to main agent]",
+                source="system",
+            )
+
+        # target == "main"
+        debug("Routing to main agent")
+        return await _invoke_main_agent(
+            agent,
+            gateway,
+            main_messages,
+            session_id,
+            message,
+            debug,
+            verbose,
+        )
+
+    return EnhancedAgent(
+        gateway=gateway,
+        _process_message=_process_message,
+    )
+
+
+# ============================================================================
+# Main Agent Invocation
+# ============================================================================
+
+
+async def _invoke_main_agent(
+    agent: InvokableAgent,
+    gateway: TrikGateway,
+    main_messages: dict[str, list[BaseMessage]],
+    session_id: str,
+    message: str,
+    debug: Any,
+    verbose: Any,
+) -> EnhancedResponse:
+    """
+    Invoke the main agent with the user's message.
+    If the agent calls a talk_to_X handoff tool, intercept it and start a handoff.
+    """
+    # Get or create session message history
+    messages = main_messages.get(session_id)
+    if messages is None:
+        messages = []
+        main_messages[session_id] = messages
+
+    # Add user message
+    messages.append(HumanMessage(content=message))
+
+    verbose(f"Main agent input (session: {session_id})")
+    _dump_messages(verbose, "main agent messages", messages)
+
+    # Invoke agent
+    result = await agent.ainvoke({"messages": messages})
+    new_messages: list[BaseMessage] = result["messages"]
+
+    verbose("Main agent output")
+    _dump_messages(verbose, "main agent result", new_messages)
+
+    # Check for handoff tool calls in the response
+    handoff_call = _find_handoff_tool_call(new_messages, len(messages) - 1)
+
+    if handoff_call is not None:
+        trik_id = handoff_call["tool_name"][len(HANDOFF_TOOL_PREFIX):]
+        context = handoff_call["context"]
+
+        debug(
+            f'Handoff detected → {trik_id} (context: "{context[:80]}{"..." if len(context) > 80 else ""}")'
+        )
+
+        handoff_result = await gateway.start_handoff(trik_id, context, session_id)
+
+        if handoff_result.target == "transfer_back":
+            debug(f"Immediate transfer back from: {trik_id}")
+            debug(f"Transfer-back summary:\n{handoff_result.summary}")
+            main_messages[session_id] = new_messages
+            _inject_summary_into_history(
+                main_messages, session_id, handoff_result.summary, debug
+            )
+            return EnhancedResponse(
+                message=handoff_result.message,
+                source=handoff_result.trik_id,
+            )
+
+        debug(f"Handoff active → {trik_id}")
+        main_messages[session_id] = new_messages
+        return EnhancedResponse(
+            message=handoff_result.response.message,
+            source=handoff_result.trik_id,
+        )
+
+    # No handoff — normal main agent response
+    main_messages[session_id] = new_messages
+    response_text = _extract_last_ai_message(new_messages)
+    return EnhancedResponse(
+        message=response_text,
+        source="main",
+    )
+
+
+def _inject_summary_into_history(
+    main_messages: dict[str, list[BaseMessage]],
+    session_id: str,
+    summary: str,
+    debug: Any,
+) -> None:
+    """
+    Inject a handoff session summary into the main agent's message history
+    so it has context for future turns, without invoking the main agent.
+    """
+    messages = main_messages.get(session_id)
+    if messages is None:
+        messages = []
+        main_messages[session_id] = messages
+
+    messages.append(
+        HumanMessage(
+            content=f"[System: Trik handoff completed. Session summary:\n{summary}]"
+        )
+    )
+    debug("Injected transfer-back summary into main agent history")
+
+
+# ============================================================================
+# Handoff Tool Building
+# ============================================================================
+
+
+class _HandoffInput(BaseModel):
+    context: str = Field(description="Context about what the user needs from this agent")
+
+
+def _build_handoff_tools(
+    definitions: list[HandoffToolDefinition],
+) -> list[StructuredTool]:
+    """
+    Convert gateway HandoffToolDefinitions into LangChain StructuredTools.
+    These tools don't actually execute — they're intercepted by enhance().
+    """
+    tools: list[StructuredTool] = []
+    for defn in definitions:
+
+        async def _placeholder(context: str) -> str:
+            return f"Handoff initiated with context: {context}"
+
+        tools.append(
+            StructuredTool.from_function(
+                coroutine=_placeholder,
+                name=defn.name,
+                description=defn.description,
+                args_schema=_HandoffInput,
+            )
+        )
+    return tools
+
+
+def get_handoff_tools_for_agent(gateway: TrikGateway) -> list[StructuredTool]:
+    """
+    Get handoff tools as a list for binding to agents.
+    Call this after enhance() to get the tools that should be added to your agent.
+    """
+    return _build_handoff_tools(gateway.get_handoff_tools())
+
+
+# ============================================================================
+# Exposed Tool Building (tool-mode triks)
+# ============================================================================
+
+
+def _build_exposed_tools(gateway: TrikGateway) -> list[StructuredTool]:
+    """
+    Convert gateway ExposedToolDefinitions into LangChain StructuredTools.
+    These tools call gateway.execute_exposed_tool() which returns a template-filled string.
+    """
+    definitions = gateway.get_exposed_tools()
+    tools: list[StructuredTool] = []
+
+    for defn in definitions:
+        input_schema = defn.input_schema
+        if hasattr(input_schema, "model_dump"):
+            input_schema = input_schema.model_dump(by_alias=True, exclude_none=True)
+
+        pydantic_model = json_schema_to_pydantic(input_schema, defn.tool_name + "Input")
+
+        # Capture defn in closure
+        _defn = defn
+        _gw = gateway
+
+        async def _execute(**kwargs: Any) -> str:
+            return await _gw.execute_exposed_tool(
+                _defn.trik_id, _defn.tool_name, kwargs
+            )
+
+        tools.append(
+            StructuredTool.from_function(
+                coroutine=_execute,
+                name=defn.tool_name,
+                description=defn.description,
+                args_schema=pydantic_model,
+            )
+        )
+
+    return tools
+
+
+def get_exposed_tools_for_agent(gateway: TrikGateway) -> list[StructuredTool]:
+    """
+    Get exposed tools from tool-mode triks as a list for binding to agents.
+    These appear as native tools on the main agent (no handoff, no session).
+    """
+    return _build_exposed_tools(gateway)
+
+
+# ============================================================================
+# Convenience: load_langchain_triks()
+# ============================================================================
 
 
 @dataclass
 class LoadLangChainTriksOptions:
-    """Options for the simplified load_langchain_triks function."""
+    """Options for load_langchain_triks()."""
 
-    # Callback when passthrough content is delivered
-    # Passthrough content bypasses the agent and goes directly to the user
-    on_passthrough: Callable[[PassthroughContent], None] | None = None
-    # Enable debug logging
+    on_passthrough: Any = None
     debug: bool = False
-    # Path to the .trikhub/config.json file
-    config_path: str | None = None
-    # Base directory for resolving trik paths
-    base_dir: str | None = None
+    verbose: bool = False
 
 
 @dataclass
-class LangChainTriksResult:
-    """Result from load_langchain_triks."""
+class LoadLangChainTriksResult:
+    """Result from load_langchain_triks()."""
 
-    # LangChain tools ready to bind to a model
     tools: list[StructuredTool]
-    # The gateway instance for advanced operations
     gateway: TrikGateway
-    # List of loaded trik IDs (for logging/display)
     loaded_triks: list[str]
-
-
-def _fill_template(template: str, data: dict[str, Any]) -> str:
-    """Fill a template string with data values."""
-
-    def replace_fn(match: re.Match[str]) -> str:
-        key = match.group(1)
-        return str(data.get(key, f"{{{{{key}}}}}"))
-
-    return re.sub(r"\{\{(\w+)\}\}", replace_fn, template)
-
-
-def _to_tool_name(gateway_name: str) -> str:
-    """
-    Convert a gateway tool name to a LangChain-compatible tool name.
-
-    LangChain tool names must be valid Python identifiers.
-    Example: "@molefas/article-search:list" -> "@molefas_article_search__list"
-    """
-    return gateway_name.replace("/", "_").replace("-", "_").replace(":", "__")
-
-
-def parse_tool_name(tool_name: str) -> tuple[str, str]:
-    """
-    Parse a LangChain tool name back to trik ID and action name.
-
-    Args:
-        tool_name: The LangChain tool name (e.g., "@molefas_article_search__list")
-
-    Returns:
-        Tuple of (trik_id, action_name)
-
-    Raises:
-        ValueError: If the tool name format is invalid
-    """
-    parts = tool_name.split("__")
-    if len(parts) != 2:
-        raise ValueError(f"Invalid tool name format: {tool_name}")
-
-    return parts[0], parts[1]
-
-
-def _create_tool_from_definition(
-    tool_def: ToolDefinition,
-    gateway: TrikGateway,
-    options: LangChainAdapterOptions,
-) -> StructuredTool:
-    """Create a LangChain StructuredTool from a gateway tool definition."""
-    get_session_id = options.get_session_id
-    set_session_id = options.set_session_id
-    on_passthrough = options.on_passthrough
-    debug = options.debug
-
-    langchain_name = _to_tool_name(tool_def.name)
-
-    # Parse trik ID and action name from "trik-id:action-name"
-    parts = tool_def.name.split(":")
-    trik_id = parts[0]
-    action_name = parts[1] if len(parts) > 1 else parts[0]
-
-    # Convert JSON Schema to Pydantic model for LangChain
-    pydantic_model = json_schema_to_pydantic(
-        tool_def.input_schema, model_name=f"{langchain_name}_Input"
-    )
-
-    async def tool_func(**kwargs: Any) -> str:
-        """Execute the trik action and return the result."""
-        if debug:
-            print(f"[Tool] {tool_def.name}: {json.dumps(kwargs)}")
-
-        session_id = get_session_id(trik_id) if get_session_id else None
-        result = await gateway.execute(
-            trik_id,
-            action_name,
-            kwargs,
-            ExecuteTrikOptions(session_id=session_id),
-        )
-
-        inner = result.result
-
-        # Handle errors
-        if isinstance(inner, GatewayError):
-            return json.dumps({"success": False, "error": inner.error})
-
-        # Track session
-        if result.session_id and set_session_id:
-            set_session_id(trik_id, result.session_id)
-            if debug:
-                print(f"[Tool] Session tracked: {result.session_id}")
-
-        # Handle passthrough responses
-        if isinstance(inner, GatewaySuccessPassthrough):
-            delivery = gateway.deliver_content(inner.userContentRef)
-
-            if not delivery:
-                return json.dumps(
-                    {"success": False, "error": "Content not found or expired"}
-                )
-
-            content, receipt = delivery
-
-            if debug:
-                print(
-                    f"[Tool] Auto-delivered passthrough content: {receipt.contentType}"
-                )
-
-            if on_passthrough:
-                on_passthrough(content)
-
-            return json.dumps(
-                {"success": True, "response": "Delivered directly to the user"}
-            )
-
-        # Handle template responses
-        if isinstance(inner, GatewaySuccessTemplate):
-            response = (
-                _fill_template(inner.templateText, inner.agentData)
-                if inner.templateText
-                else json.dumps(inner.agentData)
-            )
-
-            if debug:
-                print(f"[Tool] Auto-filled template response: {response}")
-
-            return json.dumps({"success": True, "response": response})
-
-        # Unknown response type
-        return json.dumps({"success": False, "error": "Unknown response type"})
-
-    return StructuredTool.from_function(
-        coroutine=tool_func,
-        name=langchain_name,
-        description=tool_def.description,
-        args_schema=pydantic_model,
-    )
-
-
-def create_langchain_tools(
-    gateway: TrikGateway,
-    options: LangChainAdapterOptions | None = None,
-) -> list[StructuredTool]:
-    """
-    Create LangChain tools from a TrikGateway.
-
-    Args:
-        gateway: An initialized TrikGateway with loaded triks
-        options: Adapter options for session management and callbacks
-
-    Returns:
-        List of LangChain StructuredTool objects
-    """
-    options = options or LangChainAdapterOptions()
-    debug = options.debug
-    tool_defs = gateway.get_tool_definitions()
-
-    if debug:
-        print(f"[LangChainAdapter] Creating {len(tool_defs)} tools from gateway:")
-        for td in tool_defs:
-            print(f"  - {td.name} ({td.response_mode})")
-
-    return [
-        _create_tool_from_definition(td, gateway, options) for td in tool_defs
-    ]
-
-
-def get_tool_name_map(gateway: TrikGateway) -> dict[str, str]:
-    """
-    Get a mapping from LangChain tool names to gateway tool names.
-
-    Useful for debugging and logging.
-
-    Args:
-        gateway: An initialized TrikGateway
-
-    Returns:
-        Dict mapping LangChain names to gateway names
-    """
-    tool_defs = gateway.get_tool_definitions()
-    return {_to_tool_name(td.name): td.name for td in tool_defs}
 
 
 async def load_langchain_triks(
     options: LoadLangChainTriksOptions | None = None,
-) -> LangChainTriksResult:
+) -> LoadLangChainTriksResult:
     """
-    Load triks and create LangChain tools with minimal boilerplate.
+    Convenience function: create a gateway, load triks from .trikhub/config.json,
+    and return all tools (handoff + exposed) ready for LangChain binding.
 
-    This is the recommended way to integrate Triks with LangChain.
-    For more control, use create_langchain_tools() directly.
+    Example::
 
-    Example:
-        ```python
-        result = await load_langchain_triks(
-            LoadLangChainTriksOptions(
-                on_passthrough=lambda c: print(f"Passthrough: {c.content}"),
-                debug=True,
-            )
-        )
-
-        model = ChatAnthropic().bind_tools(result.tools)
-        ```
-
-    Args:
-        options: Loading and adapter options
-
-    Returns:
-        LangChainTriksResult with tools, gateway, and loaded trik IDs
+        from trikhub.langchain import load_langchain_triks
+        result = await load_langchain_triks()
+        agent = create_react_agent(model=model, tools=[*my_tools, *result.tools])
     """
-    options = options or LoadLangChainTriksOptions()
-    on_passthrough = options.on_passthrough
-    debug = options.debug
-    config_path = options.config_path
-    base_dir = options.base_dir
+    opts = options or LoadLangChainTriksOptions()
 
-    # Create gateway and initialize (loads secrets from .trikhub/secrets.json)
     gateway = TrikGateway()
     await gateway.initialize()
+    await gateway.load_triks_from_config()
 
-    # Load triks from config
-    manifests = await gateway.load_triks_from_config(
-        LoadFromConfigOptions(config_path=config_path, base_dir=base_dir)
-    )
+    handoff_tools = get_handoff_tools_for_agent(gateway)
+    exposed_tools = get_exposed_tools_for_agent(gateway)
 
-    loaded_triks = [m.id for m in manifests]
-
-    if debug:
-        print(
-            f"[load_langchain_triks] Loaded {len(loaded_triks)} triks: {', '.join(loaded_triks)}"
-        )
-
-    # Internal session management
-    sessions: dict[str, str] = {}
-
-    # Create LangChain tools with internal session management
-    adapter_options = LangChainAdapterOptions(
-        get_session_id=lambda trik_id: sessions.get(trik_id),
-        set_session_id=lambda trik_id, session_id: sessions.__setitem__(
-            trik_id, session_id
-        ),
-        on_passthrough=on_passthrough,
-        debug=debug,
-    )
-
-    tools = create_langchain_tools(gateway, adapter_options)
-
-    if debug:
-        print(f"[load_langchain_triks] Created {len(tools)} tools")
-
-    return LangChainTriksResult(
-        tools=tools,
+    return LoadLangChainTriksResult(
+        tools=[*handoff_tools, *exposed_tools],
         gateway=gateway,
-        loaded_triks=loaded_triks,
+        loaded_triks=gateway.get_loaded_triks(),
     )
+
+
+# ============================================================================
+# Message Parsing Helpers
+# ============================================================================
+
+
+def _find_handoff_tool_call(
+    messages: list[BaseMessage],
+    start_index: int,
+) -> dict[str, str] | None:
+    """Find a handoff tool call (talk_to_X) in new messages."""
+    for i in range(start_index, len(messages)):
+        msg = messages[i]
+        if msg.type != "ai":
+            continue
+
+        tool_calls = getattr(msg, "tool_calls", None)
+        if not tool_calls:
+            continue
+
+        for tc in tool_calls:
+            name = tc.get("name", "")
+            if name.startswith(HANDOFF_TOOL_PREFIX):
+                return {
+                    "tool_name": name,
+                    "context": tc.get("args", {}).get("context", ""),
+                    "tool_call_id": tc.get("id", ""),
+                }
+
+    return None
+
+
+def _extract_text_content(content: Any) -> str:
+    """Extract text from message content, handling both string and list-of-blocks formats."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text = block.get("text", "")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+    return ""
+
+
+def _extract_last_ai_message(messages: list[BaseMessage]) -> str:
+    """Extract the text content from the last AI message in a message list."""
+    for msg in reversed(messages):
+        if msg.type != "ai":
+            continue
+        text = _extract_text_content(msg.content)
+        if text:
+            return text
+    return ""

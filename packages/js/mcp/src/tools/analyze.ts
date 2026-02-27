@@ -25,6 +25,17 @@ const TOOL_MODE_KEYWORDS = [
   'native tool', 'api', 'fetch', 'weather', 'data lookup',
 ];
 
+const PYTHON_KEYWORDS = [
+  'python', 'pip', 'pypi', 'django', 'flask', 'fastapi', 'pandas',
+  'numpy', 'scipy', 'pytorch', 'tensorflow', 'pydantic', 'asyncio',
+  'langchain python', 'python sdk', '.py',
+];
+
+const TYPESCRIPT_KEYWORDS = [
+  'typescript', 'javascript', 'node', 'npm', 'deno', 'bun', 'react',
+  'next.js', 'express', 'nestjs', 'zod', 'prisma', '.ts', '.js',
+];
+
 const STORAGE_KEYWORDS = [
   'remember', 'save', 'store', 'persist', 'history', 'cache', 'track',
   'log', 'bookmark', 'favorite', 'preference', 'database', 'data',
@@ -97,6 +108,10 @@ function extractDomainTags(description: string): string[] {
     { keywords: ['ai', 'machine learning', 'model', 'generate'], tag: 'AI generation' },
     { keywords: ['social media', 'twitter', 'linkedin', 'social'], tag: 'social media' },
     { keywords: ['database', 'sql', 'store', 'persist'], tag: 'data storage' },
+    { keywords: ['hash', 'checksum', 'encrypt', 'decrypt', 'crypto', 'md5', 'sha', 'cipher', 'digest'], tag: 'cryptography' },
+    { keywords: ['note', 'memo', 'diary', 'journal', 'jot', 'notes'], tag: 'notes' },
+    { keywords: ['note', 'memo', 'task', 'todo', 'reminder', 'productivity', 'journal'], tag: 'productivity' },
+    { keywords: ['convert', 'transform', 'format', 'encode', 'decode', 'parse'], tag: 'utilities' },
   ];
 
   for (const { keywords, tag } of domainPatterns) {
@@ -108,22 +123,54 @@ function extractDomainTags(description: string): string[] {
   return tags.length > 0 ? tags : ['general purpose'];
 }
 
+/** Common domain entity nouns, in priority order. Used when regex can't extract the object noun. */
+const DOMAIN_NOUNS = [
+  'note', 'notes', 'task', 'tasks', 'item', 'items', 'email', 'emails',
+  'message', 'messages', 'file', 'files', 'document', 'documents',
+  'article', 'articles', 'post', 'posts', 'record', 'records',
+  'entry', 'entries', 'event', 'events', 'contact', 'contacts',
+  'user', 'users', 'ticket', 'tickets', 'issue', 'issues',
+  'comment', 'comments', 'link', 'links', 'bookmark', 'bookmarks',
+];
+
+/** Find the primary domain entity from a description (e.g., "notes" from "personal notes assistant") */
+function extractDomainNoun(description: string): string {
+  const lower = description.toLowerCase();
+  for (const noun of DOMAIN_NOUNS) {
+    if (lower.includes(noun)) {
+      // Normalize to singular and capitalize
+      const singular = noun.endsWith('ies')
+        ? noun.slice(0, -3) + 'y'
+        : noun.endsWith('s') && !noun.endsWith('ss')
+          ? noun.slice(0, -1)
+          : noun;
+      return singular.charAt(0).toUpperCase() + singular.slice(1);
+    }
+  }
+  return 'Item';
+}
+
 function extractTools(description: string): AnalyzeResult['suggestedTools'] {
   const lower = description.toLowerCase();
   const tools: AnalyzeResult['suggestedTools'] = [];
+  const domainNoun = extractDomainNoun(description);
 
   for (const pattern of TOOL_PATTERNS) {
     const matchedVerb = pattern.verbs.find((v) => lower.includes(v));
     if (matchedVerb) {
-      // Try to extract the object of the verb
+      // Try to extract the object of the verb (handles "verb noun" patterns)
       const regex = new RegExp(`${matchedVerb}\\s+(?:the\\s+)?(?:a\\s+)?(\\w+)`, 'i');
       const match = description.match(regex);
-      const object = match?.[1] || 'items';
+      // Use extracted noun, or fall back to domain noun (not generic 'items')
+      const rawObject = match?.[1];
+      const object = (rawObject && rawObject.toLowerCase() !== matchedVerb && rawObject.length > 1)
+        ? rawObject
+        : domainNoun;
       const toolName = `${pattern.namePrefix}${object.charAt(0).toUpperCase() + object.slice(1)}`;
 
       tools.push({
         name: toolName,
-        description: `${matchedVerb.charAt(0).toUpperCase() + matchedVerb.slice(1)} ${object}`,
+        description: `${matchedVerb.charAt(0).toUpperCase() + matchedVerb.slice(1)} ${object.toLowerCase()}`,
         hasLogTemplate: pattern.hasLogTemplate,
       });
     }
@@ -148,12 +195,35 @@ function extractConfigRequirements(
   return configs;
 }
 
-function generateHandoffDescription(description: string): string {
-  // Trim to a reasonable length for handoff (10-500 chars)
-  const trimmed = description.length > 450 ? description.slice(0, 447) + '...' : description;
-  return trimmed.length < 10
-    ? `${description}. An agent that handles this task.`
-    : trimmed;
+function generateHandoffDescription(
+  description: string,
+  tools: Array<{ name: string }>,
+): string {
+  // Build a concise routing-style description (not a verbatim copy of the input)
+  const cleaned = description.replace(/\.\s*$/, '').replace(/\s+/g, ' ').trim();
+  // Lowercase first letter for inline embedding
+  const lower = cleaned.charAt(0).toLowerCase() + cleaned.slice(1);
+
+  if (tools.length > 0) {
+    // Extract unique leading verbs from camelCase tool names (addNote → "add", listNotes → "list")
+    const verbs = [...new Set(
+      tools
+        .map((t) => {
+          const match = t.name.match(/^([a-z]+)/);
+          return match ? match[1] : '';
+        })
+        .filter(Boolean),
+    )];
+    const verbPhrase = verbs.length > 0 ? ` — supports ${verbs.join(', ')} operations` : '';
+    const result = `Handles ${lower}${verbPhrase}`;
+    return result.length <= 500 ? result : result.slice(0, 497) + '...';
+  }
+
+  const result = `Handles ${lower}`;
+  if (result.length < 10) {
+    return `${description} — specialized assistant for this task`;
+  }
+  return result.length <= 500 ? result : result.slice(0, 497) + '...';
 }
 
 // ============================================================================
@@ -164,10 +234,13 @@ export function analyzeTrikRequirements(
   description: string,
   constraints?: string,
 ): AnalyzeResult {
-  const conversationalScore = countKeywords(description, CONVERSATIONAL_KEYWORDS);
-  const toolModeScore = countKeywords(description, TOOL_MODE_KEYWORDS);
-  const storageScore = countKeywords(description, STORAGE_KEYWORDS);
-  const sessionScore = countKeywords(description, SESSION_KEYWORDS);
+  const text = `${description} ${constraints || ''}`;
+  const conversationalScore = countKeywords(text, CONVERSATIONAL_KEYWORDS);
+  const toolModeScore = countKeywords(text, TOOL_MODE_KEYWORDS);
+  const storageScore = countKeywords(text, STORAGE_KEYWORDS);
+  const sessionScore = countKeywords(text, SESSION_KEYWORDS);
+  const pythonScore = countKeywords(text, PYTHON_KEYWORDS);
+  const tsScore = countKeywords(text, TYPESCRIPT_KEYWORDS);
 
   const isConversational = conversationalScore >= toolModeScore;
   const suggestedMode = isConversational ? 'conversational' : 'tool';
@@ -175,6 +248,13 @@ export function analyzeTrikRequirements(
   const modeReason = isConversational
     ? `Conversational mode recommended: description suggests interactive, multi-turn interactions (matched ${conversationalScore} conversational keywords vs ${toolModeScore} tool-mode keywords).`
     : `Tool mode recommended: description suggests native tools that export to the main agent (matched ${toolModeScore} tool-mode keywords vs ${conversationalScore} conversational keywords).`;
+
+  const suggestedLanguage: 'ts' | 'py' = pythonScore > tsScore ? 'py' : 'ts';
+  const languageReason = pythonScore > tsScore
+    ? `Python suggested: description mentions Python-related technologies (matched ${pythonScore} Python keywords vs ${tsScore} TypeScript keywords).`
+    : pythonScore === tsScore && pythonScore === 0
+      ? 'TypeScript suggested by default. Both Python and TypeScript are fully supported — specify your preference in constraints.'
+      : `TypeScript suggested: description mentions JS/TS-related technologies (matched ${tsScore} TypeScript keywords vs ${pythonScore} Python keywords).`;
 
   const tools = extractTools(description);
   const domain = extractDomainTags(description);
@@ -211,7 +291,9 @@ export function analyzeTrikRequirements(
   return {
     suggestedMode,
     modeReason,
-    suggestedHandoffDescription: isConversational ? generateHandoffDescription(description) : '',
+    suggestedLanguage,
+    languageReason,
+    suggestedHandoffDescription: isConversational ? generateHandoffDescription(description, tools) : '',
     suggestedDomain: domain,
     suggestedTools: tools,
     suggestedCapabilities: {

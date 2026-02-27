@@ -134,13 +134,13 @@ const ERROR_PATTERNS: ErrorPattern[] = [
 
   // Linter: has-source-files
   {
-    pattern: /no typescript source files|has-source-files/i,
+    pattern: /no (typescript|python) source files|no source files|has-source-files/i,
     diagnosis: {
       explanation:
-        'The linter checks that the trik directory contains TypeScript source files. It scans the root and src/ directory for .ts/.tsx files (excluding .test., .spec., and .d.ts).',
-      rootCause: 'No TypeScript source files were found in the trik root or src/ directory.',
+        'The linter checks that the trik directory contains source files. For TypeScript triks, it scans for .ts/.tsx files (excluding .test., .spec., and .d.ts). For Python triks, it scans for .py files.',
+      rootCause: 'No source files were found in the trik root or src/ directory.',
       suggestedFix:
-        'Ensure your source files are in the trik root or in a src/ subdirectory. If you use a different layout, check that .ts files exist in one of these locations.',
+        'Ensure your source files are in the trik root or in a src/ subdirectory. For TypeScript triks, check that .ts files exist. For Python triks, check that .py files exist in one of these locations.',
       relatedDocs: ['https://trikhub.dev/docs/creating-triks/structure'],
     },
   },
@@ -150,10 +150,10 @@ const ERROR_PATTERNS: ErrorPattern[] = [
     pattern: /entry.*not found|module.*not found|cannot find.*entry/i,
     diagnosis: {
       explanation:
-        'The entry point specified in manifest.json must point to a compiled file that exports your agent.',
+        'The entry point specified in manifest.json must point to a file that exports your agent.',
       rootCause: 'The file specified in entry.module does not exist.',
       suggestedFix:
-        'Run `npm run build` to compile your TypeScript, or verify entry.module points to the correct file path.',
+        'For TypeScript triks, run `npm run build` to compile and verify entry.module points to the compiled output (e.g., "./dist/index.js"). For Python triks, verify entry.module points to the correct .py source file (e.g., "./src/agent.py").',
       relatedDocs: ['https://trikhub.dev/docs/manifest#entry-point'],
     },
   },

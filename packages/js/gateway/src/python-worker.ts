@@ -12,6 +12,8 @@ import type { TrikStorageContext } from '@trikhub/manifest';
 import {
   createHealthRequest,
   createShutdownRequest,
+  createProcessMessageRequest,
+  createExecuteToolRequest,
   createSuccessResponse,
   createErrorResponse,
   parseMessage,
@@ -21,6 +23,10 @@ import {
   type JsonRpcRequest,
   type JsonRpcResponse,
   type HealthResult,
+  type ProcessMessageInput,
+  type ProcessMessageResult,
+  type ExecuteToolInput,
+  type ExecuteToolResult,
   type StorageMethod,
 } from './worker-protocol.js';
 
@@ -232,6 +238,51 @@ export class PythonWorker extends EventEmitter {
    */
   get ready(): boolean {
     return this.isReady;
+  }
+
+  /**
+   * Set the storage context for subsequent calls.
+   * Must be called before processMessage() or executeTool() so
+   * that storage proxy requests from the worker can be fulfilled.
+   */
+  setStorageContext(context: TrikStorageContext | null): void {
+    this.currentStorageContext = context;
+  }
+
+  /**
+   * Send a processMessage request to the Python worker (conversational mode).
+   */
+  async processMessage(input: ProcessMessageInput): Promise<ProcessMessageResult> {
+    if (!this.process) {
+      throw new Error('Worker not started');
+    }
+
+    const request = createProcessMessageRequest(input);
+    const response = await this.sendRequest(request);
+
+    if (response.error) {
+      throw new Error(`processMessage failed: ${response.error.message}`);
+    }
+
+    return response.result as ProcessMessageResult;
+  }
+
+  /**
+   * Send an executeTool request to the Python worker (tool mode).
+   */
+  async executeTool(input: ExecuteToolInput): Promise<ExecuteToolResult> {
+    if (!this.process) {
+      throw new Error('Worker not started');
+    }
+
+    const request = createExecuteToolRequest(input);
+    const response = await this.sendRequest(request);
+
+    if (response.error) {
+      throw new Error(`executeTool failed: ${response.error.message}`);
+    }
+
+    return response.result as ExecuteToolResult;
   }
 
   private handleLine(line: string): void {
