@@ -96,20 +96,5 @@ def lint_command(path: str, warnings_as_errors: bool, skip: tuple[str, ...]) -> 
     else:
         ok("Validation passed")
 
-    # Quality score
-    if validation.qualityScore is not None:
-        score = validation.qualityScore
-        if score >= 80:
-            color = "green"
-        elif score >= 50:
-            color = "yellow"
-        else:
-            color = "red"
-        click.echo()
-        click.echo(
-            click.style("Quality Score: ", bold=True)
-            + click.style(f"{score}/100", fg=color)
-        )
-
     if has_errors or (not validation.valid):
         sys.exit(1)

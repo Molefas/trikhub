@@ -76,7 +76,6 @@ export interface ValidateResult {
   valid: boolean;
   errors: Array<{ path: string; message: string; fix: string }>;
   warnings: Array<{ path: string; message: string; suggestion?: string }>;
-  qualityScore: number;
 }
 
 // ============================================================================

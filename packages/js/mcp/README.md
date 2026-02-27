@@ -5,7 +5,7 @@ An MCP (Model Context Protocol) server for AI-assisted trik authoring. Use your 
 ## Features
 
 - **Guided trik creation** - Describe what you want, get a complete v2 trik scaffold with agent, tools, and system prompt
-- **Manifest validation** - Real-time feedback on quality score, log schema constraints, and schema correctness
+- **Manifest validation** - Real-time feedback on log schema constraints and schema correctness
 - **Tool design** - Interactive tool declaration design with logTemplate and logSchema
 - **Error diagnosis** - Understand and fix validation/publish/runtime errors with context-aware guidance
 - **Documentation access** - v2 manifest schema reference
@@ -84,7 +84,7 @@ trik mcp --stdio  # Start server in stdio mode
 | `design_tool` | Design a tool declaration with logTemplate and logSchema |
 | `design_log_schema` | Create constrained logSchema for log template placeholders |
 | `scaffold_trik` | Generate complete v2 trik project structure |
-| `validate_manifest` | Validate v2 manifest with quality score |
+| `validate_manifest` | Validate v2 manifest for errors and warnings |
 | `diagnose_error` | Explain and fix v2 errors with context-aware guidance |
 
 ## Available Resources
@@ -117,7 +117,7 @@ The MCP server provides structured tools that guide you through trik creation:
 1. **Exploration** - `analyze_trik_requirements` understands your intent and suggests agent mode, domain tags, and tools
 2. **Design** - `design_tool` and `design_log_schema` create valid tool declarations with constrained log schemas
 3. **Scaffold** - `scaffold_trik` generates the complete v2 project (manifest, agent.ts with wrapAgent(), system prompt, tool files)
-4. **Validate** - `validate_manifest` checks correctness and reports a quality score (0-100)
+4. **Validate** - `validate_manifest` checks correctness and reports errors and warnings
 5. **Diagnose** - `diagnose_error` explains errors with context-specific fix suggestions
 
 The LLM orchestrates these tools through natural conversation, asking clarifying questions and iterating on designs.

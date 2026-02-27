@@ -409,37 +409,6 @@ class TestDomainTagWarnings:
 
 
 # ============================================================================
-# Quality score
-# ============================================================================
-
-
-class TestQualityScore:
-    def test_perfect_conversational_score(self):
-        data = make_conversational_manifest(limits={"maxTurnTimeMs": 30000})
-        result = validate_manifest(data)
-        assert result.valid is True
-        assert result.qualityScore == 100
-
-    def test_perfect_tool_score(self):
-        data = make_tool_manifest(limits={"maxTurnTimeMs": 30000})
-        result = validate_manifest(data)
-        assert result.valid is True
-        assert result.qualityScore == 100
-
-    def test_missing_limits_deduction(self):
-        data = make_conversational_manifest()
-        result = validate_manifest(data)
-        assert result.valid is True
-        assert result.qualityScore == 90  # -10 for missing limits
-
-    def test_generic_domain_deduction(self):
-        data = make_conversational_manifest(limits={"maxTurnTimeMs": 30000})
-        data["agent"]["domain"] = ["general", "testing"]
-        result = validate_manifest(data)
-        assert result.qualityScore == 95  # -5 for generic domain
-
-
-# ============================================================================
 # Error diagnosis
 # ============================================================================
 

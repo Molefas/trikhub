@@ -89,12 +89,12 @@ my-trik/
 cd my-trik
 npm install
 npm run build
-trik lint .   # Validate manifest and quality score
+trik lint .   # Validate manifest
 ```
 
 ### `trik lint <path>`
 
-Validate a trik's manifest and source files. Shows errors, warnings, and a quality score.
+Validate a trik's manifest and source files. Shows errors and warnings.
 
 ```bash
 trik lint .
@@ -106,13 +106,6 @@ trik lint . --warnings-as-errors
 # Skip specific rules
 trik lint . --skip manifest-completeness
 ```
-
-The quality score (0-100) evaluates:
-- Handoff description quality
-- Domain tag specificity
-- System prompt presence (conversational mode)
-- Tool log template coverage
-- Log schema constraint safety
 
 ### `trik install <name>`
 
