@@ -13,7 +13,7 @@ npm install -g @trikhub/cli
 ```bash
 # Create a new trik
 trik init ts   # TypeScript
-trik init py   # Python (coming soon)
+trik init py   # Python
 
 # Search for triks
 trik search article
@@ -83,13 +83,37 @@ my-trik/
 └── .gitignore
 ```
 
+**Python:**
+
+```text
+my-trik/
+├── manifest.json
+├── trikhub.json
+├── pyproject.toml
+├── src/
+│   └── my_trik/
+│       ├── __init__.py
+│       ├── main.py
+│       └── prompts/
+│           └── system.md    # System prompt (conversational mode)
+├── README.md
+└── .gitignore
+```
+
 #### Testing Your Trik
 
 ```bash
+# TypeScript
 cd my-trik
 npm install
 npm run build
 trik lint .   # Validate manifest and quality score
+
+# Python
+cd my-trik
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
+trik lint .
 ```
 
 ### `trik lint <path>`
@@ -113,6 +137,12 @@ The quality score (0-100) evaluates:
 - System prompt presence (conversational mode)
 - Tool log template coverage
 - Log schema constraint safety
+
+**TDPS linter rules:**
+- `tdps-agent-safe-output` — outputSchema must use agent-safe types
+- `tdps-constrained-log` — logSchema strings must be constrained
+- `tdps-log-template` — logTemplate placeholders must match logSchema
+- `tdps-output-template` — outputTemplate placeholders must match outputSchema
 
 ### `trik install <name>`
 
@@ -227,7 +257,7 @@ trik publish --tag 1.2.0
 
 - Logged in with `trik login`
 - Git tag pushed to remote matching the manifest version
-- `dist/` directory committed (for TypeScript triks)
+- `dist/` directory committed (TypeScript triks only; Python triks don't need a build step)
 
 **Publishing flow:**
 
@@ -238,6 +268,7 @@ trik publish --tag 1.2.0
 
 ### Required Files
 
+**TypeScript:**
 ```
 your-trik/
 ├── manifest.json      # v2 trik manifest (required)
@@ -245,6 +276,17 @@ your-trik/
 ├── package.json       # npm package definition (required)
 └── dist/
     └── agent.js       # Compiled entry point (required)
+```
+
+**Python:**
+```
+your-trik/
+├── manifest.json      # v2 trik manifest (required)
+├── trikhub.json       # Registry metadata (required)
+├── pyproject.toml     # Python package definition (required)
+└── src/
+    └── your_trik/
+        └── main.py    # Entry point (required)
 ```
 
 ### Manifest Requirements
