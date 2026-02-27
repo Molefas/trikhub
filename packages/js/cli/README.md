@@ -118,7 +118,7 @@ trik lint .
 
 ### `trik lint <path>`
 
-Validate a trik's manifest and source files. Shows errors, warnings, and a quality score.
+Validate a trik's manifest and source files. Shows errors and warnings.
 
 ```bash
 trik lint .
