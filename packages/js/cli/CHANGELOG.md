@@ -1,5 +1,17 @@
 # @trikhub/cli
 
+## 0.14.0
+
+### Minor Changes
+
+- [#50](https://github.com/Molefas/trikhub/pull/50) [`7ea4b52`](https://github.com/Molefas/trikhub/commit/7ea4b5280b924ff53d75899bf01bbcf057d2fac3) Thanks [@Molefas](https://github.com/Molefas)! - Add --runtime filter to search and list commands for cross-language trik filtering
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @trikhub/linter@0.14.0
+  - @trikhub/manifest@0.14.0
+
 ## 0.13.0
 
 ### Minor Changes
