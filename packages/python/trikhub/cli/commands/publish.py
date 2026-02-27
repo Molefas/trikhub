@@ -12,6 +12,7 @@ from pathlib import Path
 import click
 
 from trikhub.cli.config import is_auth_expired, read_global_config
+from trikhub.cli.output import ok, fail, info, warn
 from trikhub.cli.registry import get_registry
 from trikhub.manifest import validate_manifest
 
@@ -48,8 +49,16 @@ def _find_trikhub_json(repo_dir: Path) -> dict | None:
         return None
 
 
+def _extract_github_repo(url: str) -> str | None:
+    """Extract owner/repo from a GitHub URL, preserving case."""
+    match = re.search(r"github\.com[/:]([^/]+/[^/]+)", url)
+    if not match:
+        return None
+    return re.sub(r"\.git$", "", match.group(1))
+
+
 def _normalize_git_url(url: str) -> str:
-    """Normalize a git URL for comparison."""
+    """Normalize a git URL for comparison (lowercased)."""
     url = url.rstrip("/")
     url = re.sub(r"\.git$", "", url)
     url = re.sub(r"^https?://github\.com/", "", url)
@@ -112,35 +121,26 @@ def publish_command(directory: str, tag: str | None) -> None:
     """Validate and publish a trik to the TrikHub registry."""
     repo_dir = Path(directory).resolve()
 
-    # Check auth
+    # Step 1: Check auth
     global_config = read_global_config()
     if not global_config.auth_token or is_auth_expired(global_config):
-        click.echo(click.style("  Not authenticated. Run `trik login` first.", fg="red"))
+        fail("Not authenticated")
+        info("Run `trik login` to authenticate first")
         sys.exit(1)
 
-    # Find manifest
+    # Step 2: Find and validate manifest
     result = _find_manifest(repo_dir)
     if not result:
-        click.echo(click.style("  No manifest.json found", fg="red"))
+        fail("Missing manifest.json")
+        info("Create a manifest.json file with your trik definition")
         sys.exit(1)
     manifest_path, manifest_data = result
-
-    # Validate manifest
-    validation = validate_manifest(manifest_data)
-    if not validation.valid:
-        click.echo(click.style("  Manifest validation failed:", fg="red"))
-        for error in validation.errors:
-            click.echo(f"    - {error}")
-        sys.exit(1)
-
-    if validation.warnings:
-        for warning in validation.warnings:
-            click.echo(click.style(f"  Warning: {warning}", fg="yellow"))
 
     # Check trikhub.json
     trikhub_json = _find_trikhub_json(repo_dir)
     if not trikhub_json:
-        click.echo(click.style("  No trikhub.json found", fg="red"))
+        fail("Missing trikhub.json")
+        info("Create a trikhub.json file with registry metadata")
         sys.exit(1)
 
     # Check entry point exists
@@ -148,72 +148,122 @@ def publish_command(directory: str, tag: str | None) -> None:
     entry_module = manifest_data.get("entry", {}).get("module", "")
     entry_path = manifest_dir / entry_module
     if not entry_path.exists():
-        click.echo(click.style(f"  Entry point not found: {entry_module}", fg="red"))
+        fail(f"Entry point not found: {entry_module}")
         sys.exit(1)
 
-    # Get version and tag
+    # Validate manifest
+    validation = validate_manifest(manifest_data)
+    if not validation.valid:
+        fail("Validation failed")
+        for error in validation.errors:
+            info(f"  {error}")
+        sys.exit(1)
+
+    if validation.warnings:
+        warn("Validation passed with warnings")
+        for warning in validation.warnings:
+            info(warning)
+    else:
+        ok("Validation passed")
+
+    # Step 3: Determine version and git tag
     version = manifest_data.get("version", "0.1.0")
     git_tag = tag or f"v{version}"
+    info(f"Version: {version}")
 
-    # Extract GitHub repo from trikhub.json
+    # Step 4: Extract GitHub repo from trikhub.json
     repo_url = trikhub_json.get("repository", "")
-    github_repo = _normalize_git_url(repo_url)
+    github_repo = _extract_github_repo(repo_url)
 
     if not github_repo:
-        click.echo(click.style("  No repository URL in trikhub.json", fg="red"))
+        fail("Invalid repository URL in trikhub.json")
+        info("Expected format: https://github.com/owner/repo")
         sys.exit(1)
 
-    # Verify git remote matches
+    # Step 5: Verify git remote matches trikhub.json repository
     remote_url = _get_remote_url(repo_dir)
     if remote_url:
         normalized_remote = _normalize_git_url(remote_url)
-        if normalized_remote != github_repo:
-            click.echo(click.style(
-                f"  Git remote ({normalized_remote}) doesn't match trikhub.json ({github_repo})",
-                fg="red",
-            ))
+        normalized_repo = _normalize_git_url(repo_url)
+        if normalized_remote != normalized_repo:
+            fail("Git remote does not match trikhub.json repository")
+            info(f"trikhub.json: {repo_url}")
+            info(f"git remote:   {remote_url}")
             sys.exit(1)
-
-    # Check entry point is committed
-    entry_rel = str(manifest_path.parent.relative_to(repo_dir) / entry_module)
-    if not _is_path_committed(repo_dir, entry_rel):
-        click.echo(click.style(f"  Entry point not committed: {entry_rel}", fg="yellow"))
-
-    # Verify tag exists on remote
-    commit_sha = _get_remote_tag_sha(repo_dir, git_tag)
-    if not commit_sha:
-        click.echo(click.style(f"  Tag {git_tag} not found on remote", fg="red"))
-        click.echo(f"  Create and push: git tag {git_tag} && git push origin {git_tag}")
+        ok("Git remote verified")
+    else:
+        fail("Not a git repository or no remote configured")
+        info(f"git remote add origin {repo_url}")
         sys.exit(1)
 
-    # Publish
-    click.echo(f"  Publishing {manifest_data['id']}@{version} ({git_tag})...")
+    owner = github_repo.split("/")[0]
+    trik_name = manifest_data.get("id") or manifest_data.get("name", "")
+    full_name = f"@{owner}/{trik_name}"
+    info(f"Trik: {full_name}")
+    info(f"Repo: {github_repo}")
 
+    # Step 6: Check entry point is committed
+    entry_rel = str(manifest_path.parent.relative_to(repo_dir) / entry_module)
+    if not _is_path_committed(repo_dir, entry_rel):
+        fail(f"Entry module is not committed to git")
+        info(f"{entry_rel} must be committed for direct GitHub installation.")
+        info(f'git add "{entry_rel}"')
+        info(f'git commit -m "Add entry module for publishing"')
+        info("git push")
+        sys.exit(1)
+    ok(f"{entry_rel} is committed")
+
+    # Step 7: Verify tag exists on remote
+    commit_sha = _get_remote_tag_sha(repo_dir, git_tag)
+    if not commit_sha:
+        fail(f"Tag {git_tag} not found on remote")
+        info("The git tag must exist on the remote before publishing.")
+        info(f"git tag {git_tag}")
+        info(f"git push origin {git_tag}")
+        sys.exit(1)
+    ok(f"Tag {git_tag} verified ({commit_sha[:8]}...)")
+
+    # Step 8: Publish to registry
     async def _publish():
         async with get_registry() as registry:
             # Register trik if needed
             try:
-                await registry.register_trik(
-                    github_repo=github_repo,
-                    name=manifest_data.get("id"),
-                    description=manifest_data.get("description"),
-                    categories=trikhub_json.get("categories"),
-                    keywords=trikhub_json.get("keywords"),
-                )
+                existing = await registry.get_trik(full_name)
+                if not existing:
+                    await registry.register_trik(
+                        github_repo=github_repo,
+                        name=trik_name,
+                        description=manifest_data.get("description"),
+                        categories=trikhub_json.get("categories"),
+                        keywords=trikhub_json.get("keywords"),
+                    )
+                    info(f"Registered new trik: {full_name}")
             except RuntimeError:
                 pass  # Already registered
 
-            trik_name = f"@{global_config.publisher_username}/{manifest_data['id']}"
             await registry.publish_version(
-                full_name=trik_name,
+                full_name=full_name,
                 version=version,
                 git_tag=git_tag,
                 commit_sha=commit_sha,
                 manifest=manifest_data,
             )
-            click.echo(click.style(f"  Published {trik_name}@{version}", fg="green"))
+            ok("Published to TrikHub registry")
 
-    asyncio.run(_publish())
+    try:
+        asyncio.run(_publish())
+    except Exception as exc:
+        fail("Failed to publish to registry")
+        info(str(exc))
+        sys.exit(1)
+
+    # Success message
+    click.echo()
+    click.echo(click.style("  Published successfully!", fg="green", bold=True))
+    click.echo()
+    info(f"Install with: trik install {full_name}@{version}")
+    info(f"View at: https://trikhub.com/triks/{full_name}")
+    click.echo()
 
 
 @click.command("unpublish")
