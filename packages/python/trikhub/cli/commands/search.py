@@ -26,6 +26,8 @@ def _format_number(num: int) -> str:
 @click.option("--runtime", default=None, help="Filter by runtime (python/node)")
 def search_command(query: str, as_json: bool, limit: int, runtime: str | None) -> None:
     """Search for triks in the registry."""
+    from trikhub.cli.config import read_config
+    from trikhub.cli.output import info
 
     async def _search():
         async with get_registry() as registry:
@@ -47,22 +49,39 @@ def search_command(query: str, as_json: bool, limit: int, runtime: str | None) -
                 return
 
             if not result.results:
-                click.echo(f"  No triks found for '{query}'")
+                click.echo(click.style(f'\nNo triks found for "{query}"\n', fg="yellow"))
+                info("Try a different search term or browse all triks at https://trikhub.com")
                 return
 
-            click.echo(f"\n  Found {result.total} triks:\n")
+            # Check installed triks for badge
+            config = read_config()
+            installed_triks = set(config.triks)
+
+            click.echo(
+                click.style(f"\nFound {result.total} trik{'s' if result.total != 1 else ''}:\n", bold=True)
+            )
+
             for trik in result.results:
-                name_str = click.style(trik.full_name, bold=True)
-                click.echo(f"  {name_str}")
+                installed = trik.full_name in installed_triks
+                installed_badge = click.style(" [installed]", fg="green") if installed else ""
+                verified_badge = click.style(" \u2713", fg="blue") if trik.verified else ""
+
+                click.echo(f"  {click.style(trik.full_name, fg='cyan')}{verified_badge}{installed_badge}")
                 if trik.description:
-                    click.echo(f"    {trik.description}")
-                meta_parts = [f"v{trik.latest_version}"]
-                if trik.downloads:
-                    meta_parts.append(f"{_format_number(trik.downloads)} downloads")
-                if trik.runtime != "node":
-                    meta_parts.append(f"runtime: {trik.runtime}")
-                click.echo(click.style(f"    {' | '.join(meta_parts)}", dim=True))
+                    click.echo(click.style(f"  {trik.description}", dim=True))
+                click.echo(click.style(
+                    f"  v{trik.latest_version} \u00b7 \u2b07 {_format_number(trik.downloads)} \u00b7 \u2b50 {trik.stars}",
+                    dim=True,
+                ))
                 click.echo()
+
+            if result.total > len(result.results):
+                click.echo(click.style(
+                    f"Showing {len(result.results)} of {result.total} results. Use --limit to see more.",
+                    dim=True,
+                ))
+
+            click.echo(click.style("\nInstall with: trik install @scope/name", dim=True))
 
     asyncio.run(_search())
 
