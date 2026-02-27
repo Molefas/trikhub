@@ -62,6 +62,7 @@ program
   .alias('ls')
   .description('List installed triks')
   .option('-j, --json', 'Output as JSON')
+  .option('-r, --runtime <runtime>', 'Filter by runtime (python/node)')
   .action(listCommand);
 
 // Search command
@@ -71,6 +72,7 @@ program
   .description('Search for triks in the registry')
   .option('-j, --json', 'Output as JSON')
   .option('-l, --limit <number>', 'Limit results', '10')
+  .option('-r, --runtime <runtime>', 'Filter by runtime (python/node)')
   .action(searchCommand);
 
 // Info command

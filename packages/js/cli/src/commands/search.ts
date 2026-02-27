@@ -12,6 +12,7 @@ import { isTrikInstalled } from '../lib/storage.js';
 interface SearchOptions {
   json?: boolean;
   limit?: string;
+  runtime?: string;
 }
 
 export async function searchCommand(
@@ -22,7 +23,7 @@ export async function searchCommand(
 
   try {
     const limit = parseInt(options.limit ?? '10', 10);
-    const results = await registry.search(query, { perPage: limit });
+    const results = await registry.search(query, { perPage: limit, runtime: options.runtime });
 
     spinner.stop();
 

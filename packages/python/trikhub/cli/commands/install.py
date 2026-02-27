@@ -137,25 +137,40 @@ def install_command(package: str, version: str | None) -> None:
 @click.argument("package")
 def uninstall_command(package: str) -> None:
     """Uninstall a trik."""
+    from trikhub.cli.output import ok, warn
+
+    # Parse @version suffix (e.g., @scope/name@1.0.0 -> @scope/name)
+    at_index = package.rfind("@")
+    if at_index > 0:
+        package_name = package[:at_index]
+    else:
+        package_name = package
+
     config = read_config()
-    runtime = config.runtimes.get(package, "python")
+    runtime = config.runtimes.get(package_name, "python")
 
-    if not remove_trik_from_config(package):
-        click.echo(click.style(f"  Trik not found in config: {package}", fg="yellow"))
-        return
+    # Remove from config
+    was_in_config = remove_trik_from_config(package_name)
+    if was_in_config:
+        ok(f"Removed {package_name} from config")
+    else:
+        warn(f"{package_name} was not in config")
 
+    # Remove files
+    removed_files = False
     if runtime == "node":
         triks_dir = get_config_dir() / "triks"
-        if package.startswith("@"):
-            parts = package.split("/", 1)
+        if package_name.startswith("@"):
+            parts = package_name.split("/", 1)
             target = triks_dir / parts[0] / parts[1]
         else:
-            target = triks_dir / package
+            target = triks_dir / package_name
         if target.exists():
             shutil.rmtree(target)
-            click.echo(f"  Removed {target}")
+            ok(f"Removed {package_name} from .trikhub/triks/")
+            removed_files = True
     else:
-        pip_names = _get_pip_package_names(package)
+        pip_names = _get_pip_package_names(package_name)
         for pip_name in pip_names:
             try:
                 subprocess.run(
@@ -164,8 +179,15 @@ def uninstall_command(package: str) -> None:
                     capture_output=True,
                     text=True,
                 )
+                ok(f"Uninstalled {pip_name} via pip")
+                removed_files = True
                 break
             except subprocess.CalledProcessError:
                 continue
 
-    click.echo(click.style(f"  Uninstalled {package}", fg="green"))
+    if not was_in_config and not removed_files:
+        warn(f"{package_name} was not installed")
+        return
+
+    click.echo()
+    ok(f"Uninstalled {package_name}")

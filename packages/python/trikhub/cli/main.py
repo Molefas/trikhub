@@ -4,6 +4,7 @@ Usage:
     trik init ts|py            Initialize a new trik project
     trik install @scope/name   Install a trik from the registry or pip
     trik uninstall @scope/name Uninstall a trik
+    trik lint [path]           Validate a trik for security and correctness
     trik list                  List installed triks
     trik sync                  Discover triks in site-packages
     trik search query          Search for triks in the registry
@@ -23,6 +24,7 @@ import click
 
 from trikhub.cli.commands.init import init_command
 from trikhub.cli.commands.install import install_command, uninstall_command
+from trikhub.cli.commands.lint import lint_command
 from trikhub.cli.commands.list import list_command, sync_command
 from trikhub.cli.commands.login import login_command, logout_command, whoami_command
 from trikhub.cli.commands.publish import publish_command, unpublish_command
@@ -30,7 +32,7 @@ from trikhub.cli.commands.search import info_command, search_command
 
 
 @click.group()
-@click.version_option(version="0.13.0", prog_name="trik")
+@click.version_option(version="0.14.0", prog_name="trik")
 @click.option("--dev", is_flag=True, help="Use development registry (localhost:3001)")
 @click.pass_context
 def cli(ctx: click.Context, dev: bool) -> None:
@@ -44,6 +46,7 @@ def cli(ctx: click.Context, dev: bool) -> None:
 # Register commands
 cli.add_command(init_command)
 cli.add_command(install_command)
+cli.add_command(lint_command)
 cli.add_command(uninstall_command)
 cli.add_command(list_command)
 cli.add_command(sync_command)

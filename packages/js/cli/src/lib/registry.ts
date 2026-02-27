@@ -223,14 +223,18 @@ export class RegistryClient {
   /**
    * Search for triks in the registry
    */
-  async search(query: string, options: { page?: number; perPage?: number } = {}): Promise<SearchResult> {
-    const { page = 1, perPage = 10 } = options;
+  async search(query: string, options: { page?: number; perPage?: number; runtime?: string } = {}): Promise<SearchResult> {
+    const { page = 1, perPage = 10, runtime } = options;
 
     const params = new URLSearchParams({
       q: query,
       page: String(page),
       pageSize: String(perPage),
     });
+
+    if (runtime) {
+      params.set('runtime', runtime);
+    }
 
     const result = await this.fetch<ApiSearchResult>(`/api/v1/triks?${params}`);
 
