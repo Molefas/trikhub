@@ -380,9 +380,12 @@ class TrikGateway:
         try:
             response: TrikResponse = await loaded.agent.process_message(message, ctx)
         except Exception as exc:
-            return self._auto_transfer_back(
-                f'Trik "{loaded.manifest.name}" encountered an error: {exc}'
-            )
+            # User-facing: include sanitized error for debugging
+            sanitized = self._sanitize_error_message(str(exc))
+            user_message = f'Trik "{loaded.manifest.name}" encountered an error: {sanitized}'
+            # Agent-facing log: generic message, no trik-controlled text
+            agent_log = f'Trik "{loaded.manifest.name}" encountered an error and transferred back'
+            return self._auto_transfer_back(user_message, log_summary=agent_log)
 
         if response.toolCalls:
             self._process_tool_calls(handoff.session_id, loaded.manifest, response.toolCalls)
@@ -435,17 +438,31 @@ class TrikGateway:
         self._active_handoff = None
         return result
 
-    def _auto_transfer_back(self, reason: str) -> RouteTransferBack:
+    @staticmethod
+    def _sanitize_error_message(msg: str, max_length: int = 200) -> str:
+        """
+        Sanitize an error message for safe display.
+        Strips control characters (keeps newlines/tabs) and truncates.
+        """
+        import re
+        # Strip control characters except newline (\n=0x0A) and tab (\t=0x09)
+        cleaned = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", msg)
+        if len(cleaned) <= max_length:
+            return cleaned
+        return cleaned[:max_length] + "..."
+
+    def _auto_transfer_back(self, reason: str, log_summary: str | None = None) -> RouteTransferBack:
         handoff = self._active_handoff
         assert handoff is not None
         loaded = self._triks[handoff.trik_id]
 
+        # Log handoff end — use log_summary for the agent-facing log if provided
         self._session_storage.append_log(
             handoff.session_id,
             HandoffLogEntry(
                 timestamp=_now_ms(),
                 type="handoff_end",
-                summary=reason,
+                summary=log_summary if log_summary is not None else reason,
             ),
         )
         summary = self._build_session_summary(handoff.session_id, loaded.manifest)
@@ -475,19 +492,86 @@ class TrikGateway:
             )
 
     @staticmethod
+    def _validate_log_value(value: Any, field_schema: JSONSchema) -> str | None:
+        """
+        Validate a single log value against its logSchema field definition.
+        Returns the validated string representation, or None if non-conforming.
+
+        TDPS enforcement: log values flow into the main agent's context via session
+        summaries, so every value must be validated against declared constraints.
+        """
+        if value is None:
+            return None
+
+        schema_type = field_schema.type
+
+        # Enum — check membership (works for any type)
+        if field_schema.enum:
+            return str(value) if value in field_schema.enum else None
+
+        # Integer
+        if schema_type == "integer":
+            return str(value) if isinstance(value, int) and not isinstance(value, bool) else None
+
+        # Number
+        if schema_type == "number":
+            return str(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+        # Boolean
+        if schema_type == "boolean":
+            return str(value) if isinstance(value, bool) else None
+
+        # String with constraints
+        if schema_type == "string":
+            if not isinstance(value, str):
+                return None
+
+            # Pattern — reject if no match
+            if field_schema.pattern:
+                import re as _re
+                if not _re.search(field_schema.pattern, value):
+                    return None
+
+            # maxLength — truncate
+            if field_schema.maxLength and len(value) > field_schema.maxLength:
+                return value[: field_schema.maxLength]
+
+            # format, pattern, or maxLength means constrained — allow through
+            if field_schema.format or field_schema.pattern or field_schema.maxLength:
+                return value
+
+            # Unconstrained string — reject
+            return None
+
+        # Unknown type / no constraints — reject
+        return None
+
+    @staticmethod
     def _build_tool_log_summary(
         call: ToolCallRecord, decl: ToolDeclaration | None
     ) -> str:
+        """
+        Build a log summary string for a single tool call.
+
+        TDPS enforcement: validates each placeholder value against logSchema before
+        filling. Non-conforming values are replaced with the literal placeholder.
+        """
         if not decl or not decl.logTemplate:
             return f"Called {call.tool}"
         import re
 
+        log_schema = decl.logSchema
+
         def _replace(m: re.Match[str]) -> str:
             field = m.group(1)
-            val = call.output.get(field)
-            if val is None:
+
+            # No logSchema or field not in logSchema — safe fallback
+            if not log_schema or field not in log_schema:
                 return m.group(0)
-            return str(val)
+
+            val = call.output.get(field)
+            validated = TrikGateway._validate_log_value(val, log_schema[field])
+            return validated if validated is not None else m.group(0)
 
         return re.sub(r"\{\{(\w+)\}\}", _replace, decl.logTemplate)
 
