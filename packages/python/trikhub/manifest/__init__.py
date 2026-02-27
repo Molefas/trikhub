@@ -1,116 +1,90 @@
 """
-TrikHub Manifest Types and Validation
+TrikHub v2 Manifest Types and Validation
 
-Provides Pydantic models and JSON Schema validation for trik manifests.
-Mirrors packages/trik-manifest in TypeScript.
+Provides Pydantic models and JSON Schema validation for v2 trik manifests.
+Mirrors packages/js/manifest in TypeScript.
 """
 
 from trikhub.manifest.types import (
     # JSON Schema
     JSONSchema,
-    # Session & Storage
-    SessionCapabilities,
-    StorageCapabilities,
-    ConfigRequirement,
-    TrikConfig,
+    # Manifest types
+    AgentMode,
+    AgentDefinition,
+    ModelPreferences,
+    ToolDeclaration,
+    # Capabilities
     TrikCapabilities,
     TrikLimits,
-    # Runtime & Entry
-    TrikRuntime,
+    SessionCapabilities,
+    StorageCapabilities,
+    # Configuration
+    ConfigRequirement,
+    TrikConfig,
+    # Entry point
     TrikEntry,
-    # Response Mode
-    ResponseMode,
-    AllowedAgentStringFormat,
-    ResponseTemplate,
-    ActionDefinition,
-    # Main Manifest
+    TrikRuntime,
+    # Main manifest
     TrikManifest,
-    # Wire Protocol
-    ExecuteRequest,
-    ClarificationQuestion,
-    ClarificationAnswer,
-    ClarifyRequest,
-    SuccessResponse,
-    ClarificationResponse,
-    ErrorResponse,
-    # Gateway Results
-    GatewayErrorCode,
-    GatewayError,
-    GatewayClarification,
-    GatewaySuccessTemplate,
-    GatewaySuccessPassthrough,
-    GatewaySuccess,
-    GatewayResult,
-    # Passthrough
-    PassthroughContent,
-    PassthroughDeliveryReceipt,
-    UserContentReference,
-    # Session
-    SessionHistoryEntry,
-    TrikSession,
-    SessionContext,
-    # Graph Input/Output
-    GraphInput,
-    GraphResult,
+    # Runtime communication
+    TrikConfigContext,
+    TrikStorageContext,
+    TrikContext,
+    TrikAgent,
+    TrikResponse,
+    ToolCallRecord,
+    ToolExecutionResult,
+    # Gateway session
+    HandoffLogType,
+    HandoffLogEntry,
+    HandoffSession,
 )
 
 from trikhub.manifest.validator import (
     ValidationResult,
+    DiagnosisResult,
     validate_manifest,
+    diagnose_error,
     validate_data,
-    SchemaValidator,
 )
 
 __all__ = [
     # JSON Schema
     "JSONSchema",
-    # Session & Storage
-    "SessionCapabilities",
-    "StorageCapabilities",
-    "ConfigRequirement",
-    "TrikConfig",
+    # Manifest types
+    "AgentMode",
+    "AgentDefinition",
+    "ModelPreferences",
+    "ToolDeclaration",
+    # Capabilities
     "TrikCapabilities",
     "TrikLimits",
-    # Runtime & Entry
-    "TrikRuntime",
+    "SessionCapabilities",
+    "StorageCapabilities",
+    # Configuration
+    "ConfigRequirement",
+    "TrikConfig",
+    # Entry point
     "TrikEntry",
-    # Response Mode
-    "ResponseMode",
-    "AllowedAgentStringFormat",
-    "ResponseTemplate",
-    "ActionDefinition",
-    # Main Manifest
+    "TrikRuntime",
+    # Main manifest
     "TrikManifest",
-    # Wire Protocol
-    "ExecuteRequest",
-    "ClarificationQuestion",
-    "ClarificationAnswer",
-    "ClarifyRequest",
-    "SuccessResponse",
-    "ClarificationResponse",
-    "ErrorResponse",
-    # Gateway Results
-    "GatewayErrorCode",
-    "GatewayError",
-    "GatewayClarification",
-    "GatewaySuccessTemplate",
-    "GatewaySuccessPassthrough",
-    "GatewaySuccess",
-    "GatewayResult",
-    # Passthrough
-    "PassthroughContent",
-    "PassthroughDeliveryReceipt",
-    "UserContentReference",
-    # Session
-    "SessionHistoryEntry",
-    "TrikSession",
-    "SessionContext",
-    # Graph Input/Output
-    "GraphInput",
-    "GraphResult",
+    # Runtime communication
+    "TrikConfigContext",
+    "TrikStorageContext",
+    "TrikContext",
+    "TrikAgent",
+    "TrikResponse",
+    "ToolCallRecord",
+    "ToolExecutionResult",
+    # Gateway session
+    "HandoffLogType",
+    "HandoffLogEntry",
+    "HandoffSession",
     # Validation
     "ValidationResult",
+    "DiagnosisResult",
     "validate_manifest",
+    "diagnose_error",
     "validate_data",
-    "SchemaValidator",
 ]

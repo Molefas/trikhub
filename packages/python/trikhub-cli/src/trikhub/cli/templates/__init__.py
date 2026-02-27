@@ -1,1 +1,0 @@
-"""Trik project templates."""

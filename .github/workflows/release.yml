@@ -14,6 +14,8 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write
+    outputs:
+      published: ${{ steps.changesets.outputs.published }}
 
     steps:
       - name: Checkout
@@ -42,7 +44,7 @@ jobs:
         uses: changesets/action@v1
         with:
           publish: pnpm release
-          version: pnpm changeset version
+          version: pnpm version
           title: 'chore: version packages'
           commit: 'chore: version packages'
         env:
@@ -54,6 +56,7 @@ jobs:
     name: Release Python Package
     runs-on: ubuntu-latest
     needs: release
+    if: needs.release.outputs.published == 'true'
     permissions:
       contents: read
       id-token: write
@@ -61,6 +64,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Setup Python
         uses: actions/setup-python@v5

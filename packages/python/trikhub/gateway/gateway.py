@@ -1,262 +1,521 @@
 """
-TrikGateway - Python gateway for trik execution.
+TrikGateway — loads triks, routes messages, manages handoff sessions.
 
-Mirrors packages/trik-gateway/src/gateway.ts
-Provides secure trik execution with type-directed privilege separation.
+Mirrors packages/js/gateway/src/gateway.ts.
 
-This gateway:
-- Executes Python triks natively (in-process)
-- Executes JavaScript triks via Node.js worker subprocess (Phase 4)
-- Manages session storage, config, and persistent storage
+Python triks are loaded in-process via TrikLoader.
+JavaScript triks are executed via NodeWorker subprocess.
 """
 
 from __future__ import annotations
 
-import asyncio
 import importlib.util
 import json
 import os
-import re
-import sys
 import time
-import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Coroutine, Protocol, TypeVar
+from typing import Any
 
 from trikhub.manifest import (
-    ActionDefinition,
-    ClarificationQuestion,
-    GatewayError,
-    GatewayErrorCode,
-    GatewayClarification,
-    GatewaySuccessPassthrough,
-    GatewaySuccessTemplate,
-    PassthroughContent,
-    PassthroughDeliveryReceipt,
-    ResponseMode,
-    ResponseTemplate,
-    TrikManifest,
-    TrikRuntime,
-    TrikSession,
-    UserContentReference,
-    validate_manifest,
-    SchemaValidator,
-)
-
-from trikhub.gateway.session_storage import SessionStorage, InMemorySessionStorage
-from trikhub.gateway.config_store import (
-    ConfigStore,
-    FileConfigStore,
+    HandoffLogEntry,
+    HandoffSession,
+    JSONSchema,
+    ToolCallRecord,
+    ToolDeclaration,
+    TrikAgent,
     TrikConfigContext,
+    TrikContext,
+    TrikManifest,
+    TrikResponse,
+    TrikRuntime,
+    ToolExecutionResult,
+    validate_data,
+    validate_manifest,
 )
-from trikhub.gateway.storage_provider import (
-    StorageProvider,
-    SqliteStorageProvider,
-    TrikStorageContext,
-)
-from trikhub.gateway.node_worker import (
-    NodeWorker,
-    NodeWorkerConfig,
-    ExecuteNodeTrikOptions,
-)
+from trikhub.worker.trik_loader import TrikLoader
+
+from trikhub.gateway.config_store import ConfigStore, FileConfigStore, InMemoryConfigStore
+from trikhub.gateway.node_worker import NodeWorker, NodeWorkerConfig
+from trikhub.gateway.session_storage import InMemorySessionStorage, SessionStorage
+from trikhub.gateway.storage_provider import InMemoryStorageProvider, SqliteStorageProvider, StorageProvider
 
 
 # ============================================================================
-# Type Variables
-# ============================================================================
-
-TAgent = TypeVar("TAgent")
-
-
-# ============================================================================
-# Graph Protocol
-# ============================================================================
-
-
-class TrikGraph(Protocol):
-    """Protocol for trik graphs."""
-
-    async def invoke(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """Execute the trik with the given input."""
-        ...
-
-
-# ============================================================================
-# Configuration
+# Types
 # ============================================================================
 
 
 @dataclass
-class TrikGatewayConfig:
-    """Configuration for TrikGateway."""
-
-    allowed_triks: list[str] | None = None
-    on_clarification_needed: (
-        Callable[[str, list[ClarificationQuestion]], Coroutine[Any, Any, None]] | None
-    ) = None
-    session_storage: SessionStorage | None = None
-    triks_directory: str | None = None
-    config_store: ConfigStore | None = None
-    storage_provider: StorageProvider | None = None
-    validate_config: bool = True
-    # Node.js worker configuration for executing JS triks
-    node_worker_config: NodeWorkerConfig | None = None
-
-
-@dataclass
-class ExecuteTrikOptions:
-    """Options for executing a trik."""
-
-    session_id: str | None = None
-
-
-@dataclass
-class LoadFromConfigOptions:
-    """Options for loading triks from config file."""
-
-    config_path: str | None = None
-    base_dir: str | None = None
-
-
-@dataclass
-class TrikHubConfig:
-    """Configuration file structure for .trikhub/config.json."""
-
-    triks: list[str] = field(default_factory=list)
-
-
-@dataclass
-class ToolDefinition:
-    """Tool definition for AI agent integration."""
-
-    name: str
-    description: str
-    input_schema: dict[str, Any]
-    response_mode: ResponseMode
-    is_gateway_tool: bool = False
-
-
-@dataclass
-class TrikInfo:
-    """Information about a loaded trik."""
-
-    id: str
-    name: str
-    description: str
-    tools: list[ToolDefinition]
-    session_enabled: bool
-
-
-# ============================================================================
-# Internal Types
-# ============================================================================
-
-
-@dataclass
-class LoadedTrik:
-    """Internal representation of a loaded trik."""
-
+class _LoadedTrik:
     manifest: TrikManifest
-    graph: TrikGraph | None  # None for JS triks (executed via worker)
+    agent: Any  # TrikAgent (Protocol) — may be proxy for JS triks
     path: str
     runtime: TrikRuntime
 
 
 @dataclass
-class TrikOutput:
-    """Output from trik execution."""
+class LoadFromConfigOptions:
+    """Options for load_triks_from_config()."""
+    config_path: str | None = None
+    base_dir: str | None = None
 
-    response_mode: ResponseMode
-    agent_data: Any | None = None
-    user_content: PassthroughContent | None = None
-    end_session: bool = False
-    needs_clarification: bool = False
-    clarification_questions: list[ClarificationQuestion] | None = None
+
+@dataclass
+class TrikGatewayConfig:
+    allowed_triks: list[str] | None = None
+    triks_directory: str | None = None
+    config_store: ConfigStore | None = None
+    storage_provider: StorageProvider | None = None
+    session_storage: SessionStorage | None = None
+    validate_config: bool = True
+    node_worker_config: NodeWorkerConfig | None = None
+    max_turns_per_handoff: int = 20
 
 
 # ============================================================================
-# Gateway Result Types
+# Route Result Types
 # ============================================================================
 
 
 @dataclass
-class GatewayResultWithSession:
-    """Gateway result with optional session ID."""
+class RouteToMain:
+    target: str = "main"
+    handoff_tools: list[HandoffToolDefinition] | None = None
 
-    result: GatewaySuccessTemplate | GatewaySuccessPassthrough | GatewayError | GatewayClarification
-    session_id: str | None = None
+    def __post_init__(self) -> None:
+        if self.handoff_tools is None:
+            self.handoff_tools = []
+
+
+@dataclass
+class RouteToTrik:
+    target: str
+    trik_id: str
+    response: TrikResponse
+    session_id: str
+
+    def __init__(self, trik_id: str, response: TrikResponse, session_id: str) -> None:
+        self.target = "trik"
+        self.trik_id = trik_id
+        self.response = response
+        self.session_id = session_id
+
+
+@dataclass
+class RouteTransferBack:
+    target: str
+    trik_id: str
+    message: str
+    summary: str
+    session_id: str
+
+    def __init__(self, trik_id: str, message: str, summary: str, session_id: str) -> None:
+        self.target = "transfer_back"
+        self.trik_id = trik_id
+        self.message = message
+        self.summary = summary
+        self.session_id = session_id
+
+
+@dataclass
+class RouteForceBack:
+    target: str
+    trik_id: str
+    message: str
+    summary: str
+    session_id: str
+
+    def __init__(self, trik_id: str, message: str, summary: str, session_id: str) -> None:
+        self.target = "force_back"
+        self.trik_id = trik_id
+        self.message = message
+        self.summary = summary
+        self.session_id = session_id
+
+
+RouteResult = RouteToMain | RouteToTrik | RouteTransferBack | RouteForceBack
+
+
+@dataclass
+class HandoffToolDefinition:
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+
+
+@dataclass
+class ExposedToolDefinition:
+    trik_id: str
+    tool_name: str
+    description: str
+    input_schema: JSONSchema
+    output_schema: JSONSchema
+    output_template: str
+
+
+@dataclass
+class _ActiveHandoff:
+    trik_id: str
+    session_id: str
+    turn_count: int
 
 
 # ============================================================================
-# TrikGateway Implementation
+# Gateway
 # ============================================================================
 
 
 class TrikGateway:
     """
-    Main gateway class for executing triks in Python.
+    Central orchestration point for trik execution.
 
-    This gateway:
-    - Executes Python triks natively (in-process)
-    - Executes JavaScript triks via Node.js worker subprocess (Phase 4)
-    - Manages session storage, config, and persistent storage
+    - Loads Python triks in-process (fast).
+    - Loads JavaScript triks via NodeWorker subprocess (isolated).
+    - Routes messages through handoff sessions.
+    - Manages exposed tool-mode tools.
     """
 
-    CONTENT_REF_TTL_MS = 10 * 60 * 1000  # 10 minutes
-
     def __init__(self, config: TrikGatewayConfig | None = None) -> None:
-        """Initialize the TrikGateway."""
-        self._config = config or TrikGatewayConfig()
-        self._session_storage = (
-            self._config.session_storage or InMemorySessionStorage()
-        )
-        self._config_store = self._config.config_store or FileConfigStore()
-        self._storage_provider = (
-            self._config.storage_provider or SqliteStorageProvider()
-        )
+        cfg = config or TrikGatewayConfig()
+        self._config = cfg
+        self._config_store: ConfigStore = cfg.config_store or FileConfigStore()
+        self._storage_provider: StorageProvider = cfg.storage_provider or SqliteStorageProvider()
+        self._session_storage: SessionStorage = cfg.session_storage or InMemorySessionStorage()
+        self._max_turns = cfg.max_turns_per_handoff
         self._config_loaded = False
-
-        self._triks: dict[str, LoadedTrik] = {}
-        self._content_references: dict[str, UserContentReference] = {}
-        self._validator = SchemaValidator()
-
-        # Node.js worker for executing JavaScript triks
         self._node_worker: NodeWorker | None = None
-        self._node_worker_config = self._config.node_worker_config
+        self._trik_loader = TrikLoader()
+        self._triks: dict[str, _LoadedTrik] = {}
+        self._active_handoff: _ActiveHandoff | None = None
+
+    # -- Initialization -------------------------------------------------------
 
     async def initialize(self) -> None:
-        """
-        Initialize the gateway by loading configuration.
-        Should be called before loading any triks.
-        """
         if not self._config_loaded:
             await self._config_store.load()
             self._config_loaded = True
 
-    def get_config_store(self) -> ConfigStore:
-        """Get the config store (for CLI integration)."""
+    @property
+    def config_store(self) -> ConfigStore:
         return self._config_store
 
-    def get_storage_provider(self) -> StorageProvider:
-        """Get the storage provider (for CLI integration)."""
+    @property
+    def storage_provider(self) -> StorageProvider:
         return self._storage_provider
 
+    @property
+    def session_storage(self) -> SessionStorage:
+        return self._session_storage
+
+    # -- Message Routing ------------------------------------------------------
+
+    async def route_message(self, message: str, session_id: str) -> RouteResult:
+        # /back escape
+        if message.strip() == "/back" and self._active_handoff:
+            return self._force_transfer_back()
+
+        # Active handoff — route to trik
+        if self._active_handoff:
+            return await self._route_to_trik(message, session_id)
+
+        # No handoff — return to main agent
+        return RouteToMain(handoff_tools=self.get_handoff_tools())
+
+    async def start_handoff(
+        self, trik_id: str, context: str, session_id: str
+    ) -> RouteToTrik | RouteTransferBack:
+        loaded = self._triks.get(trik_id)
+        if loaded is None:
+            raise ValueError(f'Trik "{trik_id}" is not loaded')
+
+        handoff_session = self._session_storage.create_session(trik_id)
+        self._active_handoff = _ActiveHandoff(
+            trik_id=trik_id,
+            session_id=handoff_session.sessionId,
+            turn_count=0,
+        )
+
+        self._session_storage.append_log(
+            handoff_session.sessionId,
+            HandoffLogEntry(
+                timestamp=_now_ms(),
+                type="handoff_start",
+                summary=f"Handoff to {loaded.manifest.name}",
+            ),
+        )
+
+        return await self._route_to_trik(context, session_id)
+
+    def get_active_handoff(self) -> dict[str, Any] | None:
+        if not self._active_handoff:
+            return None
+        return {
+            "trikId": self._active_handoff.trik_id,
+            "sessionId": self._active_handoff.session_id,
+            "turnCount": self._active_handoff.turn_count,
+        }
+
+    # -- Handoff Tool Generation ----------------------------------------------
+
+    def get_handoff_tools(self) -> list[HandoffToolDefinition]:
+        tools: list[HandoffToolDefinition] = []
+        for trik_id, loaded in self._triks.items():
+            if loaded.manifest.agent.mode != "conversational":
+                continue
+            tools.append(
+                HandoffToolDefinition(
+                    name=f"talk_to_{trik_id}",
+                    description=loaded.manifest.agent.handoffDescription or "",
+                    input_schema={
+                        "type": "object",
+                        "properties": {
+                            "context": {
+                                "type": "string",
+                                "description": "Context about what the user needs from this agent",
+                            }
+                        },
+                        "required": ["context"],
+                    },
+                )
+            )
+        return tools
+
+    def get_exposed_tools(self) -> list[ExposedToolDefinition]:
+        tools: list[ExposedToolDefinition] = []
+        for trik_id, loaded in self._triks.items():
+            if loaded.manifest.agent.mode != "tool":
+                continue
+            if not loaded.manifest.tools:
+                continue
+            for tool_name, decl in loaded.manifest.tools.items():
+                if not decl.inputSchema or not decl.outputSchema or not decl.outputTemplate:
+                    continue
+                tools.append(
+                    ExposedToolDefinition(
+                        trik_id=trik_id,
+                        tool_name=tool_name,
+                        description=decl.description,
+                        input_schema=decl.inputSchema,
+                        output_schema=decl.outputSchema,
+                        output_template=decl.outputTemplate,
+                    )
+                )
+        return tools
+
+    async def execute_exposed_tool(
+        self,
+        trik_id: str,
+        tool_name: str,
+        input: dict[str, Any],
+    ) -> str:
+        loaded = self._triks.get(trik_id)
+        if loaded is None:
+            raise ValueError(f'Trik "{trik_id}" is not loaded')
+        if loaded.manifest.agent.mode != "tool":
+            raise ValueError(f'Trik "{trik_id}" is not a tool-mode trik')
+
+        decl = (loaded.manifest.tools or {}).get(tool_name)
+        if not decl or not decl.inputSchema or not decl.outputSchema or not decl.outputTemplate:
+            raise ValueError(f'Tool "{tool_name}" not found in trik "{trik_id}"')
+
+        # Validate input
+        input_validation = validate_data(decl.inputSchema.model_dump(by_alias=True, exclude_none=True), input)
+        if not input_validation.valid:
+            raise ValueError(
+                f"Invalid input for {trik_id}.{tool_name}: {', '.join(input_validation.errors or [])}"
+            )
+
+        agent = loaded.agent
+        if not callable(getattr(agent, "execute_tool", None)):
+            raise ValueError(f'Trik "{trik_id}" does not implement execute_tool()')
+
+        ctx = self._build_trik_context(f"tool:{trik_id}:{tool_name}", loaded)
+        result: ToolExecutionResult = await agent.execute_tool(tool_name, input, ctx)
+
+        # Validate output
+        output_validation = validate_data(
+            decl.outputSchema.model_dump(by_alias=True, exclude_none=True), result.output
+        )
+        if not output_validation.valid:
+            raise ValueError(
+                f'Tool "{tool_name}" returned invalid output: {", ".join(output_validation.errors or [])}'
+            )
+
+        # Strip to declared properties
+        declared_props = list(
+            (decl.outputSchema.properties or {}).keys()
+        )
+        stripped: dict[str, Any] = {k: result.output[k] for k in declared_props if k in result.output}
+
+        # Fill outputTemplate
+        import re
+
+        def _replace(m: re.Match[str]) -> str:
+            field = m.group(1)
+            val = stripped.get(field)
+            if val is None:
+                return m.group(0)
+            return str(val)
+
+        return re.sub(r"\{\{(\w+)\}\}", _replace, decl.outputTemplate)
+
+    # -- Internal Routing -----------------------------------------------------
+
+    async def _route_to_trik(
+        self, message: str, session_id: str
+    ) -> RouteToTrik | RouteTransferBack:
+        handoff = self._active_handoff
+        assert handoff is not None
+        loaded = self._triks[handoff.trik_id]
+
+        ctx = self._build_trik_context(handoff.session_id, loaded)
+        handoff.turn_count += 1
+
+        if handoff.turn_count > self._max_turns:
+            return self._auto_transfer_back(
+                f"Maximum turns ({self._max_turns}) exceeded. Automatically transferring back."
+            )
+
+        try:
+            response: TrikResponse = await loaded.agent.process_message(message, ctx)
+        except Exception as exc:
+            return self._auto_transfer_back(
+                f'Trik "{loaded.manifest.name}" encountered an error: {exc}'
+            )
+
+        if response.toolCalls:
+            self._process_tool_calls(handoff.session_id, loaded.manifest, response.toolCalls)
+
+        if response.transferBack:
+            self._session_storage.append_log(
+                handoff.session_id,
+                HandoffLogEntry(
+                    timestamp=_now_ms(),
+                    type="handoff_end",
+                    summary=f"Transferred back from {loaded.manifest.name}",
+                ),
+            )
+            summary = self._build_session_summary(handoff.session_id, loaded.manifest)
+            result = RouteTransferBack(
+                trik_id=handoff.trik_id,
+                message=response.message,
+                summary=summary,
+                session_id=handoff.session_id,
+            )
+            self._active_handoff = None
+            return result
+
+        return RouteToTrik(
+            trik_id=handoff.trik_id,
+            response=response,
+            session_id=handoff.session_id,
+        )
+
+    def _force_transfer_back(self) -> RouteForceBack:
+        handoff = self._active_handoff
+        assert handoff is not None
+        loaded = self._triks[handoff.trik_id]
+
+        self._session_storage.append_log(
+            handoff.session_id,
+            HandoffLogEntry(
+                timestamp=_now_ms(),
+                type="handoff_end",
+                summary="Force transfer-back via /back",
+            ),
+        )
+        summary = self._build_session_summary(handoff.session_id, loaded.manifest)
+        result = RouteForceBack(
+            trik_id=handoff.trik_id,
+            message="",
+            summary=summary,
+            session_id=handoff.session_id,
+        )
+        self._active_handoff = None
+        return result
+
+    def _auto_transfer_back(self, reason: str) -> RouteTransferBack:
+        handoff = self._active_handoff
+        assert handoff is not None
+        loaded = self._triks[handoff.trik_id]
+
+        self._session_storage.append_log(
+            handoff.session_id,
+            HandoffLogEntry(
+                timestamp=_now_ms(),
+                type="handoff_end",
+                summary=reason,
+            ),
+        )
+        summary = self._build_session_summary(handoff.session_id, loaded.manifest)
+        result = RouteTransferBack(
+            trik_id=handoff.trik_id,
+            message=reason,
+            summary=summary,
+            session_id=handoff.session_id,
+        )
+        self._active_handoff = None
+        return result
+
+    # -- Conversation Log -----------------------------------------------------
+
+    def _process_tool_calls(
+        self,
+        session_id: str,
+        manifest: TrikManifest,
+        tool_calls: list[ToolCallRecord],
+    ) -> None:
+        for call in tool_calls:
+            decl = (manifest.tools or {}).get(call.tool)
+            summary = self._build_tool_log_summary(call, decl)
+            self._session_storage.append_log(
+                session_id,
+                HandoffLogEntry(timestamp=_now_ms(), type="tool_execution", summary=summary),
+            )
+
+    @staticmethod
+    def _build_tool_log_summary(
+        call: ToolCallRecord, decl: ToolDeclaration | None
+    ) -> str:
+        if not decl or not decl.logTemplate:
+            return f"Called {call.tool}"
+        import re
+
+        def _replace(m: re.Match[str]) -> str:
+            field = m.group(1)
+            val = call.output.get(field)
+            if val is None:
+                return m.group(0)
+            return str(val)
+
+        return re.sub(r"\{\{(\w+)\}\}", _replace, decl.logTemplate)
+
+    def _build_session_summary(self, session_id: str, manifest: TrikManifest) -> str:
+        session = self._session_storage.get_session(session_id)
+        if session is None or len(session.log) == 0:
+            return f"Handoff to {manifest.name} (no activity logged)"
+
+        tool_entries = [e for e in session.log if e.type == "tool_execution"]
+        if not tool_entries:
+            return f"Handoff to {manifest.name} (conversation only, no tools used)"
+
+        return "\n".join(f"- {e.summary}" for e in tool_entries)
+
+    # -- Context Building -----------------------------------------------------
+
+    def _build_trik_context(self, session_id: str, loaded: _LoadedTrik) -> TrikContext:
+        config_ctx = self._config_store.get_for_trik(loaded.manifest.id)
+        storage_ctx = self._storage_provider.for_trik(
+            loaded.manifest.id,
+            loaded.manifest.capabilities.storage if loaded.manifest.capabilities else None,
+        )
+        return TrikContext(sessionId=session_id, config=config_ctx, storage=storage_ctx)
+
+    # -- Trik Loading ---------------------------------------------------------
+
     async def load_trik(self, trik_path: str) -> TrikManifest:
-        """
-        Load a trik from a directory.
-
-        Args:
-            trik_path: Path to the trik directory containing manifest.json
-
-        Returns:
-            The loaded TrikManifest
-
-        Raises:
-            ValueError: If the manifest is invalid or trik is not allowed
-        """
         manifest_path = os.path.join(trik_path, "manifest.json")
-
         with open(manifest_path) as f:
             manifest_data = json.load(f)
 
@@ -266,183 +525,181 @@ class TrikGateway:
                 f"Invalid manifest at {manifest_path}: {', '.join(validation.errors or [])}"
             )
 
-        manifest = TrikManifest.model_validate(manifest_data)
+        manifest = TrikManifest(**manifest_data)
 
-        # Check allowlist
-        if (
-            self._config.allowed_triks
-            and manifest.id not in self._config.allowed_triks
-        ):
+        if self._config.allowed_triks and manifest.id not in self._config.allowed_triks:
             raise ValueError(f'Trik "{manifest.id}" is not in the allowlist')
 
         runtime = manifest.entry.runtime or TrikRuntime.NODE
+        is_tool_mode = manifest.agent.mode == "tool"
 
-        if runtime == TrikRuntime.PYTHON:
-            # Python triks are loaded and executed in-process
-            graph = await self._load_python_graph(trik_path, manifest)
-            self._triks[manifest.id] = LoadedTrik(
-                manifest=manifest, graph=graph, path=trik_path, runtime=runtime
+        if runtime == TrikRuntime.PYTHON or runtime == "python":
+            # Load Python triks in-process
+            agent = self._trik_loader.load(trik_path)
+            self._triks[manifest.id] = _LoadedTrik(
+                manifest=manifest, agent=agent, path=trik_path, runtime=TrikRuntime.PYTHON
             )
         else:
-            # Node.js triks are executed via worker subprocess
-            self._triks[manifest.id] = LoadedTrik(
-                manifest=manifest, graph=None, path=trik_path, runtime=runtime
+            # JS triks via NodeWorker proxy
+            await self._ensure_node_worker()
+            agent = self._create_node_agent_proxy(manifest, trik_path)
+
+            if is_tool_mode:
+                if not callable(getattr(agent, "execute_tool", None)):
+                    raise ValueError(
+                        f'Trik "{manifest.id}" module does not export a valid tool-mode TrikAgent'
+                    )
+                # Check duplicate tool names
+                if manifest.tools:
+                    for tn in manifest.tools:
+                        for eid, et in self._triks.items():
+                            if et.manifest.agent.mode != "tool":
+                                continue
+                            if et.manifest.tools and tn in et.manifest.tools:
+                                raise ValueError(
+                                    f'Duplicate tool name "{tn}": declared in both "{eid}" and "{manifest.id}"'
+                                )
+            else:
+                if not callable(getattr(agent, "process_message", None)):
+                    raise ValueError(
+                        f'Trik "{manifest.id}" module does not export a valid TrikAgent'
+                    )
+
+            self._triks[manifest.id] = _LoadedTrik(
+                manifest=manifest, agent=agent, path=trik_path, runtime=TrikRuntime.NODE
             )
 
         return manifest
 
-    async def _load_python_graph(
-        self, trik_path: str, manifest: TrikManifest
-    ) -> TrikGraph:
-        """Load a Python graph from the trik directory."""
-        module_path = os.path.join(trik_path, manifest.entry.module)
-        abs_trik_path = os.path.abspath(trik_path)
+    def _create_node_agent_proxy(
+        self, manifest: TrikManifest, trik_path: str
+    ) -> Any:
+        """Create a proxy TrikAgent for JS triks that delegates to NodeWorker."""
+        gateway = self
 
-        # Check if this is a pip-installed package (in site-packages)
-        # by looking for __init__.py and checking if it's importable
-        package_name = None
-        if os.path.exists(os.path.join(trik_path, "__init__.py")):
-            # Try to detect package name from directory name
-            potential_package = os.path.basename(abs_trik_path)
-            try:
-                spec = importlib.util.find_spec(potential_package)
-                if spec and spec.origin and os.path.dirname(spec.origin) == abs_trik_path:
-                    package_name = potential_package
-            except (ImportError, ModuleNotFoundError):
-                pass
+        class _NodeAgentProxy:
+            pass
 
-        if package_name:
-            # For pip-installed packages, import the module directly
-            # This preserves the package context for relative imports
-            module_name = manifest.entry.module.replace("./", "").replace(".py", "")
-            full_module_name = f"{package_name}.{module_name}"
-            module = importlib.import_module(full_module_name)
-        else:
-            # For local path triks, add to sys.path and load dynamically
-            if abs_trik_path not in sys.path:
-                sys.path.insert(0, abs_trik_path)
+        proxy = _NodeAgentProxy()
 
-            # Load the module dynamically
-            spec = importlib.util.spec_from_file_location("trik_module", module_path)
-            if spec is None or spec.loader is None:
-                raise ValueError(f"Cannot load module from {module_path}")
+        if manifest.agent.mode == "conversational":
 
-            module = importlib.util.module_from_spec(spec)
-            sys.modules["trik_module"] = module
-            spec.loader.exec_module(module)
+            async def _process_message(message: str, context: TrikContext) -> TrikResponse:
+                worker = await gateway._ensure_node_worker()
+                worker.set_storage_context(context.storage)
+                try:
+                    result = await worker.process_message(
+                        trik_path=trik_path,
+                        message=message,
+                        session_id=context.sessionId,
+                        config=_config_to_record(context.config),
+                        storage_namespace=manifest.id,
+                    )
+                    return TrikResponse(
+                        message=result.message,
+                        transferBack=result.transfer_back,
+                        toolCalls=(
+                            [ToolCallRecord(**tc) for tc in result.tool_calls]
+                            if result.tool_calls
+                            else None
+                        ),
+                    )
+                finally:
+                    worker.set_storage_context(None)
 
-        # Get the exported graph
-        graph = getattr(module, manifest.entry.export, None)
+            proxy.process_message = _process_message  # type: ignore[attr-defined]
 
-        if graph is None:
-            raise ValueError(
-                f'Invalid graph at {module_path}: export "{manifest.entry.export}" not found'
-            )
+        if manifest.agent.mode == "tool":
 
-        # Check if it has an invoke method
-        if not hasattr(graph, "invoke") or not callable(graph.invoke):
-            raise ValueError(
-                f'Invalid graph at {module_path}: export "{manifest.entry.export}" '
-                "must have an invoke function"
-            )
+            async def _execute_tool(
+                tool_name: str, input: dict[str, Any], context: TrikContext
+            ) -> ToolExecutionResult:
+                worker = await gateway._ensure_node_worker()
+                worker.set_storage_context(context.storage)
+                try:
+                    result = await worker.execute_tool(
+                        trik_path=trik_path,
+                        tool_name=tool_name,
+                        input=input,
+                        session_id=context.sessionId,
+                        config=_config_to_record(context.config),
+                        storage_namespace=manifest.id,
+                    )
+                    return ToolExecutionResult(output=result.output)
+                finally:
+                    worker.set_storage_context(None)
 
-        return graph
+            proxy.execute_tool = _execute_tool  # type: ignore[attr-defined]
+
+        return proxy
+
+    async def _ensure_node_worker(self) -> NodeWorker:
+        if self._node_worker is None:
+            self._node_worker = NodeWorker(self._config.node_worker_config)
+        if not self._node_worker.ready:
+            await self._node_worker.start()
+        return self._node_worker
 
     async def shutdown(self) -> None:
-        """Shutdown the gateway and cleanup resources."""
-        # Shutdown Node.js worker if running
         if self._node_worker:
             await self._node_worker.shutdown()
             self._node_worker = None
 
+    # -- Directory Loading ----------------------------------------------------
+
     async def load_triks_from_directory(self, directory: str) -> list[TrikManifest]:
-        """
-        Load all triks from a directory.
-        Supports scoped directory structure: directory/@scope/trik-name/
-
-        Args:
-            directory: Path to the directory containing triks.
-                      Use '~' prefix for home directory.
-
-        Returns:
-            Array of successfully loaded manifests
-        """
-        # Resolve ~ to home directory
-        if directory.startswith("~"):
-            resolved_dir = str(Path.home() / directory[1:].lstrip("/"))
-        else:
-            resolved_dir = os.path.abspath(directory)
+        resolved = (
+            os.path.join(os.path.expanduser("~"), directory[1:])
+            if directory.startswith("~")
+            else os.path.abspath(directory)
+        )
 
         manifests: list[TrikManifest] = []
-        errors: list[dict[str, str]] = []
+        errors: list[tuple[str, str]] = []
 
-        if not os.path.exists(resolved_dir):
+        if not os.path.isdir(resolved):
             return manifests
 
-        try:
-            for entry in os.scandir(resolved_dir):
-                if not entry.is_dir():
-                    continue
+        for entry in os.listdir(resolved):
+            entry_path = os.path.join(resolved, entry)
+            if not os.path.isdir(entry_path):
+                continue
 
-                entry_path = entry.path
-
-                # Check if this is a scoped directory (starts with @)
-                if entry.name.startswith("@"):
-                    # Scoped directory: @scope/trik-name structure
-                    for scoped_entry in os.scandir(entry_path):
-                        if not scoped_entry.is_dir():
-                            continue
-
-                        trik_path = scoped_entry.path
-                        manifest_path = os.path.join(trik_path, "manifest.json")
-
-                        if os.path.isfile(manifest_path):
-                            try:
-                                manifest = await self.load_trik(trik_path)
-                                manifests.append(manifest)
-                            except Exception as e:
-                                errors.append({"path": trik_path, "error": str(e)})
-                else:
-                    # Non-scoped directory: direct trik-name structure
-                    trik_path = entry_path
-                    manifest_path = os.path.join(trik_path, "manifest.json")
-
-                    if os.path.isfile(manifest_path):
+            if entry.startswith("@"):
+                # Scoped directory
+                for scoped in os.listdir(entry_path):
+                    scoped_path = os.path.join(entry_path, scoped)
+                    if not os.path.isdir(scoped_path):
+                        continue
+                    mp = os.path.join(scoped_path, "manifest.json")
+                    if os.path.isfile(mp):
                         try:
-                            manifest = await self.load_trik(trik_path)
-                            manifests.append(manifest)
+                            m = await self.load_trik(scoped_path)
+                            manifests.append(m)
                         except Exception as e:
-                            errors.append({"path": trik_path, "error": str(e)})
+                            errors.append((scoped_path, str(e)))
+            else:
+                mp = os.path.join(entry_path, "manifest.json")
+                if os.path.isfile(mp):
+                    try:
+                        m = await self.load_trik(entry_path)
+                        manifests.append(m)
+                    except Exception as e:
+                        errors.append((entry_path, str(e)))
 
-        except PermissionError:
-            pass
-
-        # Log errors for debugging
         if errors:
-            print(f"[TrikGateway] Failed to load {len(errors)} trik(s):")
-            for err in errors:
-                print(f"  - {err['path']}: {err['error']}")
+            import sys
+            for path, err in errors:
+                print(f"[TrikGateway] Failed to load {path}: {err}", file=sys.stderr)
 
         return manifests
 
-    async def load_installed_triks(self) -> list[TrikManifest]:
-        """Load triks from the configured triksDirectory (if set)."""
-        if not self._config.triks_directory:
-            return []
-        return await self.load_triks_from_directory(self._config.triks_directory)
+    # -- Config Loading -------------------------------------------------------
 
     async def load_triks_from_config(
         self, options: LoadFromConfigOptions | None = None
     ) -> list[TrikManifest]:
-        """
-        Load triks from a config file (.trikhub/config.json).
-
-        Args:
-            options: Configuration options
-
-        Returns:
-            Array of successfully loaded manifests
-        """
+        """Load triks from a config file (.trikhub/config.json)."""
         options = options or LoadFromConfigOptions()
         config_path = options.config_path or str(
             Path.cwd() / ".trikhub" / "config.json"
@@ -450,7 +707,6 @@ class TrikGateway:
         base_dir = options.base_dir or os.path.dirname(config_path)
 
         if not os.path.exists(config_path):
-            print(f"[TrikGateway] No config file found at {config_path}")
             return []
 
         try:
@@ -460,39 +716,31 @@ class TrikGateway:
             raise ValueError(f'Failed to read config file "{config_path}": {e}')
 
         if "triks" not in config_data or not isinstance(config_data["triks"], list):
-            print("[TrikGateway] Config file has no triks array")
             return []
 
         manifests: list[TrikManifest] = []
-        errors: list[dict[str, str]] = []
+        errors: list[tuple[str, str]] = []
 
         for trik_name in config_data["triks"]:
             try:
-                # Try to find the trik in common locations
-                # 1. Check if it's a path
+                # 1. Check if it's a direct path
                 if os.path.isdir(trik_name):
-                    manifest = await self.load_trik(trik_name)
-                    manifests.append(manifest)
+                    manifests.append(await self.load_trik(trik_name))
                     continue
 
-                # 2. Check in .trikhub/triks directory
+                # 2. Check in .trikhub/triks/ directory
                 triks_dir = os.path.join(base_dir, "triks", trik_name)
                 if os.path.isdir(triks_dir):
-                    manifest = await self.load_trik(triks_dir)
-                    manifests.append(manifest)
+                    manifests.append(await self.load_trik(triks_dir))
                     continue
 
                 # 3. Try to import as Python package
-                # Try multiple package name variations since Python doesn't use npm-style scopes
                 package_names_to_try = []
                 if trik_name.startswith("@"):
-                    # Scoped: @scope/name -> try both "name" and "scope_name"
                     parts = trik_name[1:].split("/", 1)
                     if len(parts) == 2:
                         scope, name = parts
-                        # Try name only first (most common for Python packages)
                         package_names_to_try.append(name.replace("-", "_"))
-                        # Then try with scope
                         package_names_to_try.append(f"{scope}_{name}".replace("-", "_"))
                 else:
                     package_names_to_try.append(trik_name.replace("-", "_"))
@@ -503,586 +751,54 @@ class TrikGateway:
                         spec = importlib.util.find_spec(package_name)
                         if spec and spec.origin:
                             trik_path = os.path.dirname(spec.origin)
-                            manifest = await self.load_trik(trik_path)
-                            manifests.append(manifest)
+                            manifests.append(await self.load_trik(trik_path))
                             found = True
                             break
                     except (ImportError, ModuleNotFoundError):
                         continue
 
-                if found:
-                    continue
-
-                errors.append({"trik": trik_name, "error": f"Could not find trik {trik_name}"})
+                if not found:
+                    errors.append((trik_name, f"Could not find trik {trik_name}"))
 
             except Exception as e:
-                errors.append({"trik": trik_name, "error": str(e)})
+                errors.append((trik_name, str(e)))
 
-        # Log errors for debugging
         if errors:
-            print(f"[TrikGateway] Failed to load {len(errors)} trik(s) from config:")
-            for err in errors:
-                print(f"  - {err['trik']}: {err['error']}")
-
-        if manifests:
-            print(f"[TrikGateway] Loaded {len(manifests)} trik(s) from config")
+            import sys
+            for trik_name, err in errors:
+                print(f"[TrikGateway] Failed to load {trik_name}: {err}", file=sys.stderr)
 
         return manifests
 
+    # -- Trik Queries ---------------------------------------------------------
+
     def get_manifest(self, trik_id: str) -> TrikManifest | None:
-        """Get the manifest for a loaded trik."""
         loaded = self._triks.get(trik_id)
         return loaded.manifest if loaded else None
 
     def get_loaded_triks(self) -> list[str]:
-        """Get list of loaded trik IDs."""
         return list(self._triks.keys())
 
     def is_loaded(self, trik_id: str) -> bool:
-        """Check if a trik is loaded."""
         return trik_id in self._triks
 
-    def get_available_triks(self) -> list[TrikInfo]:
-        """Get information about all loaded triks."""
-        result: list[TrikInfo] = []
+    def unload_trik(self, trik_id: str) -> bool:
+        return self._triks.pop(trik_id, None) is not None
 
-        for loaded in self._triks.values():
-            manifest = loaded.manifest
-            tools = [
-                self._action_to_tool_definition(manifest.id, action_name, action)
-                for action_name, action in manifest.actions.items()
-            ]
 
-            result.append(
-                TrikInfo(
-                    id=manifest.id,
-                    name=manifest.name,
-                    description=manifest.description,
-                    tools=tools,
-                    session_enabled=(
-                        manifest.capabilities.session.enabled
-                        if manifest.capabilities.session
-                        else False
-                    ),
-                )
-            )
+# ============================================================================
+# Helpers
+# ============================================================================
 
-        return result
 
-    def get_tool_definitions(self) -> list[ToolDefinition]:
-        """Get tool definitions for all loaded triks."""
-        tools: list[ToolDefinition] = []
+def _now_ms() -> int:
+    return int(time.time() * 1000)
 
-        for loaded in self._triks.values():
-            manifest = loaded.manifest
-            for action_name, action in manifest.actions.items():
-                tool = self._action_to_tool_definition(manifest.id, action_name, action)
-                tools.append(tool)
 
-        return tools
-
-    def _action_to_tool_definition(
-        self, trik_id: str, action_name: str, action: ActionDefinition
-    ) -> ToolDefinition:
-        """Convert an action definition to a tool definition."""
-        return ToolDefinition(
-            name=f"{trik_id}:{action_name}",
-            description=action.description or f"Execute {action_name} on {trik_id}",
-            input_schema=action.inputSchema.model_dump(exclude_none=True),
-            response_mode=action.responseMode,
-        )
-
-    async def execute(
-        self,
-        trik_id: str,
-        action_name: str,
-        input_data: Any,
-        options: ExecuteTrikOptions | None = None,
-    ) -> GatewayResultWithSession:
-        """
-        Execute a trik action.
-
-        Args:
-            trik_id: The trik identifier
-            action_name: The action name to execute
-            input_data: Input data for the action
-            options: Execution options
-
-        Returns:
-            GatewayResultWithSession containing the result and optional session ID
-        """
-        options = options or ExecuteTrikOptions()
-
-        loaded = self._triks.get(trik_id)
-        if not loaded:
-            return GatewayResultWithSession(
-                result=GatewayError(
-                    code=GatewayErrorCode.TRIK_NOT_FOUND,
-                    error=f'Trik "{trik_id}" is not loaded. Call load_trik() first.',
-                )
-            )
-
-        manifest = loaded.manifest
-        graph = loaded.graph
-        trik_path = loaded.path
-        runtime = loaded.runtime
-
-        action = manifest.actions.get(action_name)
-        if not action:
-            available = ", ".join(manifest.actions.keys())
-            return GatewayResultWithSession(
-                result=GatewayError(
-                    code=GatewayErrorCode.INVALID_INPUT,
-                    error=f'Action "{action_name}" not found. Available: {available}',
-                )
-            )
-
-        # Validate input
-        input_schema = action.inputSchema.model_dump(exclude_none=True)
-        input_validation = self._validator.validate(
-            f"{trik_id}:{action_name}:input", input_schema, input_data
-        )
-        if not input_validation.valid:
-            return GatewayResultWithSession(
-                result=GatewayError(
-                    code=GatewayErrorCode.INVALID_INPUT,
-                    error=f"Invalid input: {', '.join(input_validation.errors or [])}",
-                )
-            )
-
-        # Handle session
-        session: TrikSession | None = None
-        if manifest.capabilities.session and manifest.capabilities.session.enabled:
-            if options.session_id:
-                session = await self._session_storage.get(options.session_id)
-            if not session:
-                session = await self._session_storage.create(
-                    trik_id, manifest.capabilities.session
-                )
-
-        try:
-            # Get config context for this trik
-            config_context = self._config_store.get_for_trik(trik_id)
-
-            # Get storage context if storage is enabled
-            storage_context: TrikStorageContext | None = None
-            if manifest.capabilities.storage and manifest.capabilities.storage.enabled:
-                storage_context = self._storage_provider.for_trik(
-                    trik_id, manifest.capabilities.storage
-                )
-
-            # Execute based on runtime
-            if runtime == TrikRuntime.PYTHON:
-                if not graph:
-                    return GatewayResultWithSession(
-                        result=GatewayError(
-                            code=GatewayErrorCode.EXECUTION_ERROR,
-                            error="Graph not loaded for Python trik",
-                        )
-                    )
-
-                result = await self._execute_python_trik(
-                    graph,
-                    action_name,
-                    input_data,
-                    session,
-                    config_context,
-                    storage_context,
-                    manifest.limits.maxExecutionTimeMs,
-                )
-            else:
-                # Node.js triks are executed via worker subprocess
-                result = await self._execute_node_trik(
-                    trik_path,
-                    action_name,
-                    input_data,
-                    session,
-                    config_context,
-                    storage_context,
-                    manifest.limits.maxExecutionTimeMs,
-                )
-
-            # Handle clarification
-            if result.needs_clarification and result.clarification_questions:
-                if self._config.on_clarification_needed:
-                    await self._config.on_clarification_needed(
-                        trik_id, result.clarification_questions
-                    )
-
-                return GatewayResultWithSession(
-                    result=GatewayClarification(
-                        sessionId=session.sessionId if session else "",
-                        questions=result.clarification_questions,
-                    ),
-                    session_id=session.sessionId if session else None,
-                )
-
-            return await self._process_result(
-                trik_id, action_name, action, session, result
-            )
-
-        except asyncio.TimeoutError:
-            return GatewayResultWithSession(
-                result=GatewayError(
-                    code=GatewayErrorCode.TIMEOUT,
-                    error=f"Execution timed out after {manifest.limits.maxExecutionTimeMs}ms",
-                )
-            )
-        except Exception as e:
-            return GatewayResultWithSession(
-                result=GatewayError(
-                    code=GatewayErrorCode.EXECUTION_ERROR,
-                    error=str(e),
-                )
-            )
-
-    async def _execute_python_trik(
-        self,
-        graph: TrikGraph,
-        action_name: str,
-        input_data: Any,
-        session: TrikSession | None,
-        config_context: TrikConfigContext,
-        storage_context: TrikStorageContext | None,
-        timeout_ms: int,
-    ) -> TrikOutput:
-        """Execute a Python trik with timeout."""
-        trik_input: dict[str, Any] = {
-            "action": action_name,
-            "input": input_data,
-        }
-
-        if session:
-            trik_input["session"] = {
-                "sessionId": session.sessionId,
-                "history": [entry.model_dump() for entry in session.history],
-            }
-
-        # Add config and storage to input if needed
-        trik_input["config"] = config_context
-        if storage_context:
-            trik_input["storage"] = storage_context
-
-        # Execute with timeout
-        async def execute() -> dict[str, Any]:
-            return await graph.invoke(trik_input)
-
-        raw_result = await asyncio.wait_for(execute(), timeout=timeout_ms / 1000)
-
-        # Convert to TrikOutput
-        return TrikOutput(
-            response_mode=ResponseMode(raw_result.get("responseMode", "template")),
-            agent_data=raw_result.get("agentData"),
-            user_content=(
-                PassthroughContent.model_validate(raw_result["userContent"])
-                if raw_result.get("userContent")
-                else None
-            ),
-            end_session=raw_result.get("endSession", False),
-            needs_clarification=raw_result.get("needsClarification", False),
-            clarification_questions=(
-                [
-                    ClarificationQuestion.model_validate(q)
-                    for q in raw_result.get("clarificationQuestions", [])
-                ]
-                if raw_result.get("clarificationQuestions")
-                else None
-            ),
-        )
-
-    async def _get_node_worker(self) -> NodeWorker:
-        """Get or create the Node.js worker."""
-        if self._node_worker is None:
-            self._node_worker = NodeWorker(self._node_worker_config)
-            await self._node_worker.start()
-        return self._node_worker
-
-    async def _execute_node_trik(
-        self,
-        trik_path: str,
-        action_name: str,
-        input_data: Any,
-        session: TrikSession | None,
-        config_context: TrikConfigContext,
-        storage_context: TrikStorageContext | None,
-        timeout_ms: int,
-    ) -> TrikOutput:
-        """Execute a JavaScript trik via Node.js worker subprocess."""
-        worker = await self._get_node_worker()
-
-        # Build session data for worker
-        session_data: dict[str, Any] | None = None
-        if session:
-            session_data = {
-                "sessionId": session.sessionId,
-                "history": [entry.model_dump() for entry in session.history],
-            }
-
-        # Execute via worker
-        options = ExecuteNodeTrikOptions(
-            session=session_data,
-            config=config_context,
-            storage=storage_context,
-        )
-
-        result = await worker.invoke(
-            trik_path,
-            action_name,
-            input_data,
-            options,
-        )
-
-        # Convert InvokeResult to TrikOutput
-        return TrikOutput(
-            response_mode=ResponseMode(result.response_mode or "template"),
-            agent_data=result.agent_data,
-            user_content=(
-                PassthroughContent.model_validate(result.user_content)
-                if result.user_content
-                else None
-            ),
-            end_session=result.end_session,
-            needs_clarification=result.needs_clarification,
-            clarification_questions=(
-                [
-                    ClarificationQuestion.model_validate(q)
-                    for q in (result.clarification_questions or [])
-                ]
-                if result.clarification_questions
-                else None
-            ),
-        )
-
-    async def _process_result(
-        self,
-        trik_id: str,
-        action_name: str,
-        action: ActionDefinition,
-        session: TrikSession | None,
-        result: TrikOutput,
-    ) -> GatewayResultWithSession:
-        """Process the trik result and return gateway result."""
-        effective_mode = result.response_mode or action.responseMode
-
-        # Update session
-        if session:
-            if result.end_session:
-                await self._session_storage.delete(session.sessionId)
-                session = None
-            else:
-                await self._session_storage.add_history(
-                    session.sessionId,
-                    action_name,
-                    {},
-                    result.agent_data,
-                    result.user_content.model_dump() if result.user_content else None,
-                )
-
-        session_id = session.sessionId if session else None
-
-        # Handle passthrough mode
-        if effective_mode == ResponseMode.PASSTHROUGH:
-            if result.user_content is None:
-                return GatewayResultWithSession(
-                    result=GatewayError(
-                        code=GatewayErrorCode.INVALID_OUTPUT,
-                        error="Passthrough mode requires userContent",
-                    ),
-                    session_id=session_id,
-                )
-
-            # Validate user content
-            if action.userContentSchema:
-                user_schema = action.userContentSchema.model_dump(exclude_none=True)
-                user_validation = self._validator.validate(
-                    f"{trik_id}:{action_name}:userContent",
-                    user_schema,
-                    result.user_content.model_dump(),
-                )
-                if not user_validation.valid:
-                    return GatewayResultWithSession(
-                        result=GatewayError(
-                            code=GatewayErrorCode.INVALID_OUTPUT,
-                            error=f"Invalid userContent: {', '.join(user_validation.errors or [])}",
-                        ),
-                        session_id=session_id,
-                    )
-
-            content_ref = self._store_passthrough_content(
-                trik_id, action_name, result.user_content
-            )
-
-            return GatewayResultWithSession(
-                result=GatewaySuccessPassthrough(
-                    userContentRef=content_ref,
-                    contentType=result.user_content.contentType,
-                    metadata=result.user_content.metadata,
-                ),
-                session_id=session_id,
-            )
-
-        # Handle template mode
-        if result.agent_data is None:
-            return GatewayResultWithSession(
-                result=GatewayError(
-                    code=GatewayErrorCode.INVALID_OUTPUT,
-                    error="Template mode requires agentData",
-                ),
-                session_id=session_id,
-            )
-
-        # Validate agent data
-        if action.agentDataSchema:
-            agent_schema = action.agentDataSchema.model_dump(exclude_none=True)
-            agent_validation = self._validator.validate(
-                f"{trik_id}:{action_name}:agentData", agent_schema, result.agent_data
-            )
-            if not agent_validation.valid:
-                return GatewayResultWithSession(
-                    result=GatewayError(
-                        code=GatewayErrorCode.INVALID_OUTPUT,
-                        error=f"Invalid agentData: {', '.join(agent_validation.errors or [])}",
-                    ),
-                    session_id=session_id,
-                )
-
-        # Get template text if available
-        template_text: str | None = None
-        if isinstance(result.agent_data, dict):
-            template_id = result.agent_data.get("template")
-            if template_id and action.responseTemplates:
-                template = action.responseTemplates.get(template_id)
-                if template:
-                    template_text = template.text
-
-        return GatewayResultWithSession(
-            result=GatewaySuccessTemplate(
-                agentData=result.agent_data,
-                templateText=template_text,
-            ),
-            session_id=session_id,
-        )
-
-    # ============================================
-    # Passthrough Content Management
-    # ============================================
-
-    def _store_passthrough_content(
-        self, trik_id: str, action_name: str, content: PassthroughContent
-    ) -> str:
-        """Store passthrough content and return a reference."""
-        self._cleanup_expired_content_references()
-
-        ref = str(uuid.uuid4())
-        now = int(time.time() * 1000)
-
-        self._content_references[ref] = UserContentReference(
-            ref=ref,
-            trikId=trik_id,
-            actionName=action_name,
-            content=content,
-            createdAt=now,
-            expiresAt=now + self.CONTENT_REF_TTL_MS,
-        )
-
-        return ref
-
-    def _cleanup_expired_content_references(self) -> None:
-        """Clean up expired content references."""
-        now = int(time.time() * 1000)
-        expired = [
-            ref
-            for ref, content_ref in self._content_references.items()
-            if content_ref.expiresAt < now
-        ]
-        for ref in expired:
-            del self._content_references[ref]
-
-    def deliver_content(
-        self, ref: str
-    ) -> tuple[PassthroughContent, PassthroughDeliveryReceipt] | None:
-        """
-        Deliver passthrough content to the user.
-        One-time delivery - the reference is deleted after delivery.
-        """
-        content_ref = self._content_references.get(ref)
-
-        if not content_ref:
-            return None
-
-        now = int(time.time() * 1000)
-        if content_ref.expiresAt < now:
-            del self._content_references[ref]
-            return None
-
-        # One-time delivery
-        del self._content_references[ref]
-
-        return (
-            content_ref.content,
-            PassthroughDeliveryReceipt(
-                contentType=content_ref.content.contentType,
-                metadata=content_ref.content.metadata,
-            ),
-        )
-
-    def has_content_ref(self, ref: str) -> bool:
-        """Check if a content reference exists and is valid."""
-        content_ref = self._content_references.get(ref)
-        if not content_ref:
-            return False
-
-        now = int(time.time() * 1000)
-        if content_ref.expiresAt < now:
-            del self._content_references[ref]
-            return False
-
-        return True
-
-    def get_content_ref_info(
-        self, ref: str
-    ) -> dict[str, Any] | None:
-        """Get information about a content reference."""
-        content_ref = self._content_references.get(ref)
-        if not content_ref:
-            return None
-
-        now = int(time.time() * 1000)
-        if content_ref.expiresAt < now:
-            return None
-
-        return {
-            "contentType": content_ref.content.contentType,
-            "metadata": content_ref.content.metadata,
-        }
-
-    def resolve_template(
-        self, template: ResponseTemplate, agent_data: dict[str, Any]
-    ) -> str:
-        """Resolve a template with agent data."""
-        text = template.text
-
-        def replace_placeholder(match: re.Match[str]) -> str:
-            field_name = match.group(1)
-            value = agent_data.get(field_name)
-            return str(value) if value is not None else f"{{{{{field_name}}}}}"
-
-        return re.sub(r"\{\{(\w+)\}\}", replace_placeholder, text)
-
-    def get_action_templates(
-        self, trik_id: str, action_name: str
-    ) -> dict[str, ResponseTemplate] | None:
-        """Get response templates for an action."""
-        loaded = self._triks.get(trik_id)
-        if not loaded:
-            return None
-
-        action = loaded.manifest.actions.get(action_name)
-        if not action:
-            return None
-
-        return action.responseTemplates
-
-    async def close(self) -> None:
-        """Clean up resources (shutdown workers, close connections)."""
-        await self.shutdown()
+def _config_to_record(config: TrikConfigContext) -> dict[str, str]:
+    record: dict[str, str] = {}
+    for key in config.keys():
+        value = config.get(key)
+        if value is not None:
+            record[key] = value
+    return record

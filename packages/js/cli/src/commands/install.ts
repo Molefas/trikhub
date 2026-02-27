@@ -642,7 +642,11 @@ export async function installCommand(
           console.log(chalk.dim(`  Downloaded to: .trikhub/triks/${packageName}`));
           console.log(chalk.dim(`  Registered in: .trikhub/config.json`));
           console.log();
-          console.log(chalk.dim('The trik will run via the cross-language worker.'));
+          if (isCrossLanguage) {
+            console.log(chalk.dim('The trik will run via the cross-language worker.'));
+          } else {
+            console.log(chalk.dim('The trik will be available to your AI agent.'));
+          }
         } else {
           spinner.fail(`Failed to install ${chalk.red(packageName)}`);
           process.exit(1);

@@ -1,217 +1,52 @@
-#!/usr/bin/env python3
 """
-Python Worker for TrikHub
+Python Worker for TrikHub (v2 Protocol)
 
-This module implements the worker process that executes Python triks.
-It communicates with the gateway via stdin/stdout using JSON-RPC 2.0.
+Executes Python triks via JSON-RPC 2.0 over stdin/stdout.
+
+v2 Protocol methods:
+  - health: Health check
+  - shutdown: Graceful shutdown
+  - processMessage: Execute a conversational trik agent
+  - executeTool: Execute a tool-mode trik
 
 Usage:
-    python -m trikhub.worker
+    python -m trikhub.worker.main
 """
 
 from __future__ import annotations
 
 import asyncio
-import importlib.util
 import json
-import os
 import sys
 import time
-from pathlib import Path
 from typing import Any
 
-from trikhub.gateway.worker_protocol import (
-    JsonRpcRequest,
+from trikhub.manifest import TrikContext
+
+from trikhub.worker.protocol import (
+    ErrorCode,
     JsonRpcResponse,
-    WorkerErrorCodes,
-    WorkerProtocol,
-    InvokeParams,
-    InvokeResult,
+    error_response,
+    is_request,
+    is_response,
+    success_response,
 )
-
-
-class StorageProxy:
-    """
-    Proxy for storage operations.
-
-    Storage calls are forwarded to the gateway via stdout,
-    and responses are received via stdin.
-    """
-
-    def __init__(self, send_request: Any, receive_response: Any):
-        self._send_request = send_request
-        self._receive_response = receive_response
-        self._pending_requests: dict[str, asyncio.Future[Any]] = {}
-
-    async def get(self, key: str) -> Any | None:
-        """Get a value from storage."""
-        request = WorkerProtocol.create_storage_request("storage.get", {"key": key})
-        response = await self._send_and_wait(request)
-        return response.get("value") if response else None
-
-    async def set(self, key: str, value: Any, ttl: int | None = None) -> None:
-        """Set a value in storage."""
-        params: dict[str, Any] = {"key": key, "value": value}
-        if ttl is not None:
-            params["ttl"] = ttl
-        request = WorkerProtocol.create_storage_request("storage.set", params)
-        await self._send_and_wait(request)
-
-    async def delete(self, key: str) -> bool:
-        """Delete a value from storage."""
-        request = WorkerProtocol.create_storage_request("storage.delete", {"key": key})
-        response = await self._send_and_wait(request)
-        return response.get("deleted", False) if response else False
-
-    async def list(self, prefix: str | None = None) -> list[str]:
-        """List keys in storage."""
-        params: dict[str, Any] = {}
-        if prefix is not None:
-            params["prefix"] = prefix
-        request = WorkerProtocol.create_storage_request("storage.list", params)
-        response = await self._send_and_wait(request)
-        return response.get("keys", []) if response else []
-
-    async def get_many(self, keys: list[str]) -> dict[str, Any]:
-        """Get multiple values from storage."""
-        request = WorkerProtocol.create_storage_request("storage.getMany", {"keys": keys})
-        response = await self._send_and_wait(request)
-        return response.get("values", {}) if response else {}
-
-    async def set_many(self, entries: dict[str, Any]) -> None:
-        """Set multiple values in storage."""
-        request = WorkerProtocol.create_storage_request(
-            "storage.setMany", {"entries": entries}
-        )
-        await self._send_and_wait(request)
-
-    async def _send_and_wait(self, request: JsonRpcRequest) -> Any:
-        """Send a request and wait for the response."""
-        future: asyncio.Future[Any] = asyncio.Future()
-        self._pending_requests[request.id] = future
-        await self._send_request(request)
-        return await future
-
-    def handle_response(self, response: JsonRpcResponse) -> bool:
-        """Handle a response from the gateway. Returns True if handled."""
-        if response.id in self._pending_requests:
-            future = self._pending_requests.pop(response.id)
-            if response.is_error:
-                future.set_exception(
-                    RuntimeError(f"Storage error: {response.error}")
-                )
-            else:
-                future.set_result(response.result)
-            return True
-        return False
-
-
-class TrikLoader:
-    """Loads and caches Python trik modules."""
-
-    def __init__(self):
-        self._cache: dict[str, Any] = {}
-
-    def load(self, trik_path: str, export_name: str = "graph") -> Any:
-        """
-        Load a Python trik module.
-
-        Args:
-            trik_path: Path to the trik directory
-            export_name: Name of the export to use (default: "graph")
-
-        Returns:
-            The trik's graph object with an invoke() method
-        """
-        cache_key = f"{trik_path}:{export_name}"
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-
-        # Find the module file
-        trik_dir = Path(trik_path)
-        manifest_path = trik_dir / "manifest.json"
-
-        if not manifest_path.exists():
-            raise FileNotFoundError(f"Manifest not found at {manifest_path}")
-
-        with open(manifest_path) as f:
-            manifest = json.load(f)
-
-        entry = manifest.get("entry", {})
-        module_path = entry.get("module", "./graph.py")
-        export_name = entry.get("export", "graph")
-
-        # Resolve relative path
-        if module_path.startswith("./"):
-            module_path = module_path[2:]
-        module_file = trik_dir / module_path
-
-        if not module_file.exists():
-            raise FileNotFoundError(f"Module not found at {module_file}")
-
-        # Determine if this is a package (trik_dir is a Python package with __init__.py)
-        # or just a standalone module
-        init_file = trik_dir / "__init__.py"
-        is_package = init_file.exists()
-
-        if is_package:
-            # For Python packages with relative imports:
-            # 1. Add parent directory to sys.path
-            # 2. Import the package properly so relative imports work
-            parent_dir = str(trik_dir.parent)
-            package_name = trik_dir.name
-
-            if parent_dir not in sys.path:
-                sys.path.insert(0, parent_dir)
-
-            # Import the package first to set up the package context
-            package = importlib.import_module(package_name)
-
-            # Now import the specific module within the package
-            module_name_without_ext = module_path.replace(".py", "").replace("/", ".")
-            full_module_name = f"{package_name}.{module_name_without_ext}"
-
-            # Reload in case it was cached with wrong context
-            if full_module_name in sys.modules:
-                module = importlib.reload(sys.modules[full_module_name])
-            else:
-                module = importlib.import_module(full_module_name)
-        else:
-            # For standalone modules without relative imports:
-            # Use the original approach
-            spec = importlib.util.spec_from_file_location("trik_module", module_file)
-            if spec is None or spec.loader is None:
-                raise ImportError(f"Could not load module from {module_file}")
-
-            module = importlib.util.module_from_spec(spec)
-            sys.modules["trik_module"] = module
-            spec.loader.exec_module(module)
-
-        # Get the exported graph
-        if not hasattr(module, export_name):
-            raise AttributeError(f"Module does not export '{export_name}'")
-
-        graph = getattr(module, export_name)
-        self._cache[cache_key] = graph
-        return graph
+from trikhub.worker.storage_proxy import StorageProxy
+from trikhub.worker.trik_loader import TrikLoader
 
 
 class PythonWorker:
-    """
-    Python worker process for executing triks.
+    """Python worker process for executing triks via v2 protocol."""
 
-    Communicates with the gateway via stdin/stdout using JSON-RPC 2.0.
-    """
-
-    def __init__(self):
+    def __init__(self) -> None:
         self._trik_loader = TrikLoader()
-        self._storage_proxy: StorageProxy | None = None
-        self._start_time = time.time()
+        self._storage_proxy = StorageProxy(self._write_line)
+        self._start_time = time.monotonic()
         self._running = True
         self._write_lock = asyncio.Lock()
 
     async def run(self) -> None:
-        """Main worker loop."""
+        """Main worker loop: read stdin line by line, dispatch JSON-RPC."""
         reader = asyncio.StreamReader()
         protocol = asyncio.StreamReaderProtocol(reader)
         await asyncio.get_event_loop().connect_read_pipe(lambda: protocol, sys.stdin)
@@ -221,180 +56,216 @@ class PythonWorker:
                 line = await reader.readline()
                 if not line:
                     break  # EOF
-
                 line_str = line.decode("utf-8").strip()
                 if not line_str:
                     continue
-
-                # Don't await - let the readline loop continue so we can receive
-                # storage proxy responses while an invoke is in progress
+                # Don't await — keep reading stdin so storage proxy responses
+                # can arrive while a trik invocation is in progress
                 asyncio.create_task(self._handle_message_safe(line_str))
+            except Exception:
+                break
 
-            except Exception as e:
-                # Log error but keep running
-                error_response = WorkerProtocol.create_error_response(
-                    "unknown",
-                    WorkerErrorCodes.INTERNAL_ERROR,
-                    f"Worker error: {e}",
-                )
-                await self._write_response(error_response)
+    # -- Message routing ------------------------------------------------------
 
     async def _handle_message_safe(self, line: str) -> None:
-        """Handle message with error handling."""
         try:
             await self._handle_message(line)
-        except Exception as e:
-            error_response = WorkerProtocol.create_error_response(
+        except Exception as exc:
+            resp = error_response(
                 "unknown",
-                WorkerErrorCodes.INTERNAL_ERROR,
-                f"Worker error: {e}",
+                ErrorCode.INTERNAL_ERROR,
+                f"Worker error: {exc}",
             )
-            await self._write_response(error_response)
+            self._write_response(resp)
 
     async def _handle_message(self, line: str) -> None:
-        """Handle an incoming message."""
         try:
-            message = WorkerProtocol.parse_message(line)
-        except ValueError as e:
-            error_response = WorkerProtocol.create_error_response(
-                "unknown",
-                WorkerErrorCodes.PARSE_ERROR,
-                str(e),
+            msg = json.loads(line)
+        except json.JSONDecodeError as exc:
+            self._write_response(
+                error_response("unknown", ErrorCode.PARSE_ERROR, str(exc))
             )
-            await self._write_response(error_response)
             return
 
-        if WorkerProtocol.is_response(message):
-            # This is a response to a storage proxy request
-            assert isinstance(message, JsonRpcResponse)
-            if self._storage_proxy:
-                self._storage_proxy.handle_response(message)
+        if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0":
+            self._write_response(
+                error_response(
+                    msg.get("id", "unknown") if isinstance(msg, dict) else "unknown",
+                    ErrorCode.INVALID_REQUEST,
+                    "Invalid JSON-RPC 2.0 message",
+                )
+            )
             return
 
-        assert isinstance(message, JsonRpcRequest)
-        response = await self._handle_request(message)
-        await self._write_response(response)
+        # Storage proxy responses come back through here
+        if is_response(msg):
+            self._storage_proxy.handle_response(
+                msg_id=msg["id"],
+                result=msg.get("result"),
+                error=msg.get("error"),
+            )
+            return
 
-    async def _handle_request(self, request: JsonRpcRequest) -> JsonRpcResponse:
-        """Handle a JSON-RPC request."""
-        method = request.method
+        # Otherwise it's a request from the gateway
+        if is_request(msg):
+            resp = await self._handle_request(msg)
+            self._write_response(resp)
+
+    async def _handle_request(self, msg: dict[str, Any]) -> JsonRpcResponse:
+        method = msg.get("method", "")
+        request_id = msg.get("id", "unknown")
+        params = msg.get("params") or {}
 
         if method == "health":
-            return self._handle_health(request)
+            return self._handle_health(request_id)
         elif method == "shutdown":
-            return self._handle_shutdown(request)
-        elif method == "invoke":
-            return await self._handle_invoke(request)
+            return self._handle_shutdown(request_id)
+        elif method == "processMessage":
+            return await self._handle_process_message(request_id, params)
+        elif method == "executeTool":
+            return await self._handle_execute_tool(request_id, params)
         else:
-            return WorkerProtocol.create_error_response(
-                request.id,
-                WorkerErrorCodes.METHOD_NOT_FOUND,
+            return error_response(
+                request_id,
+                ErrorCode.METHOD_NOT_FOUND,
                 f"Unknown method: {method}",
             )
 
-    def _handle_health(self, request: JsonRpcRequest) -> JsonRpcResponse:
-        """Handle health check."""
-        result = {
+    # -- Method handlers ------------------------------------------------------
+
+    def _handle_health(self, request_id: str) -> JsonRpcResponse:
+        uptime = time.monotonic() - self._start_time
+        return success_response(request_id, {
             "status": "ok",
             "runtime": "python",
-            "version": sys.version,
-            "uptime": time.time() - self._start_time,
-        }
-        return WorkerProtocol.create_success_response(request.id, result)
+            "version": sys.version.split()[0],
+            "uptime": round(uptime, 3),
+        })
 
-    def _handle_shutdown(self, request: JsonRpcRequest) -> JsonRpcResponse:
-        """Handle shutdown request."""
+    def _handle_shutdown(self, request_id: str) -> JsonRpcResponse:
         self._running = False
-        return WorkerProtocol.create_success_response(request.id, {"acknowledged": True})
+        return success_response(request_id, {"acknowledged": True})
 
-    async def _handle_invoke(self, request: JsonRpcRequest) -> JsonRpcResponse:
-        """Handle trik invocation."""
-        params = request.params or {}
-
+    async def _handle_process_message(
+        self, request_id: str, params: dict[str, Any]
+    ) -> JsonRpcResponse:
         trik_path = params.get("trikPath")
         if not trik_path:
-            return WorkerProtocol.create_error_response(
-                request.id,
-                WorkerErrorCodes.INVALID_PARAMS,
-                "Missing trikPath parameter",
-            )
+            return error_response(request_id, ErrorCode.INVALID_PARAMS, "Missing trikPath parameter")
 
-        action = params.get("action")
-        if not action:
-            return WorkerProtocol.create_error_response(
-                request.id,
-                WorkerErrorCodes.INVALID_PARAMS,
-                "Missing action parameter",
-            )
-
-        # Create storage proxy for this invocation
-        # The proxy sends requests to the gateway via stdout and receives responses via stdin
-        self._storage_proxy = StorageProxy(
-            send_request=self._send_storage_request,
-            receive_response=None,  # Responses handled via handle_response()
-        )
+        message = params.get("message")
+        if message is None:
+            return error_response(request_id, ErrorCode.INVALID_PARAMS, "Missing message parameter")
 
         try:
-            # Load the trik
-            graph = self._trik_loader.load(trik_path)
+            agent = self._trik_loader.load(trik_path)
 
-            # Build the input
-            trik_input = {
-                "action": action,
-                "input": params.get("input"),
+            if not callable(getattr(agent, "process_message", None)):
+                return error_response(
+                    request_id,
+                    ErrorCode.INTERNAL_ERROR,
+                    "Trik does not implement process_message (not a conversational trik)",
+                )
+
+            context = self._build_context(params)
+            response = await agent.process_message(str(message), context)
+
+            result: dict[str, Any] = {
+                "message": response.message,
+                "transferBack": response.transferBack,
             }
+            if response.toolCalls is not None:
+                result["toolCalls"] = [tc.model_dump() for tc in response.toolCalls]
 
-            if "session" in params:
-                trik_input["session"] = params["session"]
+            return success_response(request_id, result)
 
-            if "config" in params:
-                trik_input["config"] = params["config"]
-
-            # Add storage proxy to input
-            trik_input["storage"] = self._storage_proxy
-
-            # Execute the trik
-            if asyncio.iscoroutinefunction(graph.invoke):
-                result = await graph.invoke(trik_input)
-            else:
-                result = graph.invoke(trik_input)
-
-            return WorkerProtocol.create_success_response(request.id, result)
-
-        except FileNotFoundError as e:
-            return WorkerProtocol.create_error_response(
-                request.id,
-                WorkerErrorCodes.TRIK_NOT_FOUND,
-                str(e),
+        except FileNotFoundError as exc:
+            return error_response(request_id, ErrorCode.TRIK_NOT_FOUND, str(exc))
+        except Exception as exc:
+            return error_response(
+                request_id,
+                ErrorCode.INTERNAL_ERROR,
+                f"Execution error: {exc}",
             )
-        except Exception as e:
-            return WorkerProtocol.create_error_response(
-                request.id,
-                WorkerErrorCodes.INTERNAL_ERROR,
-                f"Execution error: {e}",
+
+    async def _handle_execute_tool(
+        self, request_id: str, params: dict[str, Any]
+    ) -> JsonRpcResponse:
+        trik_path = params.get("trikPath")
+        if not trik_path:
+            return error_response(request_id, ErrorCode.INVALID_PARAMS, "Missing trikPath parameter")
+
+        tool_name = params.get("toolName")
+        if not tool_name:
+            return error_response(request_id, ErrorCode.INVALID_PARAMS, "Missing toolName parameter")
+
+        try:
+            agent = self._trik_loader.load(trik_path)
+
+            if not callable(getattr(agent, "execute_tool", None)):
+                return error_response(
+                    request_id,
+                    ErrorCode.INTERNAL_ERROR,
+                    "Trik does not implement execute_tool (not a tool-mode trik)",
+                )
+
+            context = self._build_context(params)
+            result = await agent.execute_tool(str(tool_name), params.get("input", {}), context)
+
+            return success_response(request_id, {"output": result.output})
+
+        except FileNotFoundError as exc:
+            return error_response(request_id, ErrorCode.TRIK_NOT_FOUND, str(exc))
+        except Exception as exc:
+            return error_response(
+                request_id,
+                ErrorCode.INTERNAL_ERROR,
+                f"Execution error: {exc}",
             )
-        finally:
-            self._storage_proxy = None
 
-    async def _write_response(self, response: JsonRpcResponse) -> None:
-        """Write a response to stdout."""
-        async with self._write_lock:
-            line = response.to_json() + "\n"
-            sys.stdout.write(line)
-            sys.stdout.flush()
+    # -- Helpers --------------------------------------------------------------
 
-    async def _send_storage_request(self, request: JsonRpcRequest) -> None:
-        """Send a storage request to the gateway via stdout."""
-        async with self._write_lock:
-            line = request.to_json() + "\n"
-            sys.stdout.write(line)
-            sys.stdout.flush()
+    def _build_context(self, params: dict[str, Any]) -> TrikContext:
+        config_record = params.get("config", {})
+        config_ctx = _ConfigContext(config_record)
+        return TrikContext(
+            sessionId=params.get("sessionId", ""),
+            config=config_ctx,
+            storage=self._storage_proxy,
+        )
+
+    def _write_response(self, response: JsonRpcResponse) -> None:
+        self._write_line(json.dumps(response.to_dict()))
+
+    def _write_line(self, line: str) -> None:
+        sys.stdout.write(line + "\n")
+        sys.stdout.flush()
+
+
+class _ConfigContext:
+    """Simple config context wrapping a dict."""
+
+    def __init__(self, data: dict[str, str]) -> None:
+        self._data = data
+
+    def get(self, key: str) -> str | None:
+        return self._data.get(key)
+
+    def has(self, key: str) -> bool:
+        return key in self._data
+
+    def keys(self) -> list[str]:
+        return list(self._data.keys())
+
+
+async def _run_worker_async() -> None:
+    worker = PythonWorker()
+    await worker.run()
 
 
 def run_worker() -> None:
-    """Entry point for the worker process."""
-    worker = PythonWorker()
-    asyncio.run(worker.run())
+    """Entry point for the trikhub-worker console script."""
+    asyncio.run(_run_worker_async())
 
 
 if __name__ == "__main__":

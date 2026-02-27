@@ -1,14 +1,14 @@
 """
-TrikHub Manifest Types
+TrikHub v2 Manifest Types
 
-Pydantic models mirroring packages/trik-manifest/src/types.ts
+Pydantic models mirroring packages/js/manifest/src/types.ts
 These provide type-safe manifest parsing and validation for Python triks.
 """
 
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
@@ -39,11 +39,65 @@ class JSONSchema(BaseModel):
     description: str | None = None
     default: Any | None = None
 
-    model_config = {"extra": "allow"}
+    model_config = {"extra": "allow", "populate_by_name": True}
 
 
 # ============================================================================
-# Session & Storage Types
+# Manifest Types
+# ============================================================================
+
+
+AgentMode = Literal["conversational", "tool"]
+"""Agent mode: 'conversational' (handoff with LLM) or 'tool' (native tools exported)."""
+
+
+class ModelPreferences(BaseModel):
+    """Model preferences for the agent's LLM."""
+
+    provider: str | None = None
+    """Provider hint: 'anthropic', 'openai', 'any'."""
+    capabilities: list[str] | None = None
+    """Required model capabilities, e.g. ['tool_use']."""
+    temperature: float | None = None
+    """Temperature for generation (0.0-2.0)."""
+
+
+class AgentDefinition(BaseModel):
+    """Agent definition — the core of a v2 manifest."""
+
+    mode: AgentMode
+    """How this agent operates."""
+    handoffDescription: str | None = None
+    """Description used to generate the handoff tool (required for conversational mode)."""
+    systemPrompt: str | None = None
+    """Inline system prompt (conversational mode)."""
+    systemPromptFile: str | None = None
+    """Path to system prompt file, relative to manifest (conversational mode)."""
+    model: ModelPreferences | None = None
+    """LLM model preferences."""
+    domain: list[str]
+    """Domain tags describing this agent's expertise."""
+
+
+class ToolDeclaration(BaseModel):
+    """Tool declaration in the manifest."""
+
+    description: str
+    """What this tool does."""
+    logTemplate: str | None = None
+    """Template for log entries. Placeholders: {{field}}."""
+    logSchema: dict[str, JSONSchema] | None = None
+    """Schema for log template placeholder values. Must use constrained types."""
+    inputSchema: JSONSchema | None = None
+    """Input schema for tool-mode triks."""
+    outputSchema: JSONSchema | None = None
+    """Output schema for tool-mode triks (constrained types)."""
+    outputTemplate: str | None = None
+    """Template for output sent to the main LLM. Required for tool-mode."""
+
+
+# ============================================================================
+# Capabilities & Limits
 # ============================================================================
 
 
@@ -51,16 +105,18 @@ class SessionCapabilities(BaseModel):
     """Session capabilities for multi-turn conversations."""
 
     enabled: bool
-    maxDurationMs: int | None = Field(default=30 * 60 * 1000)  # 30 minutes
-    maxHistoryEntries: int | None = Field(default=20)
+    maxDurationMs: int | None = None
+    """Maximum session duration in milliseconds (default: 30 minutes)."""
 
 
 class StorageCapabilities(BaseModel):
     """Storage capabilities for persistent data."""
 
     enabled: bool
-    maxSizeBytes: int | None = Field(default=100 * 1024 * 1024)  # 100MB
-    persistent: bool | None = Field(default=True)
+    maxSizeBytes: int | None = None
+    """Maximum storage size in bytes (default: 100MB)."""
+    persistent: bool | None = None
+    """Whether storage persists across sessions (default: true)."""
 
 
 class ConfigRequirement(BaseModel):
@@ -81,19 +137,17 @@ class TrikConfig(BaseModel):
 class TrikCapabilities(BaseModel):
     """Trik capabilities declared in manifest."""
 
-    tools: list[str]
-    """List of tool names this trik uses. Declarative - not enforced at runtime."""
     session: SessionCapabilities | None = None
-    """Session capabilities. Enforced - gateway creates/manages sessions."""
+    """Session capabilities. Enforced — gateway creates/manages sessions."""
     storage: StorageCapabilities | None = None
-    """Storage capabilities. Enforced - gateway provides storage context."""
+    """Storage capabilities. Enforced — gateway provides storage context."""
 
 
 class TrikLimits(BaseModel):
     """Resource limits for trik execution."""
 
-    maxExecutionTimeMs: int
-    """Maximum execution time in milliseconds. Enforced - gateway aborts after timeout."""
+    maxTurnTimeMs: int
+    """Maximum time per turn in milliseconds."""
 
 
 # ============================================================================
@@ -112,49 +166,11 @@ class TrikEntry(BaseModel):
     """Entry point configuration."""
 
     module: str
+    """Path to the compiled module (relative to trik directory)."""
     export: str
-    runtime: TrikRuntime | None = Field(default=TrikRuntime.NODE)
-
-
-# ============================================================================
-# Response Mode Types
-# ============================================================================
-
-
-class ResponseMode(str, Enum):
-    """Response mode for an action."""
-
-    TEMPLATE = "template"
-    PASSTHROUGH = "passthrough"
-
-
-class AllowedAgentStringFormat(str, Enum):
-    """Allowed string formats in agentDataSchema."""
-
-    ID = "id"
-    DATE = "date"
-    DATE_TIME = "date-time"
-    UUID = "uuid"
-    EMAIL = "email"
-    URL = "url"
-
-
-class ResponseTemplate(BaseModel):
-    """Response template for agent responses."""
-
-    text: str
-    condition: str | None = None
-
-
-class ActionDefinition(BaseModel):
-    """Action definition for triks."""
-
-    description: str | None = None
-    inputSchema: JSONSchema
-    responseMode: ResponseMode
-    agentDataSchema: JSONSchema | None = None
-    responseTemplates: dict[str, ResponseTemplate] | None = None
-    userContentSchema: JSONSchema | None = None
+    """Export name to use (usually 'default')."""
+    runtime: TrikRuntime | None = None
+    """Runtime environment: 'node' (default) or 'python'."""
 
 
 # ============================================================================
@@ -163,234 +179,137 @@ class ActionDefinition(BaseModel):
 
 
 class TrikManifest(BaseModel):
-    """The trik manifest - single source of truth for the trik contract."""
+    """The trik manifest — v2 with agent-based handoff architecture."""
 
-    schemaVersion: Literal[1]
-    """Schema version for migration support. Current version: 1."""
+    schemaVersion: Literal[2]
+    """Schema version (must be 2)."""
     id: str
     name: str
     description: str
     version: str
-    actions: dict[str, ActionDefinition]
-    capabilities: TrikCapabilities
-    limits: TrikLimits
+
+    agent: AgentDefinition
+    """Agent definition — how this trik operates."""
+
+    tools: dict[str, ToolDeclaration] | None = None
+    """Internal tools the agent uses."""
+    capabilities: TrikCapabilities | None = None
+    limits: TrikLimits | None = None
     entry: TrikEntry
     config: TrikConfig | None = None
+
     author: str | None = None
     repository: str | None = None
     license: str | None = None
 
 
 # ============================================================================
-# Wire Protocol Types (for remote triks)
+# Runtime Communication Types
 # ============================================================================
 
 
-class ExecuteRequest(BaseModel):
-    """Request to execute a trik."""
+@runtime_checkable
+class TrikConfigContext(Protocol):
+    """Configuration context passed to triks."""
 
-    requestId: str
-    input: Any
+    def get(self, key: str) -> str | None:
+        """Get a configuration value by key."""
+        ...
 
+    def has(self, key: str) -> bool:
+        """Check if a configuration key is set."""
+        ...
 
-class ClarificationQuestion(BaseModel):
-    """Clarification question from a trik."""
-
-    questionId: str
-    questionText: str
-    questionType: Literal["text", "multiple_choice", "boolean"]
-    options: list[str] | None = None
-    required: bool | None = None
-
-
-class ClarificationAnswer(BaseModel):
-    """Answer to a clarification question."""
-
-    questionId: str
-    answer: str | bool
+    def keys(self) -> list[str]:
+        """Get all configured keys (without values, for debugging)."""
+        ...
 
 
-class ClarifyRequest(BaseModel):
-    """Request to provide clarification answers."""
+@runtime_checkable
+class TrikStorageContext(Protocol):
+    """Storage context passed to triks. Persistent key-value storage scoped to the trik."""
+
+    async def get(self, key: str) -> Any | None: ...
+    async def set(self, key: str, value: Any, ttl: int | None = None) -> None: ...
+    async def delete(self, key: str) -> bool: ...
+    async def list(self, prefix: str | None = None) -> list[str]: ...
+    async def get_many(self, keys: list[str]) -> dict[str, Any]: ...
+    async def set_many(self, entries: dict[str, Any]) -> None: ...
+
+
+class TrikContext(BaseModel):
+    """Context passed to a trik agent on each message."""
+
+    model_config = {"arbitrary_types_allowed": True}
 
     sessionId: str
-    answers: list[ClarificationAnswer]
+    config: Any  # TrikConfigContext at runtime
+    storage: Any  # TrikStorageContext at runtime
 
 
-class SuccessResponse(BaseModel):
-    """Successful execution response."""
+class ToolCallRecord(BaseModel):
+    """Record of a tool call made by the agent during message processing."""
 
-    requestId: str
-    type: Literal["result"]
-    agentData: Any
-    userContent: Any | None = None
-
-
-class ClarificationResponse(BaseModel):
-    """Clarification needed response."""
-
-    requestId: str
-    type: Literal["clarification_needed"]
-    sessionId: str
-    questions: list[ClarificationQuestion]
+    tool: str
+    input: dict[str, Any]
+    output: dict[str, Any]
 
 
-class ErrorResponse(BaseModel):
-    """Error response."""
+class TrikResponse(BaseModel):
+    """Response from a trik agent after processing a message."""
 
-    requestId: str
-    type: Literal["error"]
-    code: str
     message: str
+    """The agent's response message to show to the user."""
+    transferBack: bool
+    """Whether to transfer the conversation back to the main agent."""
+    toolCalls: list[ToolCallRecord] | None = None
+    """Tool calls made during processing (for log template filling)."""
+
+
+class ToolExecutionResult(BaseModel):
+    """Result from executing a tool-mode trik tool."""
+
+    output: dict[str, Any]
+
+
+@runtime_checkable
+class TrikAgent(Protocol):
+    """
+    The contract a trik agent must implement.
+    Conversational triks implement process_message().
+    Tool-mode triks implement execute_tool().
+    """
+
+    async def process_message(
+        self, message: str, context: TrikContext
+    ) -> TrikResponse: ...
+
+    async def execute_tool(
+        self, tool_name: str, input: dict[str, Any], context: TrikContext
+    ) -> ToolExecutionResult: ...
 
 
 # ============================================================================
-# Gateway Result Types
+# Gateway Session Types
 # ============================================================================
 
 
-class GatewayErrorCode(str, Enum):
-    """Gateway error codes."""
-
-    TRIK_NOT_FOUND = "TRIK_NOT_FOUND"
-    INVALID_INPUT = "INVALID_INPUT"
-    INVALID_OUTPUT = "INVALID_OUTPUT"
-    TIMEOUT = "TIMEOUT"
-    EXECUTION_ERROR = "EXECUTION_ERROR"
-    NOT_ALLOWED = "NOT_ALLOWED"
-    NETWORK_ERROR = "NETWORK_ERROR"
-    CLARIFICATION_NEEDED = "CLARIFICATION_NEEDED"
+HandoffLogType = Literal["handoff_start", "tool_execution", "handoff_end"]
 
 
-class GatewayError(BaseModel):
-    """Gateway error result."""
-
-    success: Literal[False] = False
-    code: GatewayErrorCode
-    error: str
-    details: Any | None = None
-
-
-class GatewayClarification(BaseModel):
-    """Gateway clarification needed result."""
-
-    success: Literal[False] = False
-    code: Literal["CLARIFICATION_NEEDED"] = "CLARIFICATION_NEEDED"
-    sessionId: str
-    questions: list[ClarificationQuestion]
-
-
-class GatewaySuccessTemplate(BaseModel):
-    """Gateway success for template mode."""
-
-    success: Literal[True] = True
-    responseMode: Literal["template"] = "template"
-    agentData: Any
-    templateText: str | None = None
-
-
-class GatewaySuccessPassthrough(BaseModel):
-    """Gateway success for passthrough mode."""
-
-    success: Literal[True] = True
-    responseMode: Literal["passthrough"] = "passthrough"
-    userContentRef: str
-    contentType: str
-    metadata: dict[str, Any] | None = None
-
-
-# Union type for gateway results
-GatewaySuccess = GatewaySuccessTemplate | GatewaySuccessPassthrough
-GatewayResult = GatewaySuccess | GatewayError | GatewayClarification
-
-
-# ============================================================================
-# Passthrough Mode Types
-# ============================================================================
-
-
-class PassthroughContent(BaseModel):
-    """User content with content type for passthrough mode."""
-
-    contentType: str
-    content: str
-    metadata: dict[str, Any] | None = None
-
-
-class PassthroughDeliveryReceipt(BaseModel):
-    """Receipt returned to agent after passthrough delivery."""
-
-    delivered: Literal[True] = True
-    contentType: str
-    metadata: dict[str, Any] | None = None
-
-
-class UserContentReference(BaseModel):
-    """Content reference stored by gateway for later delivery."""
-
-    ref: str
-    trikId: str
-    actionName: str
-    content: PassthroughContent
-    createdAt: int
-    expiresAt: int
-
-
-# ============================================================================
-# Session State Types
-# ============================================================================
-
-
-class SessionHistoryEntry(BaseModel):
-    """Entry in the session history."""
+class HandoffLogEntry(BaseModel):
+    """A single log entry in a handoff session."""
 
     timestamp: int
-    action: str
-    input: Any
-    agentData: Any
-    userContent: Any | None = None
+    type: HandoffLogType
+    summary: str
 
 
-class TrikSession(BaseModel):
-    """Session state maintained by the gateway."""
+class HandoffSession(BaseModel):
+    """A handoff session tracks a conversation with a trik agent."""
 
     sessionId: str
     trikId: str
+    log: list[HandoffLogEntry]
     createdAt: int
     lastActivityAt: int
-    expiresAt: int
-    history: list[SessionHistoryEntry]
-
-
-class SessionContext(BaseModel):
-    """Session context passed to triks in graph input."""
-
-    sessionId: str
-    history: list[SessionHistoryEntry]
-
-
-# ============================================================================
-# Graph Input/Output Types (for local triks)
-# ============================================================================
-
-
-class GraphInput(BaseModel):
-    """Input passed to a trik graph."""
-
-    input: Any
-    action: str
-    clarificationAnswers: dict[str, str | bool] | None = None
-    session: SessionContext | None = None
-    # Note: config and storage contexts are passed as runtime objects, not in model
-
-
-class GraphResult(BaseModel):
-    """Result returned from a trik graph."""
-
-    responseMode: ResponseMode | None = None
-    agentData: Any | None = None
-    userContent: Any | None = None
-    needsClarification: bool | None = None
-    clarificationQuestion: ClarificationQuestion | None = None
-    clarificationQuestions: list[ClarificationQuestion] | None = None
-    endSession: bool | None = None

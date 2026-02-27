@@ -637,11 +637,11 @@ if __name__ == "__main__":
 function generatePyProjectToml(input: ScaffoldInput, pkgName: string): string {
   const isConversational = input.mode === 'conversational';
   const deps = isConversational
-    ? `    "trikhub-sdk>=0.1.0",
+    ? `    "trikhub>=0.6.0",
     "langchain-anthropic>=0.3.0",
     "langchain-core>=0.3.0",
     "langgraph>=0.2.0",`
-    : `    "trikhub-sdk>=0.1.0",`;
+    : `    "trikhub>=0.6.0",`;
 
   return `[build-system]
 requires = ["setuptools>=61.0", "wheel"]

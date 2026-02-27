@@ -1,19 +1,18 @@
-"""Python Trik Template Generator.
+"""Python Trik Template Generator (v2).
 
-Generates all files needed for a Python trik project.
+Generates all files needed for a v2 Python trik project.
+Supports conversational and tool modes using the trikhub SDK.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
 @dataclass
 class PyTemplateConfig:
-    """Configuration for Python template generation."""
-
     name: str
     display_name: str
     description: str
@@ -22,99 +21,113 @@ class PyTemplateConfig:
     category: str
     enable_storage: bool
     enable_config: bool
+    agent_mode: str  # 'conversational' | 'tool'
+    handoff_description: str = ""
+    domain_tags: list[str] = field(default_factory=list)
+    tool_names: list[str] = field(default_factory=list)
 
 
 @dataclass
 class GeneratedFile:
-    """A generated file with path and content."""
-
     path: str
     content: str
 
 
 def _to_package_name(name: str) -> str:
-    """Convert trik name to Python package name (dashes to underscores)."""
     return name.replace("-", "_")
 
 
 def _to_pascal_case(name: str) -> str:
-    """Convert kebab-case to PascalCase."""
     return "".join(part.capitalize() for part in name.split("-"))
 
 
 def generate_python_project(config: PyTemplateConfig) -> list[GeneratedFile]:
-    """Generate all files for a Python trik project."""
     files: list[GeneratedFile] = []
-    pkg_name = _to_package_name(config.name)
 
+    files.append(GeneratedFile("manifest.json", _generate_manifest(config)))
     files.append(GeneratedFile("trikhub.json", _generate_trikhub_json(config)))
-    files.append(GeneratedFile("pyproject.toml", _generate_pyproject(config, pkg_name)))
-    files.append(GeneratedFile("test.py", _generate_test_py(pkg_name)))
-    files.append(GeneratedFile("README.md", _generate_readme(config)))
+    files.append(GeneratedFile("pyproject.toml", _generate_pyproject(config)))
+    files.append(GeneratedFile("test.py", _generate_test_py(config)))
     files.append(GeneratedFile(".gitignore", _generate_gitignore()))
-    files.append(GeneratedFile(f"{pkg_name}/__init__.py", _generate_init_py()))
-    files.append(GeneratedFile(f"{pkg_name}/manifest.json", _generate_manifest(config)))
-    files.append(GeneratedFile(f"{pkg_name}/graph.py", _generate_graph_py(config)))
+
+    if config.agent_mode == "conversational":
+        files.append(GeneratedFile("src/agent.py", _generate_conversational_agent(config)))
+        files.append(GeneratedFile("src/tools/example.py", _generate_example_tool()))
+        files.append(GeneratedFile("src/prompts/system.md", _generate_system_prompt(config)))
+    else:
+        files.append(GeneratedFile("src/agent.py", _generate_tool_agent(config)))
 
     return files
 
 
 def _generate_manifest(config: PyTemplateConfig) -> str:
+    agent: dict[str, Any] = {
+        "mode": config.agent_mode,
+        "domain": config.domain_tags or [config.category],
+    }
+
+    if config.agent_mode == "conversational":
+        agent["handoffDescription"] = config.handoff_description or config.description
+        agent["systemPromptFile"] = "./src/prompts/system.md"
+        agent["model"] = {"capabilities": ["tool_use"]}
+
     manifest: dict[str, Any] = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "id": config.name,
         "name": config.display_name,
         "description": config.description,
         "version": "0.1.0",
-        "actions": {
-            "hello": {
-                "description": "Say hello to someone",
+        "agent": agent,
+        "limits": {"maxTurnTimeMs": 30000},
+        "entry": {
+            "module": "./src/agent.py",
+            "export": "agent",
+            "runtime": "python",
+        },
+        "author": f"@{config.author_github}",
+        "repository": f"https://github.com/{config.author_github}/{config.name}",
+    }
+
+    if config.agent_mode == "tool":
+        tools: dict[str, Any] = {}
+        for tool_name in (config.tool_names or ["exampleTool"]):
+            tools[tool_name] = {
+                "description": f"TODO: describe {tool_name}",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "name": {"type": "string", "description": "Name to greet"},
+                        "query": {"type": "string", "description": "Input query"},
                     },
-                    "required": ["name"],
+                    "required": ["query"],
                 },
-                "responseMode": "template",
-                "agentDataSchema": {
+                "outputSchema": {
                     "type": "object",
                     "properties": {
-                        "template": {"type": "string", "enum": ["success"]},
-                        "greeting": {"type": "string", "maxLength": 200, "pattern": "^.{1,200}$"},
+                        "result": {
+                            "type": "string",
+                            "maxLength": 1000,
+                            "pattern": "^.{0,1000}$",
+                        },
                     },
-                    "required": ["template", "greeting"],
                 },
-                "responseTemplates": {
-                    "success": {"text": "{{greeting}}"},
-                },
+                "outputTemplate": "Result: {{result}}",
+            }
+        manifest["tools"] = tools
+    else:
+        manifest["tools"] = {
+            "exampleTool": {
+                "description": "An example tool",
             },
-        },
-        "capabilities": {
-            "tools": [],
-        },
-        "limits": {
-            "maxExecutionTimeMs": 5000,
-        },
-        "entry": {
-            "module": "./graph.py",
-            "export": "graph",
-            "runtime": "python",
-        },
-    }
+        }
 
     if config.enable_storage:
-        manifest["capabilities"]["storage"] = {
-            "enabled": True,
-            "maxSizeBytes": 1048576,
-            "persistent": True,
+        manifest["capabilities"] = {
+            "storage": {"enabled": True, "maxSizeBytes": 1048576, "persistent": True},
         }
 
     if config.enable_config:
         manifest["config"] = {
-            "required": [
-                {"key": "API_KEY", "description": "Your API key"},
-            ],
+            "required": [{"key": "API_KEY", "description": "Your API key"}],
             "optional": [],
         }
 
@@ -133,11 +146,21 @@ def _generate_trikhub_json(config: PyTemplateConfig) -> str:
         },
         "repository": f"https://github.com/{config.author_github}/{config.name}",
     }
-
     return json.dumps(trikhub, indent=2) + "\n"
 
 
-def _generate_pyproject(config: PyTemplateConfig, pkg_name: str) -> str:
+def _generate_pyproject(config: PyTemplateConfig) -> str:
+    deps = [
+        '"trikhub>=0.6.0"',
+    ]
+    if config.agent_mode == "conversational":
+        deps.extend([
+            '"langchain-anthropic>=0.3.0"',
+            '"langgraph>=0.2.0"',
+        ])
+
+    deps_str = ",\n    ".join(deps)
+
     return f'''[build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -152,141 +175,177 @@ license = {{text = "MIT"}}
 authors = [
     {{ name = "{config.author_name}" }}
 ]
-dependencies = []
+dependencies = [
+    {deps_str},
+]
 
 [project.urls]
 Repository = "https://github.com/{config.author_github}/{config.name}"
 
 [tool.hatch.build.targets.wheel]
-packages = ["{pkg_name}"]
+packages = ["src"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "{pkg_name}/**",
+    "src/**",
+    "manifest.json",
+    "trikhub.json",
     "README.md",
 ]
 '''
 
 
-def _generate_graph_py(config: PyTemplateConfig) -> str:
+def _generate_conversational_agent(config: PyTemplateConfig) -> str:
     class_name = _to_pascal_case(config.name)
-
-    storage_line = '        storage = input_data.get("storage")' if config.enable_storage else ""
-    config_line = '        config = input_data.get("config")' if config.enable_config else ""
-
-    extra_args = ""
-    if config.enable_storage:
-        extra_args += ", storage"
-    if config.enable_config:
-        extra_args += ", config"
-
     return f'''"""
-{config.display_name}
+{config.display_name} — conversational agent
 
-{config.description}
+Uses LangGraph ReAct pattern with the TrikHub SDK.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from langchain_anthropic import ChatAnthropic
+from langgraph.prebuilt import create_react_agent
+
+from trikhub.sdk import wrap_agent, transfer_back_tool
+from trikhub.manifest import TrikContext
+
+from .tools.example import example_tool
 
 
-class {class_name}Graph:
-    """Main graph for the {config.display_name} trik."""
+def create_agent(context: TrikContext):
+    """Factory that creates a new agent per session."""
+    model = ChatAnthropic(model="claude-sonnet-4-20250514")
 
-    async def invoke(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """
-        Main entry point called by the TrikHub gateway.
+    # Read system prompt from file (loaded by gateway via manifest.agent.systemPromptFile)
+    tools = [example_tool, transfer_back_tool]
 
-        Args:
-            input_data: Contains action, input{extra_args}
-
-        Returns:
-            Response with responseMode and agentData/userContent
-        """
-        action = input_data.get("action")
-        action_input = input_data.get("input", {{}})
-{storage_line}
-{config_line}
-
-        if action == "hello":
-            name = action_input.get("name", "World")
-            return {{
-                "responseMode": "template",
-                "agentData": {{
-                    "template": "success",
-                    "greeting": f"Hello, {{name}}!",
-                }},
-            }}
-
-        return {{
-            "responseMode": "template",
-            "agentData": {{
-                "template": "error",
-                "message": f"Unknown action: {{action}}",
-            }},
-        }}
+    return create_react_agent(
+        model,
+        tools=tools,
+    )
 
 
-# Export the graph instance
-graph = {class_name}Graph()
+# Export wrapped agent for the TrikHub worker
+agent = wrap_agent(create_agent)
 '''
 
 
-def _generate_init_py() -> str:
-    return '"""Package init."""\n'
+def _generate_tool_agent(config: PyTemplateConfig) -> str:
+    handlers: list[str] = []
+    for tool_name in (config.tool_names or ["exampleTool"]):
+        handlers.append(f'''    "{tool_name}": {_to_handler_name(tool_name)},''')
 
+    func_defs: list[str] = []
+    for tool_name in (config.tool_names or ["exampleTool"]):
+        func_name = _to_handler_name(tool_name)
+        func_defs.append(f'''
+async def {func_name}(input_data: dict, context) -> dict:
+    """Handle {tool_name} tool calls."""
+    query = input_data.get("query", "")
+    return {{"result": f"Processed: {{query}}"}}
+''')
 
-def _generate_test_py(pkg_name: str) -> str:
+    handlers_str = "\n".join(handlers)
+    func_defs_str = "\n".join(func_defs)
+
     return f'''"""
-Local test script
+{config.display_name} — tool mode agent
 
-Run with: python test.py
+Exports native tools via wrapToolHandlers from the TrikHub SDK.
 """
 
+from __future__ import annotations
+
+from trikhub.sdk import wrap_tool_handlers
+
+{func_defs_str}
+
+# Export wrapped tool handlers for the TrikHub worker
+agent = wrap_tool_handlers({{
+{handlers_str}
+}})
+'''
+
+
+def _to_handler_name(tool_name: str) -> str:
+    """Convert camelCase tool name to snake_case handler name."""
+    result = []
+    for i, char in enumerate(tool_name):
+        if char.isupper() and i > 0:
+            result.append("_")
+        result.append(char.lower())
+    return "handle_" + "".join(result)
+
+
+def _generate_example_tool() -> str:
+    return '''"""Example tool for the conversational agent."""
+
+from langchain_core.tools import tool
+
+
+@tool
+def example_tool(query: str) -> str:
+    """Search for information about a topic.
+
+    Args:
+        query: The search query.
+    """
+    return f"Result for: {query}"
+'''
+
+
+def _generate_system_prompt(config: PyTemplateConfig) -> str:
+    return f"""You are {config.display_name}, a helpful assistant.
+
+{config.description}
+
+When you have finished helping the user, use the transfer_back tool to return control to the main agent.
+"""
+
+
+def _generate_test_py(config: PyTemplateConfig) -> str:
+    if config.agent_mode == "tool":
+        tool_name = (config.tool_names or ["exampleTool"])[0]
+        handler_name = _to_handler_name(tool_name)
+        return f'''"""Local test script — run with: python test.py"""
+
 import asyncio
-from {pkg_name}.graph import graph
+from src.agent import agent
 
 
 async def main():
-    result = await graph.invoke({{
-        "action": "hello",
-        "input": {{"name": "World"}},
-    }})
+    result = await agent.execute_tool(
+        "{tool_name}",
+        {{"query": "hello world"}},
+        context=None,
+    )
     print(result)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
 '''
+    else:
+        return f'''"""Local test script — run with: python test.py"""
+
+import asyncio
+from src.agent import agent
 
 
-def _generate_readme(config: PyTemplateConfig) -> str:
-    return f"""# {config.display_name}
+async def main():
+    result = await agent.process_message(
+        "Hello! What can you do?",
+        session_id="test-session",
+        context=None,
+    )
+    print(result)
 
-{config.description}
 
-## Development
-
-```bash
-python test.py
-```
-
-## Actions
-
-### hello
-
-Say hello to someone.
-
-**Input:**
-- `name` (string, required): Name to greet
-
-## Publishing
-
-```bash
-trik publish
-```
-"""
+if __name__ == "__main__":
+    asyncio.run(main())
+'''
 
 
 def _generate_gitignore() -> str:

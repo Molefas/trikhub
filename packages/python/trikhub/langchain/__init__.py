@@ -1,28 +1,42 @@
 """
-LangChain integration for TrikHub.
+TrikHub LangChain/LangGraph Adapter
 
-This module provides utilities for converting TrikHub tools to LangChain tools,
-making it easy to integrate triks with LangChain-based agents.
+Wraps LangGraph agents with TrikHub handoff routing.
+Mirrors packages/js/gateway/src/langchain/adapter.ts.
 """
 
-from __future__ import annotations
-
-from .adapter import (
-    LangChainAdapterOptions,
-    LangChainTriksResult,
+from trikhub.langchain.adapter import (
+    EnhancedAgent,
+    EnhancedResponse,
+    EnhanceOptions,
+    InvokableAgent,
     LoadLangChainTriksOptions,
-    create_langchain_tools,
+    LoadLangChainTriksResult,
+    enhance,
+    get_exposed_tools_for_agent,
+    get_handoff_tools_for_agent,
     load_langchain_triks,
-    parse_tool_name,
 )
-from .schema_converter import json_schema_to_pydantic
+from trikhub.langchain.schema_converter import (
+    json_schema_to_field,
+    json_schema_to_pydantic,
+)
 
 __all__ = [
-    "LangChainAdapterOptions",
-    "LangChainTriksResult",
-    "LoadLangChainTriksOptions",
-    "create_langchain_tools",
+    # Main API
+    "enhance",
+    "EnhancedAgent",
+    "EnhancedResponse",
+    "EnhanceOptions",
+    "InvokableAgent",
+    # Convenience loader
     "load_langchain_triks",
-    "parse_tool_name",
+    "LoadLangChainTriksOptions",
+    "LoadLangChainTriksResult",
+    # Tool helpers
+    "get_handoff_tools_for_agent",
+    "get_exposed_tools_for_agent",
+    # Schema conversion
     "json_schema_to_pydantic",
+    "json_schema_to_field",
 ]
