@@ -13,6 +13,7 @@ import { input, select, confirm } from '@inquirer/prompts';
 import { TrikCategory } from '../types.js';
 import { loadDefaults, saveDefaults } from '../lib/storage.js';
 import { generateTypescriptProject } from '../templates/typescript.js';
+import { generatePythonProject } from '../templates/python.js';
 import type { InitConfig } from '../templates/typescript.js';
 
 type Language = 'ts' | 'py';
@@ -227,15 +228,10 @@ export async function initCommand(languageArg: string): Promise<void> {
       toolNames,
     };
 
-    // Only TypeScript is supported for now
-    if (language === 'py') {
-      spinner.stop();
-      console.log(chalk.yellow('\n  Python trik init is not yet supported. Use TypeScript for now.\n'));
-      return;
-    }
-
     // Generate project files
-    const files = generateTypescriptProject(config);
+    const files = language === 'ts'
+      ? generateTypescriptProject(config)
+      : generatePythonProject(config);
 
     // Create target directory and write all files
     await mkdir(targetDir, { recursive: true });
@@ -249,22 +245,24 @@ export async function initCommand(languageArg: string): Promise<void> {
 
     spinner.succeed('Trik created');
 
-    // Install dependencies
-    const { execSync } = await import('node:child_process');
+    // Install dependencies (TypeScript only — Python uses pip)
     let packageManager = 'npm';
-    try {
-      execSync('pnpm --version', { stdio: 'ignore' });
-      packageManager = 'pnpm';
-    } catch {
-      // pnpm not available, use npm
-    }
+    if (language === 'ts') {
+      const { execSync } = await import('node:child_process');
+      try {
+        execSync('pnpm --version', { stdio: 'ignore' });
+        packageManager = 'pnpm';
+      } catch {
+        // pnpm not available, use npm
+      }
 
-    spinner.start(`Installing dependencies with ${packageManager}...`);
-    try {
-      execSync(`${packageManager} install`, { cwd: targetDir, stdio: 'ignore' });
-      spinner.succeed('Dependencies installed');
-    } catch {
-      spinner.warn(`Failed to install dependencies. Run \`${packageManager} install\` manually.`);
+      spinner.start(`Installing dependencies with ${packageManager}...`);
+      try {
+        execSync(`${packageManager} install`, { cwd: targetDir, stdio: 'ignore' });
+        spinner.succeed('Dependencies installed');
+      } catch {
+        spinner.warn(`Failed to install dependencies. Run \`${packageManager} install\` manually.`);
+      }
     }
 
     // Save author defaults for reuse
@@ -276,14 +274,27 @@ export async function initCommand(languageArg: string): Promise<void> {
     console.log();
     console.log(chalk.dim('  Next steps:'));
     console.log(`    cd ${name}`);
-    if (agentMode === 'tool') {
-      console.log('    Edit src/agent.ts to implement your tool handlers');
+
+    if (language === 'py') {
+      const pkg = name.replace(/-/g, '_');
+      console.log('    python -m venv .venv && source .venv/bin/activate');
+      console.log('    pip install -e .');
+      if (agentMode === 'tool') {
+        console.log(`    Edit src/${pkg}/main.py to implement your tool handlers`);
+      } else {
+        console.log(`    Edit src/${pkg}/main.py to implement your agent logic`);
+        console.log(`    Customize src/${pkg}/prompts/system.md`);
+      }
     } else {
-      console.log('    Edit src/agent.ts to implement your agent logic');
-      console.log('    Add tools in src/tools/');
-      console.log('    Customize src/prompts/system.md');
+      if (agentMode === 'tool') {
+        console.log('    Edit src/agent.ts to implement your tool handlers');
+      } else {
+        console.log('    Edit src/agent.ts to implement your agent logic');
+        console.log('    Add tools in src/tools/');
+        console.log('    Customize src/prompts/system.md');
+      }
+      console.log(`    ${packageManager === 'pnpm' ? 'pnpm' : 'npm run'} build`);
     }
-    console.log(`    ${packageManager === 'pnpm' ? 'pnpm' : 'npm run'} build`);
     console.log('    trik lint .');
     console.log('    trik publish');
     console.log();
