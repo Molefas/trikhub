@@ -175,13 +175,6 @@ export async function uninstallCommand(trikInput: string): Promise<void> {
       packageName = trikInput.substring(0, atIndex);
     }
 
-    // Check if package.json exists
-    const packageJsonPath = join(baseDir, 'package.json');
-    if (!existsSync(packageJsonPath)) {
-      console.log(chalk.red('No package.json found in current directory.'));
-      process.exit(1);
-    }
-
     // Remove from config first and get the runtime
     spinner.start(`Removing ${chalk.cyan(packageName)} from config...`);
     const { wasInConfig, runtime } = await removeTrikFromConfig(packageName, baseDir);

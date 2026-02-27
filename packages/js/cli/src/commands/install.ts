@@ -626,8 +626,10 @@ export async function installCommand(
       }
 
       const isCrossLanguage = projectType !== trikRuntime;
+      // Python projects always use .trikhub/triks/ download (no npm)
+      const useTrikhubDownload = isCrossLanguage || projectType === 'python';
 
-      if (isCrossLanguage) {
+      if (useTrikhubDownload) {
         // Cross-language: download to .trikhub/triks/
         spinner.info(`Cross-language trik: ${chalk.cyan(trikRuntime)} trik in ${chalk.cyan(projectType)} project`);
         spinner.start(`Installing ${chalk.cyan(packageName)} to .trikhub/triks/...`);
