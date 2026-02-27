@@ -4,6 +4,7 @@ import { constants } from 'node:fs';
 import ts from 'typescript';
 import {
   type TrikManifest,
+  type ValidationResult,
   validateManifest,
 } from '@trikhub/manifest';
 import {
@@ -133,18 +134,22 @@ export class TrikLinter {
   }
 
   /**
-   * Load and parse the manifest from a specific path
+   * Load and parse the manifest from a specific path.
+   * Returns both the manifest (null if invalid) and the full validation result.
    */
-  private async loadManifestFromPath(manifestPath: string): Promise<TrikManifest> {
+  private async loadManifestFromPath(manifestPath: string): Promise<{
+    manifest: TrikManifest | null;
+    validation: ValidationResult;
+  }> {
     const content = await readFile(manifestPath, 'utf-8');
     const data = JSON.parse(content);
 
     const validation = validateManifest(data);
     if (!validation.valid) {
-      throw new Error(`Invalid manifest: ${validation.errors?.join(', ')}`);
+      return { manifest: null, validation };
     }
 
-    return data as TrikManifest;
+    return { manifest: data as TrikManifest, validation };
   }
 
   /**
@@ -207,8 +212,23 @@ export class TrikLinter {
 
     // 1. Load and validate manifest
     let manifest: TrikManifest;
+    let validation: ValidationResult;
     try {
-      manifest = await this.loadManifestFromPath(manifestPath);
+      const loaded = await this.loadManifestFromPath(manifestPath);
+      validation = loaded.validation;
+      if (!loaded.manifest) {
+        // Surface each validation error individually with categorized rule names
+        for (const err of validation.errors ?? []) {
+          results.push({
+            rule: this.classifySemanticIssue(err),
+            severity: 'error',
+            message: err,
+            file: manifestPath,
+          });
+        }
+        return results;
+      }
+      manifest = loaded.manifest;
     } catch (error) {
       results.push({
         rule: 'valid-manifest',
@@ -220,7 +240,7 @@ export class TrikLinter {
     }
 
     // 2. Apply manifest-specific rules (privilege separation)
-    results.push(...this.lintManifest(manifest, manifestPath));
+    results.push(...this.lintManifest(manifest, manifestPath, validation));
 
     // 3. Check manifest completeness
     if (!this.shouldSkipRule('manifest-completeness')) {
@@ -274,8 +294,22 @@ export class TrikLinter {
 
     // 1. Load and validate manifest
     let manifest: TrikManifest;
+    let validation: ValidationResult;
     try {
-      manifest = await this.loadManifestFromPath(manifestPath);
+      const loaded = await this.loadManifestFromPath(manifestPath);
+      validation = loaded.validation;
+      if (!loaded.manifest) {
+        for (const err of validation.errors ?? []) {
+          results.push({
+            rule: 'valid-manifest',
+            severity: 'error',
+            message: err,
+            file: manifestPath,
+          });
+        }
+        return results;
+      }
+      manifest = loaded.manifest;
     } catch (error) {
       results.push({
         rule: 'valid-manifest',
@@ -287,7 +321,7 @@ export class TrikLinter {
     }
 
     // 2. Apply manifest-specific rules (privilege separation)
-    results.push(...this.lintManifest(manifest, manifestPath));
+    results.push(...this.lintManifest(manifest, manifestPath, validation));
 
     // 3. Check manifest completeness
     if (!this.shouldSkipRule('manifest-completeness')) {
@@ -377,11 +411,72 @@ export class TrikLinter {
   }
 
   /**
-   * Lint manifest with privilege separation rules
+   * Classify a semantic validation message into a lint rule name.
+   * Maps TDPS-related warnings/errors to specific rule categories.
    */
-  private lintManifest(_manifest: TrikManifest, _manifestPath: string): LintResult[] {
-    // Stub — manifest-level quality rules (beyond schema validation) to be added here
-    return [];
+  private classifySemanticIssue(message: string): string {
+    const lower = message.toLowerCase();
+
+    // outputSchema agent-safe violations
+    if (lower.includes('not agent-safe') || (lower.includes('unconstrained string') && lower.includes('outputschema'))) {
+      return 'tdps-agent-safe-output';
+    }
+
+    // logSchema constraint violations
+    if (lower.includes('logschema') && lower.includes('unconstrained')) {
+      return 'tdps-constrained-log';
+    }
+
+    // logTemplate placeholder issues
+    if (lower.includes('logtemplate') && lower.includes('placeholder')) {
+      return 'tdps-log-template';
+    }
+
+    // outputTemplate placeholder issues
+    if (lower.includes('outputtemplate') && lower.includes('placeholder')) {
+      return 'tdps-output-template';
+    }
+
+    // Default catch-all for other semantic issues
+    return 'manifest-semantic';
+  }
+
+  /**
+   * Lint manifest with privilege separation rules.
+   * Maps validator warnings and errors to categorized lint results.
+   */
+  private lintManifest(
+    _manifest: TrikManifest,
+    manifestPath: string,
+    validation: ValidationResult,
+  ): LintResult[] {
+    const results: LintResult[] = [];
+
+    // Surface validation errors as categorized lint results
+    if (validation.errors) {
+      for (const error of validation.errors) {
+        results.push({
+          rule: this.classifySemanticIssue(error),
+          severity: 'error',
+          message: error,
+          file: manifestPath,
+        });
+      }
+    }
+
+    // Surface validation warnings as categorized lint results
+    if (validation.warnings) {
+      for (const warning of validation.warnings) {
+        results.push({
+          rule: this.classifySemanticIssue(warning),
+          severity: 'warning',
+          message: warning,
+          file: manifestPath,
+        });
+      }
+    }
+
+    return results;
   }
 
   /**

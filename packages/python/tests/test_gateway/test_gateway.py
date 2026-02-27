@@ -580,3 +580,234 @@ async def test_get_manifest():
         assert m.id == "test-trik"
 
         assert gw.get_manifest("nonexistent") is None
+
+
+# ============================================================================
+# Tests: TDPS Log Value Validation (Gap 1)
+# ============================================================================
+
+
+class TestValidateLogValue:
+    """Tests for TrikGateway._validate_log_value — TDPS enforcement on log values."""
+
+    def test_valid_integer(self):
+        schema = JSONSchema(type="integer")
+        assert TrikGateway._validate_log_value(42, schema) == "42"
+
+    def test_reject_non_integer(self):
+        schema = JSONSchema(type="integer")
+        assert TrikGateway._validate_log_value("hello", schema) is None
+        assert TrikGateway._validate_log_value(3.14, schema) is None
+
+    def test_reject_bool_as_integer(self):
+        schema = JSONSchema(type="integer")
+        assert TrikGateway._validate_log_value(True, schema) is None
+
+    def test_valid_number(self):
+        schema = JSONSchema(type="number")
+        assert TrikGateway._validate_log_value(3.14, schema) == "3.14"
+        assert TrikGateway._validate_log_value(42, schema) == "42"
+
+    def test_reject_non_number(self):
+        schema = JSONSchema(type="number")
+        assert TrikGateway._validate_log_value("hello", schema) is None
+
+    def test_valid_boolean(self):
+        schema = JSONSchema(type="boolean")
+        assert TrikGateway._validate_log_value(True, schema) == "True"
+        assert TrikGateway._validate_log_value(False, schema) == "False"
+
+    def test_reject_non_boolean(self):
+        schema = JSONSchema(type="boolean")
+        assert TrikGateway._validate_log_value("true", schema) is None
+
+    def test_valid_enum(self):
+        schema = JSONSchema(enum=["success", "failure"])
+        assert TrikGateway._validate_log_value("success", schema) == "success"
+
+    def test_reject_non_enum(self):
+        schema = JSONSchema(enum=["success", "failure"])
+        assert TrikGateway._validate_log_value("unknown", schema) is None
+
+    def test_string_truncation_at_max_length(self):
+        schema = JSONSchema(type="string", maxLength=100)
+        result = TrikGateway._validate_log_value("a" * 500, schema)
+        assert result == "a" * 100
+
+    def test_string_within_max_length(self):
+        schema = JSONSchema(type="string", maxLength=100)
+        assert TrikGateway._validate_log_value("short", schema) == "short"
+
+    def test_string_matching_pattern(self):
+        schema = JSONSchema(type="string", pattern=r"^[a-z0-9]+$")
+        assert TrikGateway._validate_log_value("abc123", schema) == "abc123"
+
+    def test_string_reject_pattern_mismatch(self):
+        schema = JSONSchema(type="string", pattern=r"^[a-z0-9]+$")
+        assert TrikGateway._validate_log_value("ABC!!!", schema) is None
+
+    def test_string_with_format(self):
+        schema = JSONSchema(type="string", format="date")
+        assert TrikGateway._validate_log_value("2025-01-01", schema) == "2025-01-01"
+
+    def test_reject_unconstrained_string(self):
+        schema = JSONSchema(type="string")
+        assert TrikGateway._validate_log_value("anything", schema) is None
+
+    def test_reject_unknown_types(self):
+        schema = JSONSchema(type="object")
+        assert TrikGateway._validate_log_value({}, schema) is None
+
+    def test_null_value(self):
+        schema = JSONSchema(type="string", maxLength=100)
+        assert TrikGateway._validate_log_value(None, schema) is None
+
+    def test_string_value_for_integer(self):
+        schema = JSONSchema(type="integer")
+        assert TrikGateway._validate_log_value("42", schema) is None
+
+
+class TestBuildToolLogSummary:
+    """Tests for TrikGateway._build_tool_log_summary — TDPS-enforced log building."""
+
+    def test_generic_message_no_template(self):
+        call = ToolCallRecord(tool="search", input={}, output={})
+        decl = ToolDeclaration(description="Search")
+        assert TrikGateway._build_tool_log_summary(call, decl) == "Called search"
+
+    def test_generic_message_no_decl(self):
+        call = ToolCallRecord(tool="search", input={}, output={})
+        assert TrikGateway._build_tool_log_summary(call, None) == "Called search"
+
+    def test_fills_validated_placeholders(self):
+        call = ToolCallRecord(
+            tool="search",
+            input={},
+            output={"query": "test", "count": 5},
+        )
+        decl = ToolDeclaration(
+            description="Search",
+            logTemplate='Searched for "{{query}}" — {{count}} results',
+            logSchema={
+                "query": JSONSchema(type="string", maxLength=200),
+                "count": JSONSchema(type="integer"),
+            },
+        )
+        result = TrikGateway._build_tool_log_summary(call, decl)
+        assert result == 'Searched for "test" — 5 results'
+
+    def test_literal_placeholder_for_missing_schema_field(self):
+        call = ToolCallRecord(
+            tool="search", input={}, output={"query": "test"}
+        )
+        decl = ToolDeclaration(
+            description="Search",
+            logTemplate='Searched for "{{query}}" — {{count}} results',
+            logSchema={
+                "query": JSONSchema(type="string", maxLength=200),
+            },
+        )
+        result = TrikGateway._build_tool_log_summary(call, decl)
+        assert result == 'Searched for "test" — {{count}} results'
+
+    def test_literal_placeholder_for_non_conforming_values(self):
+        call = ToolCallRecord(
+            tool="search",
+            input={},
+            output={"status": "INJECTION_ATTEMPT"},
+        )
+        decl = ToolDeclaration(
+            description="Search",
+            logTemplate="Status: {{status}}",
+            logSchema={
+                "status": JSONSchema(type="string", enum=["success", "failure"]),
+            },
+        )
+        result = TrikGateway._build_tool_log_summary(call, decl)
+        assert result == "Status: {{status}}"
+
+    def test_truncates_long_strings(self):
+        long_value = "x" * 500
+        call = ToolCallRecord(
+            tool="log", input={}, output={"msg": long_value}
+        )
+        decl = ToolDeclaration(
+            description="Log",
+            logTemplate="Message: {{msg}}",
+            logSchema={
+                "msg": JSONSchema(type="string", maxLength=100),
+            },
+        )
+        result = TrikGateway._build_tool_log_summary(call, decl)
+        assert result == "Message: " + "x" * 100
+
+    def test_literal_placeholder_when_no_log_schema(self):
+        call = ToolCallRecord(
+            tool="search", input={}, output={"query": "test"}
+        )
+        decl = ToolDeclaration(
+            description="Search",
+            logTemplate='Searched for "{{query}}"',
+        )
+        result = TrikGateway._build_tool_log_summary(call, decl)
+        assert result == 'Searched for "{{query}}"'
+
+
+# ============================================================================
+# Tests: Error Message Sanitization (Gap 2)
+# ============================================================================
+
+
+class TestSanitizeErrorMessage:
+    """Tests for TrikGateway._sanitize_error_message."""
+
+    def test_short_clean_message(self):
+        assert TrikGateway._sanitize_error_message("Something failed") == "Something failed"
+
+    def test_truncates_long_messages(self):
+        long_msg = "x" * 500
+        result = TrikGateway._sanitize_error_message(long_msg)
+        assert len(result) == 203  # 200 + "..."
+        assert result.endswith("...")
+
+    def test_custom_max_length(self):
+        result = TrikGateway._sanitize_error_message("abcdefghij", max_length=5)
+        assert result == "abcde..."
+
+    def test_strips_control_characters(self):
+        msg = "hello\x00world\x01\nline2\ttab"
+        result = TrikGateway._sanitize_error_message(msg)
+        assert result == "helloworld\nline2\ttab"
+
+
+class TestErrorAutoTransferBackSanitization:
+    """Tests that error auto-transfer-back sanitizes agent-facing log entries."""
+
+    @pytest.mark.asyncio
+    async def test_error_summary_does_not_contain_raw_error(self):
+        """result.summary must NOT contain raw trik error text (TDPS)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trik_dir = _create_error_trik(tmpdir, "error-trik")
+            gw = _make_gateway()
+            await gw.initialize()
+            await gw.load_trik(trik_dir)
+
+            result = await gw.start_handoff("error-trik", "trigger error", "s1")
+            assert isinstance(result, RouteTransferBack)
+            # The summary (injected into main agent context) should NOT contain
+            # the raw error message "Intentional test error"
+            assert "Intentional test error" not in result.summary
+
+    @pytest.mark.asyncio
+    async def test_error_user_message_contains_sanitized_error(self):
+        """result.message (shown to user) should contain a sanitized error."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trik_dir = _create_error_trik(tmpdir, "error-trik")
+            gw = _make_gateway()
+            await gw.initialize()
+            await gw.load_trik(trik_dir)
+
+            result = await gw.start_handoff("error-trik", "trigger error", "s1")
+            assert isinstance(result, RouteTransferBack)
+            # User-facing message should contain the error info
+            assert "error" in result.message.lower()

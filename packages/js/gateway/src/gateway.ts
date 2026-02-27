@@ -450,9 +450,14 @@ export class TrikGateway {
     try {
       response = await loaded.agent.processMessage!(message, trikContext);
     } catch (error) {
-      // Trik threw an error — transfer back with error summary
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-      return this.autoTransferBack(`Trik "${loaded.manifest.name}" encountered an error: ${errorMsg}`);
+      // Trik threw an error — transfer back with sanitized error
+      const rawMsg = error instanceof Error ? error.message : 'Unknown error';
+      const sanitized = this.sanitizeErrorMessage(rawMsg);
+      // User-facing: include sanitized error for debugging
+      const userMessage = `Trik "${loaded.manifest.name}" encountered an error: ${sanitized}`;
+      // Agent-facing log: generic message, no trik-controlled text
+      const agentLog = `Trik "${loaded.manifest.name}" encountered an error and transferred back`;
+      return this.autoTransferBack(userMessage, agentLog);
     }
 
     // Process tool calls into log entries
@@ -524,17 +529,28 @@ export class TrikGateway {
   }
 
   /**
+   * Sanitize an error message for safe display.
+   * Strips control characters (keeps newlines/tabs) and truncates.
+   */
+  private sanitizeErrorMessage(msg: string, maxLength = 200): string {
+    // Strip control characters except newline (\n) and tab (\t)
+    const cleaned = msg.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    if (cleaned.length <= maxLength) return cleaned;
+    return cleaned.slice(0, maxLength) + '...';
+  }
+
+  /**
    * Auto transfer-back due to max turns or error.
    */
-  private autoTransferBack(reason: string): RouteTransferBack {
+  private autoTransferBack(reason: string, logSummary?: string): RouteTransferBack {
     const handoff = this.activeHandoff!;
     const loaded = this.triks.get(handoff.trikId)!;
 
-    // Log handoff end with reason
+    // Log handoff end — use logSummary for the agent-facing log if provided
     this.sessionStorage.appendLog(handoff.sessionId, {
       timestamp: Date.now(),
       type: 'handoff_end',
-      summary: reason,
+      summary: logSummary ?? reason,
     });
 
     const summary = this.buildSessionSummary(handoff.sessionId, loaded.manifest);
@@ -578,8 +594,71 @@ export class TrikGateway {
   }
 
   /**
+   * Validate a single log value against its logSchema field definition.
+   * Returns the validated string representation, or null if non-conforming.
+   *
+   * TDPS enforcement: log values flow into the main agent's context via session
+   * summaries, so every value must be validated against declared constraints.
+   */
+  private validateLogValue(value: unknown, fieldSchema: JSONSchema): string | null {
+    if (value === undefined || value === null) return null;
+
+    const type = fieldSchema.type;
+
+    // Enum — check membership (works for any type)
+    if (fieldSchema.enum) {
+      return fieldSchema.enum.includes(value) ? String(value) : null;
+    }
+
+    // Integer
+    if (type === 'integer') {
+      return typeof value === 'number' && Number.isInteger(value) ? String(value) : null;
+    }
+
+    // Number
+    if (type === 'number') {
+      return typeof value === 'number' ? String(value) : null;
+    }
+
+    // Boolean
+    if (type === 'boolean') {
+      return typeof value === 'boolean' ? String(value) : null;
+    }
+
+    // String with constraints
+    if (type === 'string') {
+      if (typeof value !== 'string') return null;
+
+      // Pattern — reject if no match
+      if (fieldSchema.pattern) {
+        const re = new RegExp(fieldSchema.pattern);
+        if (!re.test(value)) return null;
+      }
+
+      // maxLength — truncate
+      if (fieldSchema.maxLength && value.length > fieldSchema.maxLength) {
+        return value.slice(0, fieldSchema.maxLength);
+      }
+
+      // format — allow through (format is a constraint marker, validated at manifest level)
+      if (fieldSchema.format || fieldSchema.pattern || fieldSchema.maxLength) {
+        return value;
+      }
+
+      // Unconstrained string — reject
+      return null;
+    }
+
+    // Unknown type / no constraints — reject
+    return null;
+  }
+
+  /**
    * Build a log summary string for a single tool call.
    * Uses logTemplate if available, otherwise falls back to generic format.
+   *
+   * TDPS enforcement: validates each placeholder value against logSchema before
+   * filling. Non-conforming values are replaced with the literal placeholder.
    */
   private buildToolLogSummary(call: ToolCallRecord, toolDecl?: ToolDeclaration): string {
     if (!toolDecl?.logTemplate) {
@@ -587,14 +666,18 @@ export class TrikGateway {
     }
 
     const template = toolDecl.logTemplate;
+    const logSchema = toolDecl.logSchema;
 
-    // Fill placeholders with output data
+    // Fill placeholders with validated output data
     return template.replace(/\{\{(\w+)\}\}/g, (_match, field: string) => {
-      const value = call.output[field];
-      if (value === undefined || value === null) {
+      // No logSchema or field not in logSchema — safe fallback
+      if (!logSchema || !logSchema[field]) {
         return `{{${field}}}`;
       }
-      return String(value);
+
+      const value = call.output[field];
+      const validated = this.validateLogValue(value, logSchema[field]);
+      return validated !== null ? validated : `{{${field}}}`;
     });
   }
 
