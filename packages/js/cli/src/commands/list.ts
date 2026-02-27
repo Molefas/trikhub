@@ -11,6 +11,7 @@ import { join } from 'node:path';
 
 interface ListOptions {
   json?: boolean;
+  runtime?: string;
 }
 
 interface NpmTriksConfig {
@@ -181,9 +182,27 @@ export async function listCommand(options: ListOptions): Promise<void> {
   const baseDir = process.cwd();
   const config = await readNpmConfig(baseDir);
 
+  let triksToShow = config.triks;
+  if (options.runtime) {
+    const configPath = getNpmConfigPath(baseDir);
+    if (existsSync(configPath)) {
+      try {
+        const content = await readFile(configPath, 'utf-8');
+        const fullConfig = JSON.parse(content);
+        const runtimes = fullConfig.runtimes ?? {};
+        triksToShow = config.triks.filter((name: string) => {
+          const rt = runtimes[name] ?? 'node';
+          return rt === options.runtime;
+        });
+      } catch {
+        // If we can't read runtimes, show all
+      }
+    }
+  }
+
   if (options.json) {
     const triks = await Promise.all(
-      config.triks.map((name) => getTrikInfo(name, baseDir, config))
+      triksToShow.map((name) => getTrikInfo(name, baseDir, config))
     );
     console.log(JSON.stringify({
       configPath: getNpmConfigPath(baseDir),
@@ -192,16 +211,16 @@ export async function listCommand(options: ListOptions): Promise<void> {
     return;
   }
 
-  if (config.triks.length === 0) {
+  if (triksToShow.length === 0) {
     console.log(chalk.yellow('No triks installed.'));
     console.log(chalk.dim('\nUse `trik install @scope/name` to install a trik'));
     console.log(chalk.dim('Use `trik sync` to discover triks in node_modules'));
     return;
   }
 
-  console.log(chalk.bold(`\nInstalled triks (${config.triks.length}):\n`));
+  console.log(chalk.bold(`\nInstalled triks (${triksToShow.length}):\n`));
 
-  for (const trikName of config.triks) {
+  for (const trikName of triksToShow) {
     const info = await getTrikInfo(trikName, baseDir, config);
 
     const status = info.exists
