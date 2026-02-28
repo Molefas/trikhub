@@ -1,8 +1,9 @@
-import { TrikLinter, type LintResult, type LinterConfig } from '@trikhub/linter';
+import { TrikLinter, type LintResult, type LinterConfig, type ScanResult } from '@trikhub/linter';
 
 export interface ValidationResult {
   valid: boolean;
   results: LintResult[];
+  scan: ScanResult;
   summary: string;
 }
 
@@ -14,12 +15,13 @@ export class TrikValidator {
   }
 
   async validate(trikPath: string): Promise<ValidationResult> {
-    const results = await this.linter.lint(trikPath);
+    const { results, scan } = await this.linter.lint(trikPath);
     const hasErrors = this.linter.hasErrors(results);
 
     return {
       valid: !hasErrors,
       results,
+      scan,
       summary: this.linter.formatResults(results),
     };
   }

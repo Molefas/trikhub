@@ -51,7 +51,6 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@trikhub/manifest": "workspace:*",
-    "typescript": "^5.5.0"
+    "@trikhub/manifest": "workspace:*"
   }
 }

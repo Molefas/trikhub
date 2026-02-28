@@ -1,18 +1,29 @@
 import { readFile, readdir, access } from 'node:fs/promises';
-import { join, extname } from 'node:path';
+import { join } from 'node:path';
 import { constants } from 'node:fs';
-import ts from 'typescript';
 import {
   type TrikManifest,
   type ValidationResult,
   validateManifest,
 } from '@trikhub/manifest';
-import {
-  type LintResult,
-  checkForbiddenImports,
-  checkDynamicCodeExecution,
-  checkProcessEnvAccess,
-} from './rules.js';
+import { type ScanResult, scanCapabilities } from './scanner.js';
+
+/**
+ * Lint result severity
+ */
+export type LintSeverity = 'error' | 'warning' | 'info';
+
+/**
+ * A single lint result
+ */
+export interface LintResult {
+  rule: string;
+  severity: LintSeverity;
+  message: string;
+  file?: string;
+  line?: number;
+  column?: number;
+}
 
 type PackageType = 'node' | 'python';
 
@@ -103,8 +114,6 @@ async function findManifestPath(repoDir: string): Promise<ManifestLocation | nul
  * Linter configuration
  */
 export interface LinterConfig {
-  /** Additional forbidden imports */
-  forbiddenImports?: string[];
   /** Skip certain rules */
   skipRules?: string[];
   /** Treat warnings as errors */
@@ -127,13 +136,6 @@ export class TrikLinter {
   }
 
   /**
-   * Parse a TypeScript file into a source file
-   */
-  private parseTypeScript(filePath: string, content: string): ts.SourceFile {
-    return ts.createSourceFile(filePath, content, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS);
-  }
-
-  /**
    * Load and parse the manifest from a specific path.
    * Returns both the manifest (null if invalid) and the full validation result.
    */
@@ -153,30 +155,6 @@ export class TrikLinter {
   }
 
   /**
-   * Find all TypeScript files in the trik directory
-   */
-  private async findSourceFiles(trikPath: string): Promise<string[]> {
-    const tsFiles: string[] = [];
-
-    const scanDir = async (dir: string) => {
-      const entries = await readdir(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isDirectory() && entry.name === 'src') {
-          await scanDir(join(dir, entry.name));
-        } else if (entry.isFile() && (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx'))) {
-          // Skip test files and declaration files
-          if (!entry.name.includes('.test.') && !entry.name.includes('.spec.') && !entry.name.endsWith('.d.ts')) {
-            tsFiles.push(join(dir, entry.name));
-          }
-        }
-      }
-    };
-
-    await scanDir(trikPath);
-    return tsFiles;
-  }
-
-  /**
    * Check if a rule should be skipped
    */
   private shouldSkipRule(ruleName: string): boolean {
@@ -190,8 +168,7 @@ export class TrikLinter {
    * - Manifest structure and required fields
    *
    * This does NOT validate:
-   * - Source code (forbidden imports, eval, etc.)
-   * - Entry point existence as TypeScript
+   * - Source code capabilities (handled by scanCapabilities separately)
    */
   async lintManifestOnly(trikPath: string): Promise<LintResult[]> {
     const results: LintResult[] = [];
@@ -273,9 +250,13 @@ export class TrikLinter {
   }
 
   /**
-   * Lint a trik
+   * Lint a trik — validates manifest and scans source capabilities.
+   *
+   * Returns manifest validation results and a capability scan result.
+   * The scan is informational (security tier A-D) and never blocks.
+   * Only manifest TDPS violations produce errors.
    */
-  async lint(trikPath: string): Promise<LintResult[]> {
+  async lint(trikPath: string): Promise<{ results: LintResult[]; scan: ScanResult }> {
     const results: LintResult[] = [];
 
     // Find manifest (supports both Node.js and Python package structures)
@@ -287,10 +268,12 @@ export class TrikLinter {
         message: 'No manifest.json found. For Node.js triks, place it at root. For Python triks, place it inside your package directory.',
         file: trikPath,
       });
-      return results;
+      // Return empty scan when no manifest found
+      const scan = await scanCapabilities(trikPath);
+      return { results, scan };
     }
 
-    const { manifestPath, manifestDir, packageType } = location;
+    const { manifestPath, manifestDir } = location;
 
     // 1. Load and validate manifest
     let manifest: TrikManifest;
@@ -301,13 +284,14 @@ export class TrikLinter {
       if (!loaded.manifest) {
         for (const err of validation.errors ?? []) {
           results.push({
-            rule: 'valid-manifest',
+            rule: this.classifySemanticIssue(err),
             severity: 'error',
             message: err,
             file: manifestPath,
           });
         }
-        return results;
+        const scan = await scanCapabilities(trikPath);
+        return { results, scan };
       }
       manifest = loaded.manifest;
     } catch (error) {
@@ -317,7 +301,8 @@ export class TrikLinter {
         message: error instanceof Error ? error.message : 'Failed to load manifest',
         file: manifestPath,
       });
-      return results;
+      const scan = await scanCapabilities(trikPath);
+      return { results, scan };
     }
 
     // 2. Apply manifest-specific rules (privilege separation)
@@ -328,75 +313,19 @@ export class TrikLinter {
       results.push(...this.checkManifestCompleteness(manifest, manifestDir));
     }
 
-    // 4. For Python packages, skip TypeScript source analysis
-    if (packageType === 'python') {
-      // Check entry point exists
-      const entryPath = join(manifestDir, manifest.entry.module);
-      if (!(await fileExists(entryPath))) {
-        results.push({
-          rule: 'entry-point-exists',
-          severity: 'error',
-          message: `Entry point "${manifest.entry.module}" not found`,
-          file: manifestDir,
-        });
-      }
-
-      // Apply warningsAsErrors if configured
-      if (this.config.warningsAsErrors) {
-        for (const result of results) {
-          if (result.severity === 'warning') {
-            result.severity = 'error';
-          }
-        }
-      }
-
-      return results;
-    }
-
-    // 5. Find and analyze TypeScript source files (Node.js packages only)
-    const sourceFiles = await this.findSourceFiles(trikPath);
-
-    if (sourceFiles.length === 0) {
-      results.push({
-        rule: 'has-source-files',
-        severity: 'error',
-        message: 'No TypeScript source files found in trik directory',
-        file: trikPath,
-      });
-      return results;
-    }
-
-    // 6. Check entry point exists
-    const entryPath = join(trikPath, manifest.entry.module.replace('.js', '.ts'));
-    if (!sourceFiles.some((f) => f.endsWith(entryPath.split('/').pop()!.replace('.js', '.ts')))) {
+    // 4. Check entry point exists (warning, not error)
+    const entryPath = join(manifestDir, manifest.entry.module);
+    if (!(await fileExists(entryPath))) {
       results.push({
         rule: 'entry-point-exists',
         severity: 'warning',
-        message: `Entry point "${manifest.entry.module}" not found as TypeScript source`,
-        file: trikPath,
+        message: `Entry point "${manifest.entry.module}" not found`,
+        file: manifestDir,
       });
     }
 
-    // 7. Analyze each source file
-    for (const filePath of sourceFiles) {
-      const content = await readFile(filePath, 'utf-8');
-      const sourceFile = this.parseTypeScript(filePath, content);
-
-      // Check forbidden imports
-      if (!this.shouldSkipRule('no-forbidden-imports')) {
-        results.push(...checkForbiddenImports(sourceFile, this.config.forbiddenImports));
-      }
-
-      // Check dynamic code execution
-      if (!this.shouldSkipRule('no-dynamic-code')) {
-        results.push(...checkDynamicCodeExecution(sourceFile));
-      }
-
-      // Check process.env access
-      if (!this.shouldSkipRule('no-process-env')) {
-        results.push(...checkProcessEnvAccess(sourceFile));
-      }
-    }
+    // 5. Scan source capabilities
+    const scan = await scanCapabilities(trikPath);
 
     // Apply warningsAsErrors if configured
     if (this.config.warningsAsErrors) {
@@ -407,7 +336,7 @@ export class TrikLinter {
       }
     }
 
-    return results;
+    return { results, scan };
   }
 
   /**

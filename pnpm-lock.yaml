@@ -88,9 +88,6 @@ importers:
       '@trikhub/manifest':
         specifier: workspace:*
         version: link:../manifest
-      typescript:
-        specifier: ^5.5.0
-        version: 5.9.3
 
   packages/js/manifest:
     dependencies:

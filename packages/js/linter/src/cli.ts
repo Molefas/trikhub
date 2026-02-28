@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { resolve } from 'node:path';
 import { TrikLinter } from './linter.js';
+import { formatScanResult } from './scanner.js';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -18,13 +19,13 @@ Options:
   --help, -h             Show this help message
 
 Rules:
-  valid-manifest         Manifest must be valid JSON and match schema
-  manifest-completeness  Check for recommended manifest fields
-  has-source-files       Trik must have TypeScript source files
-  entry-point-exists     Entry point in manifest must exist
-  no-forbidden-imports   Block dangerous Node.js modules
-  no-dynamic-code        Block eval() and Function constructor
-  no-process-env         Warn on process.env access
+  valid-manifest            Manifest must be valid JSON and match schema
+  manifest-completeness     Check for recommended manifest fields
+  entry-point-exists        Entry point in manifest must exist
+  tdps-agent-safe-output    outputSchema must use agent-safe types only
+  tdps-constrained-log      logSchema must use constrained types
+  tdps-log-template         logTemplate placeholders must match logSchema
+  tdps-output-template      outputTemplate placeholders must match outputSchema
 `);
     process.exit(0);
   }
@@ -48,7 +49,14 @@ Rules:
   console.log(`Linting trik at: ${trikPath}\n`);
 
   try {
-    const results = await linter.lint(trikPath);
+    const { results, scan } = await linter.lint(trikPath);
+
+    // Show security tier first
+    console.log(formatScanResult(scan));
+    console.log('');
+
+    // Then manifest validation
+    console.log('Manifest validation:');
     console.log(linter.formatResults(results));
 
     if (linter.hasErrors(results)) {

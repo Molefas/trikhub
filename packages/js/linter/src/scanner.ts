@@ -1,0 +1,308 @@
+import { readFile, readdir } from 'node:fs/promises';
+import { join, relative } from 'node:path';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export type SecurityTier = 'A' | 'B' | 'C' | 'D';
+
+export type CapabilityCategory =
+  | 'filesystem'
+  | 'network'
+  | 'process'
+  | 'environment'
+  | 'crypto'
+  | 'dns'
+  | 'workers';
+
+export interface CapabilityMatch {
+  category: CapabilityCategory;
+  locations: { file: string; line: number }[];
+}
+
+export interface ScanResult {
+  tier: SecurityTier;
+  tierLabel: string;
+  capabilities: CapabilityMatch[];
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** Source file extensions to scan */
+const SOURCE_EXTENSIONS = new Set([
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.py',
+]);
+
+/** Directories to skip when walking the file tree */
+const EXCLUDED_DIRS = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  'build',
+  '__pycache__',
+  '.venv',
+  '.tox',
+  '.mypy_cache',
+  '.pytest_cache',
+  '.ruff_cache',
+]);
+
+// ---------------------------------------------------------------------------
+// Capability regex patterns (matched per-line)
+// ---------------------------------------------------------------------------
+
+const CAPABILITY_PATTERNS: Record<CapabilityCategory, RegExp[]> = {
+  filesystem: [
+    /\b(?:require|import)\s*\(?\s*['"](?:node:)?fs(?:\/promises)?['"]/,
+    /\bfrom\s+['"](?:node:)?fs(?:\/promises)?['"]/,
+    /\bimport\s+(?:pathlib|shutil)\b/,
+    /\bfrom\s+(?:pathlib|shutil)\s+import\b/,
+    /\bimport\s+os\.path\b/,
+    /\bfrom\s+os\.path\s+import\b/,
+    /\bfrom\s+os\s+import\s+path\b/,
+  ],
+
+  network: [
+    /\b(?:require|import)\s*\(?\s*['"](?:node:)?(?:http|https|net)['"]/,
+    /\bfrom\s+['"](?:node:)?(?:http|https|net)['"]/,
+    /\bfetch\s*\(/,
+    /\b(?:require|import)\s*\(?\s*['"]axios['"]/,
+    /\bfrom\s+['"]axios['"]/,
+    /\bimport\s+(?:requests|urllib|httpx|aiohttp)\b/,
+    /\bfrom\s+(?:requests|urllib|httpx|aiohttp)[\s.]/,
+  ],
+
+  process: [
+    /\b(?:require|import)\s*\(?\s*['"](?:node:)?child_process['"]/,
+    /\bfrom\s+['"](?:node:)?child_process['"]/,
+    /\beval\s*\(/,
+    /\bnew\s+Function\s*\(/,
+    /\bimport\s+subprocess\b/,
+    /\bfrom\s+subprocess\s+import\b/,
+    /\bos\.system\s*\(/,
+    /(?<!\.\s*)exec\s*\(/,
+  ],
+
+  environment: [
+    /\bprocess\.env\b/,
+    /\bos\.environ\b/,
+    /\b(?:require|import)\s*\(?\s*['"]dotenv['"]/,
+    /\bfrom\s+['"]dotenv['"]/,
+    /\bimport\s+dotenv\b/,
+    /\bfrom\s+dotenv\s+import\b/,
+  ],
+
+  crypto: [
+    /\b(?:require|import)\s*\(?\s*['"](?:node:)?(?:crypto|tls)['"]/,
+    /\bfrom\s+['"](?:node:)?(?:crypto|tls)['"]/,
+    /\bimport\s+(?:hashlib|ssl|cryptography)\b/,
+    /\bfrom\s+(?:hashlib|ssl|cryptography)[\s.]/,
+  ],
+
+  dns: [
+    /\b(?:require|import)\s*\(?\s*['"](?:node:)?(?:dns|dgram)['"]/,
+    /\bfrom\s+['"](?:node:)?(?:dns|dgram)['"]/,
+  ],
+
+  workers: [
+    /\b(?:require|import)\s*\(?\s*['"](?:node:)?(?:worker_threads|cluster)['"]/,
+    /\bfrom\s+['"](?:node:)?(?:worker_threads|cluster)['"]/,
+    /\bimport\s+(?:threading|multiprocessing)\b/,
+    /\bfrom\s+(?:threading|multiprocessing)\s+import\b/,
+  ],
+};
+
+// ---------------------------------------------------------------------------
+// Tier labels
+// ---------------------------------------------------------------------------
+
+const TIER_LABELS: Record<SecurityTier, string> = {
+  A: 'Sandboxed',
+  B: 'Network',
+  C: 'System',
+  D: 'Unrestricted',
+};
+
+// ---------------------------------------------------------------------------
+// Tier resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Determine the security tier from the set of detected capability categories.
+ *
+ * Tier logic:
+ *   A (Sandboxed)     — no capabilities detected
+ *   B (Network)       — only network and/or crypto detected
+ *   C (System)        — filesystem, environment, or dns detected
+ *   D (Unrestricted)  — process or workers detected
+ */
+function resolveTier(categories: Set<CapabilityCategory>): SecurityTier {
+  if (categories.size === 0) {
+    return 'A';
+  }
+
+  // D: process or workers present
+  if (categories.has('process') || categories.has('workers')) {
+    return 'D';
+  }
+
+  // C: filesystem, environment, or dns present
+  if (
+    categories.has('filesystem') ||
+    categories.has('environment') ||
+    categories.has('dns')
+  ) {
+    return 'C';
+  }
+
+  // If only network and/or crypto remain, tier is B
+  for (const cat of categories) {
+    if (cat !== 'network' && cat !== 'crypto') {
+      return 'C'; // safety fallback — should not be reached
+    }
+  }
+
+  return 'B';
+}
+
+// ---------------------------------------------------------------------------
+// File walking
+// ---------------------------------------------------------------------------
+
+/**
+ * Recursively collect source file paths under `dir`, skipping excluded dirs.
+ */
+async function walkSourceFiles(dir: string): Promise<string[]> {
+  const results: string[] = [];
+
+  async function walk(current: string): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(current, { withFileTypes: true });
+    } catch {
+      // Permission error or missing dir — skip silently
+      return;
+    }
+
+    for (const entry of entries) {
+      const fullPath = join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (!EXCLUDED_DIRS.has(entry.name) && !entry.name.startsWith('.')) {
+          await walk(fullPath);
+        }
+      } else if (entry.isFile()) {
+        const ext = fullPath.slice(fullPath.lastIndexOf('.'));
+        if (SOURCE_EXTENSIONS.has(ext)) {
+          results.push(fullPath);
+        }
+      }
+    }
+  }
+
+  await walk(dir);
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// Core scanner
+// ---------------------------------------------------------------------------
+
+/**
+ * Scan all source files under `trikPath` for capability usage.
+ *
+ * Walks `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, and `.py` files,
+ * matches regex patterns per line against capability categories, and returns
+ * the resolved security tier together with all capability matches.
+ */
+export async function scanCapabilities(trikPath: string): Promise<ScanResult> {
+  const files = await walkSourceFiles(trikPath);
+
+  // category → { file, line }[]
+  const matchMap = new Map<CapabilityCategory, { file: string; line: number }[]>();
+
+  for (const filePath of files) {
+    let content: string;
+    try {
+      content = await readFile(filePath, 'utf-8');
+    } catch {
+      continue; // unreadable file — skip
+    }
+
+    const lines = content.split('\n');
+    const relPath = relative(trikPath, filePath);
+
+    for (let i = 0; i < lines.length; i++) {
+      const lineText = lines[i];
+      for (const [category, patterns] of Object.entries(CAPABILITY_PATTERNS) as [
+        CapabilityCategory,
+        RegExp[],
+      ][]) {
+        for (const pattern of patterns) {
+          if (pattern.test(lineText)) {
+            let locations = matchMap.get(category);
+            if (!locations) {
+              locations = [];
+              matchMap.set(category, locations);
+            }
+            locations.push({ file: relPath, line: i + 1 });
+            // One match per category per line is enough — break out of patterns
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  const capabilities: CapabilityMatch[] = [];
+  for (const [category, locations] of matchMap) {
+    capabilities.push({ category, locations });
+  }
+
+  const detectedCategories = new Set(matchMap.keys());
+  const tier = resolveTier(detectedCategories);
+
+  return {
+    tier,
+    tierLabel: TIER_LABELS[tier],
+    capabilities,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Formatting
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a `ScanResult` for human-readable console output.
+ */
+export function formatScanResult(result: ScanResult): string {
+  const lines: string[] = [];
+
+  lines.push(`Security Tier: ${result.tier} (${result.tierLabel})`);
+
+  if (result.capabilities.length === 0) {
+    lines.push('No capabilities detected.');
+    return lines.join('\n');
+  }
+
+  lines.push('');
+  lines.push('Detected capabilities:');
+
+  for (const cap of result.capabilities) {
+    lines.push(`  ${cap.category} (${cap.locations.length} occurrence${cap.locations.length === 1 ? '' : 's'})`);
+    for (const loc of cap.locations) {
+      lines.push(`    ${loc.file}:${loc.line}`);
+    }
+  }
+
+  return lines.join('\n');
+}

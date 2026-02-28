@@ -9,6 +9,7 @@ from pathlib import Path
 import click
 
 from trikhub.cli.output import ok, fail, warn, info
+from trikhub.linter.scanner import scan_capabilities, format_scan_result
 from trikhub.manifest import validate_manifest
 
 
@@ -42,6 +43,11 @@ def lint_command(path: str, warnings_as_errors: bool, skip: tuple[str, ...]) -> 
     trik_dir = Path(path).resolve()
 
     click.echo(f"Linting trik at: {trik_dir}\n")
+
+    # Capability scan
+    scan_result = scan_capabilities(trik_dir)
+    click.echo(format_scan_result(scan_result))
+    click.echo("")
 
     # Find manifest
     result = _find_manifest(trik_dir)
