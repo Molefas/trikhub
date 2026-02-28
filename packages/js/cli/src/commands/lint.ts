@@ -7,7 +7,7 @@
 
 import { resolve } from 'node:path';
 import chalk from 'chalk';
-import { TrikLinter } from '@trikhub/linter';
+import { TrikLinter, formatScanResult } from '@trikhub/linter';
 
 interface LintOptions {
   warningsAsErrors?: boolean;
@@ -25,7 +25,14 @@ export async function lintCommand(trikPath: string, options: LintOptions): Promi
   });
 
   try {
-    const results = await linter.lint(resolvedPath);
+    const { results, scan } = await linter.lint(resolvedPath);
+
+    // Security tier
+    console.log(formatScanResult(scan));
+    console.log('');
+
+    // Manifest validation
+    console.log(chalk.bold('Manifest validation:'));
     console.log(linter.formatResults(results));
 
     if (linter.hasErrors(results)) {

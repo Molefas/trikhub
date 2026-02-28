@@ -1,18 +1,16 @@
 export {
   TrikLinter,
   type LinterConfig,
+  type LintResult,
   findManifestPath,
   type ManifestLocation,
   type PackageType,
 } from './linter.js';
 export {
-  type LintResult,
-  type LintSeverity,
-  FORBIDDEN_IMPORTS,
-  getImports,
-  checkForbiddenImports,
-  checkDynamicCodeExecution,
-  checkUndeclaredTools,
-  checkProcessEnvAccess,
-  findToolUsage,
-} from './rules.js';
+  scanCapabilities,
+  formatScanResult,
+  type ScanResult,
+  type SecurityTier,
+  type CapabilityCategory,
+  type CapabilityMatch,
+} from './scanner.js';
