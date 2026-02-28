@@ -1,5 +1,17 @@
 # @trikhub/cli
 
+## 0.15.0
+
+### Minor Changes
+
+- [#56](https://github.com/Molefas/trikhub/pull/56) [`4d1c795`](https://github.com/Molefas/trikhub/commit/4d1c795259bc4d3ab6f72fde3700c3501e263d30) Thanks [@Molefas](https://github.com/Molefas)! - v bump
+
+### Patch Changes
+
+- Updated dependencies [[`4d1c795`](https://github.com/Molefas/trikhub/commit/4d1c795259bc4d3ab6f72fde3700c3501e263d30)]:
+  - @trikhub/linter@0.15.0
+  - @trikhub/manifest@0.15.0
+
 ## 0.14.0
 
 ### Minor Changes
