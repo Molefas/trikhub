@@ -483,6 +483,193 @@ Integer, number, and boolean fields are always safe.
   "entry": { "module": "./src/tools.py", "export": "agent", "runtime": "python" }
 }
 \`\`\`
+
+## Runtime Patterns
+
+### wrapAgent Factory Pattern
+
+\`wrapAgent\` accepts either a pre-built agent OR a factory function \`(context: TrikContext) => InvokableAgent\`.
+The factory runs once on first use; the resolved agent is reused across sessions. Use the factory when
+tools require runtime access to \`context.config\` or \`context.storage\`.
+
+**TypeScript:**
+\`\`\`typescript
+import { wrapAgent, transferBackTool, TrikContext } from '@trikhub/sdk';
+import { ChatAnthropic } from '@langchain/anthropic';
+import { createReactAgent } from '@langchain/langgraph/prebuilt';
+
+export default wrapAgent((context: TrikContext) => {
+  const model = new ChatAnthropic({
+    modelName: 'claude-sonnet-4-6',
+    anthropicApiKey: context.config.get('ANTHROPIC_API_KEY'),
+  });
+  return createReactAgent({ llm: model, tools: [transferBackTool] });
+});
+\`\`\`
+
+**Python:**
+\`\`\`python
+from trikhub.sdk import wrap_agent, transfer_back_tool, TrikContext
+from langchain_anthropic import ChatAnthropic
+from langgraph.prebuilt import create_react_agent
+
+default = wrap_agent(lambda context: create_react_agent(
+    model=ChatAnthropic(model="claude-sonnet-4-6",
+                        api_key=context.config.get("ANTHROPIC_API_KEY")),
+    tools=[transfer_back_tool],
+))
+\`\`\`
+
+### transferBackTool
+
+Every conversational agent must include \`transferBackTool\` in its tool set so the LLM can hand control
+back to the main agent when the user's request is outside its domain.
+
+- **TS import:** \`import { transferBackTool } from '@trikhub/sdk'\`
+- **PY import:** \`from trikhub.sdk import transfer_back_tool\`
+- Accepts an optional \`reason\` parameter (string)
+- When the LLM invokes this tool, the gateway triggers a handoff-back to the main agent
+
+### System Prompt Loading
+
+The \`systemPromptFile\` field in the manifest resolves relative to the manifest directory. In your code,
+load the prompt file yourself relative to your entry point:
+
+**TypeScript:**
+\`\`\`typescript
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const systemPrompt = readFileSync(join(__dirname, '../src/prompts/system.md'), 'utf-8');
+
+// Then pass to createReactAgent:
+createReactAgent({ llm: model, tools, messageModifier: systemPrompt });
+\`\`\`
+
+**Python:**
+\`\`\`python
+from pathlib import Path
+
+_SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "system.md").read_text()
+
+# Then pass to create_react_agent:
+create_react_agent(model=model, tools=tools, prompt=_SYSTEM_PROMPT)
+\`\`\`
+
+## Runtime Context API
+
+Both conversational and tool-mode agents receive a \`TrikContext\` with three fields:
+\`{ sessionId, config, storage }\`.
+
+### Config Access
+
+Configuration values are set by the user in \`~/.trikhub/secrets.json\` or \`.trikhub/secrets.json\`,
+declared in the manifest's \`config.required\` / \`config.optional\` blocks, and injected by the gateway.
+
+- \`context.config.get('KEY')\` → \`string | undefined\`
+- \`context.config.has('KEY')\` → \`boolean\`
+- \`context.config.keys()\` → \`string[]\`
+
+### Storage API
+
+Persistent key-value storage. Requires \`capabilities.storage.enabled: true\` in the manifest.
+
+- \`get(key)\` → value or null
+- \`set(key, value, ttl?)\` → void (TTL in milliseconds)
+- \`delete(key)\` → boolean
+- \`list(prefix?)\` → string[]
+- \`getMany(keys)\` → Map
+- \`setMany(entries)\` → void
+
+All methods are async.
+
+### Storage Details
+
+- **Location:** \`~/.trikhub/storage/storage.db\` (SQLite, WAL mode)
+- **Isolation:** Per-trik isolation by \`trik_id\` — triks cannot read each other's data
+- **Default quota:** 100MB (\`maxSizeBytes\` in manifest capabilities)
+- **Key length limit:** 256 characters
+- **Value size limit:** 10MB per value
+
+## Distribution & Testing
+
+### How Triks Are Distributed
+
+Triks are **NOT** npm or PyPI packages. They are distributed through the TrikHub registry.
+
+- **Install a published trik:** \`trik install @scope/name\`
+- **For development:** reference local paths in \`.trikhub/config.json\`
+- \`npm install\` / \`pip install -e .\` installs your trik's **own dependencies** (LangChain, Zod, etc.),
+  not the trik itself. You never \`npm publish\` or \`pip install\` a trik.
+
+### Testing Without Publishing
+
+You do not need to publish a trik to test it. Three options:
+
+1. **Run standalone** — Triks are LangGraph codebases. Import and invoke your agent directly
+   in a test script (see \`test.py\` / \`npm run dev\`).
+
+2. **Use the local playground** — Add your trik's path to \`.trikhub/config.json\` in
+   \`examples/js/local-playground\` or \`examples/python/local-playground\`, then run \`npm run dev\`.
+
+3. **Scaffold a test agent** — Run \`trik create-agent ts\` or \`trik create-agent py\` to generate
+   a minimal agent project with a gateway. Add your local trik path to its \`.trikhub/config.json\`.
+
+No publishing required at any stage of development.
+
+### Integrating a Trik Into an Existing Agent
+
+To consume a trik (published or local) in your own agent, use \`enhance()\` from the LangChain adapter:
+
+**1. Register the trik in \`.trikhub/config.json\`:**
+\`\`\`json
+{
+  "triks": [
+    { "id": "@scope/my-trik", "path": "/absolute/path/to/my-trik" }
+  ]
+}
+\`\`\`
+
+For published triks, use just the ID string: \`"@scope/my-trik"\`.
+
+**2. Integrate with enhance() (TypeScript):**
+\`\`\`typescript
+import { createReactAgent } from '@langchain/langgraph/prebuilt';
+import { ChatAnthropic } from '@langchain/anthropic';
+import { enhance } from '@trikhub/gateway/langchain';
+
+const model = new ChatAnthropic({ model: 'claude-sonnet-4-6' });
+const agent = createReactAgent({ llm: model, tools: myTools });
+
+// enhance() loads triks from .trikhub/config.json and wraps your agent
+const app = await enhance(agent);
+
+const response = await app.processMessage('Hello');
+console.log(response.message);  // What to show the user
+console.log(response.source);   // "main" or trik ID
+\`\`\`
+
+**Python:**
+\`\`\`python
+from langgraph.prebuilt import create_react_agent
+from langchain_anthropic import ChatAnthropic
+from trikhub.langchain import enhance
+
+model = ChatAnthropic(model="claude-sonnet-4-6")
+agent = create_react_agent(model=model, tools=my_tools)
+
+app = await enhance(agent)
+
+response = await app.process_message("Hello")
+print(response.message)
+print(response.source)
+\`\`\`
+
+\`enhance()\` creates a gateway, loads triks, generates handoff tools (\`talk_to_X\`) for conversational
+triks and exposes tool-mode tools directly, then wraps the agent with routing. For more control
+(custom gateway config, manual tool setup), use the Gateway API directly with \`TrikGateway\`.
 `;
 
 // ============================================================================
