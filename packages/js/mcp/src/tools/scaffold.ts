@@ -233,6 +233,8 @@ ${toolImports ? `\n${toolImports}\n` : ''}
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const systemPrompt = readFileSync(join(__dirname, '../src/prompts/system.md'), 'utf-8');
 
+// Factory pattern: receives TrikContext with config + storage at runtime.
+// The factory runs once on first use — the resolved agent is reused.
 export default wrapAgent((context: TrikContext) => {
 ${destructureStr}  const model = new ChatAnthropic({
     modelName: 'claude-sonnet-4-6',
@@ -423,6 +425,8 @@ ${toolList}
     ]
 
 
+# Factory pattern: receives TrikContext with config + storage at runtime.
+# The factory runs once on first use — the resolved agent is reused.
 default = wrap_agent(lambda context: create_react_agent(
     model=ChatAnthropic(
         model="claude-sonnet-4-20250514",
@@ -482,6 +486,8 @@ _SYSTEM_PROMPT = _PROMPT_PATH.read_text(encoding="utf-8")
 
 ${toolFuncs}
 
+# Factory pattern: receives TrikContext with config + storage at runtime.
+# The factory runs once on first use — the resolved agent is reused.
 default = wrap_agent(lambda context: create_react_agent(
     model=ChatAnthropic(
         model="claude-sonnet-4-20250514",
@@ -770,14 +776,16 @@ export function scaffoldTrik(input: ScaffoldInput): ScaffoldResult {
       nextSteps.push('3. Update inputSchema/outputSchema in manifest.json');
       nextSteps.push('4. Run `npm run build` to compile');
       nextSteps.push('5. Test with `trik lint .` to validate your manifest');
-      nextSteps.push('6. Publish with `trik publish`');
+      nextSteps.push('6. Test locally: use `trik create-agent ts` or add your trik path to examples/js/local-playground/.trikhub/config.json');
+      nextSteps.push('7. When ready, publish with `trik publish`');
     } else {
       nextSteps.push('1. Run `npm install` to install dependencies');
       nextSteps.push('2. Implement your tools in src/tools/');
       nextSteps.push('3. Customize the system prompt in src/prompts/system.md');
       nextSteps.push('4. Run `npm run build` to compile');
       nextSteps.push('5. Test with `trik lint .` to validate your manifest');
-      nextSteps.push('6. Publish with `trik publish`');
+      nextSteps.push('6. Test locally: use `trik create-agent ts` or add your trik path to examples/js/local-playground/.trikhub/config.json');
+      nextSteps.push('7. When ready, publish with `trik publish`');
     }
   } else {
     // Python project — v2 SDK patterns (wrap_agent / wrap_tool_handlers)
@@ -829,13 +837,15 @@ export function scaffoldTrik(input: ScaffoldInput): ScaffoldResult {
       nextSteps.push(`2. Implement your tool handlers in src/${pkgName}/main.py`);
       nextSteps.push('3. Update inputSchema/outputSchema in manifest.json');
       nextSteps.push('4. Run `python test.py` to test locally');
-      nextSteps.push('5. Publish with `trik publish`');
+      nextSteps.push('5. Test with an agent: use `trik create-agent py` or add your trik path to examples/python/local-playground/.trikhub/config.json');
+      nextSteps.push('6. When ready, publish with `trik publish`');
     } else {
       nextSteps.push('1. Run `pip install -e .` to install in development mode');
       nextSteps.push(`2. Implement your tools in src/${pkgName}/main.py`);
       nextSteps.push(`3. Customize the system prompt in src/${pkgName}/prompts/system.md`);
       nextSteps.push('4. Run `python test.py` to test locally');
-      nextSteps.push('5. Publish with `trik publish`');
+      nextSteps.push('5. Test with an agent: use `trik create-agent py` or add your trik path to examples/python/local-playground/.trikhub/config.json');
+      nextSteps.push('6. When ready, publish with `trik publish`');
     }
   }
 
