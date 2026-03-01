@@ -1,5 +1,14 @@
 # @trikhub/server
 
+## 0.16.0
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @trikhub/gateway@0.16.0
+  - @trikhub/linter@0.16.0
+  - @trikhub/manifest@0.16.0
+
 ## 0.15.0
 
 ### Patch Changes
