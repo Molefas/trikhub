@@ -1,0 +1,217 @@
+"""TypeScript Agent Template Generator.
+
+Generates a minimal TypeScript agent project ready to consume triks
+via TrikGateway. Counterpart to trik init — scaffolds the consuming
+agent, not a trik itself.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from typing import Any
+
+
+@dataclass
+class CreateAgentConfig:
+    name: str
+    provider: str  # 'openai' | 'anthropic' | 'google'
+
+
+@dataclass
+class GeneratedFile:
+    path: str
+    content: str
+
+
+_PROVIDERS: dict[str, dict[str, str]] = {
+    "openai": {
+        "importPath": "@langchain/openai",
+        "className": "ChatOpenAI",
+        "npmPackage": "@langchain/openai",
+        "defaultModel": "gpt-4o-mini",
+        "envVar": "OPENAI_API_KEY",
+        "modelParam": "model",
+    },
+    "anthropic": {
+        "importPath": "@langchain/anthropic",
+        "className": "ChatAnthropic",
+        "npmPackage": "@langchain/anthropic",
+        "defaultModel": "claude-sonnet-4-20250514",
+        "envVar": "ANTHROPIC_API_KEY",
+        "modelParam": "modelName",
+    },
+    "google": {
+        "importPath": "@langchain/google-genai",
+        "className": "ChatGoogleGenerativeAI",
+        "npmPackage": "@langchain/google-genai",
+        "defaultModel": "gemini-2.0-flash",
+        "envVar": "GOOGLE_API_KEY",
+        "modelParam": "model",
+    },
+}
+
+
+def generate_agent_typescript_project(config: CreateAgentConfig) -> list[GeneratedFile]:
+    files: list[GeneratedFile] = []
+    provider = _PROVIDERS[config.provider]
+
+    files.append(GeneratedFile("package.json", _generate_package_json(config, provider)))
+    files.append(GeneratedFile("tsconfig.json", _generate_tsconfig()))
+    files.append(GeneratedFile(".env.example", f"{provider['envVar']}=your-api-key-here\n"))
+    files.append(GeneratedFile(".gitignore", _generate_gitignore()))
+    files.append(GeneratedFile(".trikhub/config.json", json.dumps({"triks": []}, indent=2)))
+    files.append(GeneratedFile("src/agent.ts", _generate_agent_ts(config, provider)))
+    files.append(GeneratedFile("src/cli.ts", _generate_cli_ts()))
+
+    return files
+
+
+def _generate_package_json(config: CreateAgentConfig, provider: dict[str, str]) -> str:
+    pkg: dict[str, Any] = {
+        "name": config.name,
+        "version": "0.1.0",
+        "description": "AI agent powered by TrikHub",
+        "type": "module",
+        "scripts": {
+            "dev": "node --import tsx src/cli.ts",
+            "build": "tsc",
+        },
+        "dependencies": {
+            provider["npmPackage"]: "^1.0.0",
+            "@langchain/core": "^1.0.0",
+            "@langchain/langgraph": "^1.0.0",
+            "@trikhub/gateway": "latest",
+            "dotenv": "^16.4.0",
+        },
+        "devDependencies": {
+            "tsx": "^4.19.0",
+            "typescript": "^5.7.0",
+        },
+    }
+    return json.dumps(pkg, indent=2)
+
+
+def _generate_tsconfig() -> str:
+    tsconfig = {
+        "compilerOptions": {
+            "target": "ES2022",
+            "module": "NodeNext",
+            "moduleResolution": "nodenext",
+            "outDir": "./dist",
+            "rootDir": "./src",
+            "strict": True,
+            "esModuleInterop": True,
+            "skipLibCheck": True,
+            "declaration": True,
+            "sourceMap": True,
+        },
+        "include": ["src/**/*"],
+    }
+    return json.dumps(tsconfig, indent=2)
+
+
+def _generate_gitignore() -> str:
+    return """node_modules/
+dist/
+*.tsbuildinfo
+.env
+"""
+
+
+def _generate_agent_ts(config: CreateAgentConfig, provider: dict[str, str]) -> str:
+    return f"""import {{ {provider['className']} }} from '{provider['importPath']}';
+import {{ createReactAgent }} from '@langchain/langgraph/prebuilt';
+import {{ TrikGateway }} from '@trikhub/gateway';
+import {{ enhance, getHandoffToolsForAgent, getExposedToolsForAgent }} from '@trikhub/gateway/langchain';
+
+const SYSTEM_PROMPT = `You are a helpful assistant.
+When a trik can handle the user's request, use the appropriate tool.`;
+
+export async function initializeAgent() {{
+  const model = new {provider['className']}({{ {provider['modelParam']}: '{provider['defaultModel']}' }});
+
+  const gateway = new TrikGateway();
+  await gateway.initialize();
+  await gateway.loadTriksFromConfig();
+
+  const handoffTools = getHandoffToolsForAgent(gateway);
+  const exposedTools = getExposedToolsForAgent(gateway);
+
+  const agent = createReactAgent({{
+    llm: model,
+    tools: [...handoffTools, ...exposedTools] as any,
+    messageModifier: SYSTEM_PROMPT,
+  }});
+
+  const app = await enhance(agent as any, {{ gatewayInstance: gateway }});
+
+  return {{ app, handoffTools, exposedTools }};
+}}
+"""
+
+
+def _generate_cli_ts() -> str:
+    return r"""import 'dotenv/config';
+import * as readline from 'readline';
+import { initializeAgent } from './agent.js';
+
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
+
+function prompt(question: string): Promise<string> {
+  return new Promise((resolve) => {
+    rl.question(question, resolve);
+  });
+}
+
+async function main() {
+  console.log('Loading agent...\n');
+
+  const { app, handoffTools, exposedTools } = await initializeAgent();
+
+  if (handoffTools.length > 0) {
+    console.log(`Handoff triks: ${handoffTools.map((t) => t.name).join(', ')}`);
+  }
+  if (exposedTools.length > 0) {
+    console.log(`Tool-mode triks: ${exposedTools.map((t) => t.name).join(', ')}`);
+  }
+  console.log('Type "/back" to return from a trik handoff, "exit" to quit.\n');
+
+  const sessionId = `cli-${Date.now()}`;
+
+  while (true) {
+    const userInput = await prompt('You: ');
+
+    if (!userInput.trim()) continue;
+    if (userInput.toLowerCase() === 'exit' || userInput.toLowerCase() === 'quit') {
+      console.log('\nGoodbye!');
+      break;
+    }
+
+    try {
+      const result = await app.processMessage(userInput, sessionId);
+
+      if (result.source === 'system') {
+        console.log(`\n\x1b[2m${result.message}\x1b[0m\n`);
+      } else if (result.source !== 'main') {
+        console.log(`\n[${result.source}] ${result.message}\n`);
+      } else {
+        console.log(`\nAssistant: ${result.message}\n`);
+      }
+    } catch (error) {
+      console.error('\nError:', error);
+      console.log('Please try again.\n');
+    }
+  }
+
+  rl.close();
+}
+
+main().catch((error) => {
+  console.error(error);
+  rl.close();
+});
+"""

@@ -15,6 +15,10 @@ npm install -g @trikhub/cli
 trik init ts   # TypeScript
 trik init py   # Python
 
+# Scaffold an agent that consumes triks
+trik create-agent ts   # TypeScript
+trik create-agent py   # Python
+
 # Search for triks
 trik search article
 
@@ -115,6 +119,72 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e .
 trik lint .
 ```
+
+### `trik create-agent <language>`
+
+Scaffold a minimal agent project that can immediately consume triks. This is the counterpart to `trik init` — it creates the _consuming agent_, not a trik.
+
+```bash
+# Create a TypeScript agent
+trik create-agent ts
+
+# Create a Python agent
+trik create-agent py
+```
+
+The interactive wizard prompts for:
+
+- **Project name** - lowercase, alphanumeric + dashes (e.g., `my-agent`)
+- **LLM Provider** - OpenAI, Anthropic, or Google
+- **Location** - Where to create the project
+
+#### Generated Structure
+
+**TypeScript:**
+
+```text
+my-agent/
+├── package.json         # Only the selected provider's LangChain pkg
+├── tsconfig.json
+├── .env.example         # Single env var for selected provider
+├── .gitignore
+├── .trikhub/
+│   └── config.json      # Empty triks array
+└── src/
+    ├── agent.ts         # TrikGateway + enhance() + createReactAgent
+    └── cli.ts           # readline loop with processMessage()
+```
+
+**Python:**
+
+```text
+my-agent/
+├── pyproject.toml       # Only the selected provider's langchain pkg
+├── .env.example
+├── .gitignore
+├── .trikhub/
+│   └── config.json
+├── agent.py             # TrikGateway + enhance() + create_react_agent
+└── cli.py               # asyncio CLI loop
+```
+
+#### Running Your Agent
+
+```bash
+cd my-agent
+cp .env.example .env
+# Add your API key to .env
+
+# TypeScript
+npm run dev
+
+# Python
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
+python cli.py
+```
+
+Then install triks with `trik install @scope/trik-name` and restart the agent.
 
 ### `trik lint <path>`
 
