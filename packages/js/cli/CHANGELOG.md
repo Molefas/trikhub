@@ -1,5 +1,17 @@
 # @trikhub/cli
 
+## 0.16.0
+
+### Minor Changes
+
+- [#59](https://github.com/Molefas/trikhub/pull/59) [`9b1c045`](https://github.com/Molefas/trikhub/commit/9b1c04531fb9f17bc069b4039542166bc8c7ea6d) Thanks [@Molefas](https://github.com/Molefas)! - Add `trik create-agent` command to scaffold minimal agent projects ready to consume triks
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @trikhub/linter@0.16.0
+  - @trikhub/manifest@0.16.0
+
 ## 0.15.0
 
 ### Minor Changes

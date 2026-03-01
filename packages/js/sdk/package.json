@@ -1,6 +1,6 @@
 {
   "name": "@trikhub/sdk",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "SDK for building triks — wrapAgent(), wrapToolHandlers(), transfer_back tool, and tool call interception",
   "type": "module",
   "main": "./dist/index.js",
