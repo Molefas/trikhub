@@ -19,6 +19,7 @@ import { unpublishCommand } from './commands/unpublish.js';
 import { upgradeCommand, upgradeAllCommand } from './commands/upgrade.js';
 import { syncCommand } from './commands/sync.js';
 import { initCommand } from './commands/init.js';
+import { createAgentCommand } from './commands/create-agent.js';
 import { lintCommand } from './commands/lint.js';
 import { mcpCommand } from './commands/mcp.js';
 
@@ -141,6 +142,12 @@ program
   .command('init <language>')
   .description('Initialize a new trik project (ts or py)')
   .action(initCommand);
+
+// Create-agent command
+program
+  .command('create-agent <language>')
+  .description('Scaffold a minimal agent project ready to consume triks')
+  .action(createAgentCommand);
 
 // Lint command
 program

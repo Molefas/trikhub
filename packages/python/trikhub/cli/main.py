@@ -2,6 +2,7 @@
 
 Usage:
     trik init ts|py            Initialize a new trik project
+    trik create-agent ts|py    Scaffold a minimal agent project
     trik install @scope/name   Install a trik from the registry or pip
     trik uninstall @scope/name Uninstall a trik
     trik lint [path]           Validate a trik for security and correctness
@@ -23,6 +24,7 @@ import os
 import click
 
 from trikhub.cli.commands.init import init_command
+from trikhub.cli.commands.create_agent import create_agent_command
 from trikhub.cli.commands.install import install_command, uninstall_command
 from trikhub.cli.commands.lint import lint_command
 from trikhub.cli.commands.list import list_command, sync_command
@@ -45,6 +47,7 @@ def cli(ctx: click.Context, dev: bool) -> None:
 
 # Register commands
 cli.add_command(init_command)
+cli.add_command(create_agent_command)
 cli.add_command(install_command)
 cli.add_command(lint_command)
 cli.add_command(uninstall_command)
