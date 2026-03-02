@@ -3,7 +3,7 @@
  * and config validation warnings.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtemp, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { TrikGateway } from '../../packages/js/gateway/dist/gateway.js';
@@ -384,6 +384,36 @@ describe('loadTrik config validation warning', () => {
     await gw.loadTrik(trikDir);
 
     expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('warns only about missing keys when some config is present', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const configStore = new InMemoryConfigStore({
+      'test-partial': { API_KEY: 'key123' },
+    });
+    const gw = new TrikGateway({
+      configStore,
+      storageProvider: new InMemoryStorageProvider(),
+      sessionStorage: new InMemorySessionStorage(),
+    });
+    await gw.initialize();
+
+    const trikDir = await createTempTrik({
+      id: 'test-partial',
+      configRequired: [
+        { key: 'API_KEY', description: 'The API key' },
+        { key: 'API_SECRET', description: 'The API secret' },
+      ],
+    });
+
+    await gw.loadTrik(trikDir);
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('missing required config: API_SECRET'),
+    );
+    const warnMsg = warnSpy.mock.calls[0][0] as string;
+    expect(warnMsg).not.toContain('API_KEY');
   });
 
   it('does not warn when trik has no required config', async () => {
