@@ -740,6 +740,17 @@ export class TrikGateway {
       throw new Error(`Trik "${manifest.id}" is not in the allowlist`);
     }
 
+    // Validate required config
+    if (this.config.validateConfig !== false) {
+      const missingKeys = this.configStore.validateConfig(manifest);
+      if (missingKeys.length > 0) {
+        console.warn(
+          `[TrikGateway] Warning: trik "${manifest.id}" is missing required config: ${missingKeys.join(', ')}\n` +
+          `  Add to .trikhub/secrets.json: { "${manifest.id}": { ${missingKeys.map(k => `"${k}": "..."`).join(', ')} } }`
+        );
+      }
+    }
+
     const runtime: TrikRuntime = manifest.entry.runtime ?? 'node';
 
     const isToolMode = manifest.agent.mode === 'tool';

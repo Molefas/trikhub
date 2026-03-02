@@ -1,8 +1,15 @@
 /**
- * Tests for TrikGateway — TDPS log value validation and error sanitization.
+ * Tests for TrikGateway — TDPS log value validation, error sanitization,
+ * and config validation warnings.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { mkdtemp, writeFile, mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { TrikGateway } from '../../packages/js/gateway/dist/gateway.js';
+import { InMemoryConfigStore } from '../../packages/js/gateway/dist/config-store.js';
+import { InMemoryStorageProvider } from '../../packages/js/gateway/dist/storage-provider.js';
+import { InMemorySessionStorage } from '../../packages/js/gateway/dist/session-storage.js';
 
 // Access private methods via prototype for testing
 const gateway = new TrikGateway();
@@ -223,5 +230,179 @@ describe('sanitizeErrorMessage', () => {
     const msg = 'hello\x00world\x01\nline2\ttab';
     const result = sanitizeErrorMessage(msg);
     expect(result).toBe('helloworld\nline2\ttab');
+  });
+});
+
+// ============================================================================
+// Config validation warning on loadTrik
+// ============================================================================
+
+describe('loadTrik config validation warning', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * Create a temporary trik directory with a valid tool-mode manifest
+   * and a minimal entry module.
+   */
+  async function createTempTrik(options: {
+    id: string;
+    configRequired?: Array<{ key: string; description: string }>;
+  }): Promise<string> {
+    const trikDir = await mkdtemp(join(tmpdir(), 'trik-test-'));
+
+    const manifest = {
+      schemaVersion: 2,
+      id: options.id,
+      name: `Test Trik ${options.id}`,
+      description: 'A test trik for config validation',
+      version: '1.0.0',
+      agent: {
+        mode: 'tool',
+        domain: ['testing'],
+      },
+      tools: {
+        testTool: {
+          description: 'A test tool',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              query: { type: 'string' },
+            },
+          },
+          outputSchema: {
+            type: 'object',
+            properties: {
+              status: { type: 'string', enum: ['ok', 'error'] },
+            },
+          },
+          outputTemplate: 'Status: {{status}}',
+        },
+      },
+      entry: {
+        module: 'index.mjs',
+        export: 'agent',
+      },
+      ...(options.configRequired
+        ? { config: { required: options.configRequired } }
+        : {}),
+    };
+
+    await writeFile(
+      join(trikDir, 'manifest.json'),
+      JSON.stringify(manifest, null, 2),
+    );
+
+    // Create a minimal entry module that exports an executeTool function
+    const entryCode = `
+      export const agent = {
+        async executeTool(toolName, input, context) {
+          return { output: { status: 'ok' } };
+        }
+      };
+    `;
+    await writeFile(join(trikDir, 'index.mjs'), entryCode);
+
+    return trikDir;
+  }
+
+  it('warns when required config keys are missing', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const configStore = new InMemoryConfigStore();
+    const gw = new TrikGateway({
+      configStore,
+      storageProvider: new InMemoryStorageProvider(),
+      sessionStorage: new InMemorySessionStorage(),
+    });
+    await gw.initialize();
+
+    const trikDir = await createTempTrik({
+      id: 'test-config-warn',
+      configRequired: [
+        { key: 'API_KEY', description: 'The API key' },
+        { key: 'API_SECRET', description: 'The API secret' },
+      ],
+    });
+
+    await gw.loadTrik(trikDir);
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('trik "test-config-warn" is missing required config: API_KEY, API_SECRET'),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('.trikhub/secrets.json'),
+    );
+  });
+
+  it('does not warn when all required config keys are present', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const configStore = new InMemoryConfigStore({
+      'test-config-present': { API_KEY: 'key123', API_SECRET: 'secret456' },
+    });
+    const gw = new TrikGateway({
+      configStore,
+      storageProvider: new InMemoryStorageProvider(),
+      sessionStorage: new InMemorySessionStorage(),
+    });
+    await gw.initialize();
+
+    const trikDir = await createTempTrik({
+      id: 'test-config-present',
+      configRequired: [
+        { key: 'API_KEY', description: 'The API key' },
+        { key: 'API_SECRET', description: 'The API secret' },
+      ],
+    });
+
+    await gw.loadTrik(trikDir);
+
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not warn when validateConfig is false', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const configStore = new InMemoryConfigStore();
+    const gw = new TrikGateway({
+      configStore,
+      storageProvider: new InMemoryStorageProvider(),
+      sessionStorage: new InMemorySessionStorage(),
+      validateConfig: false,
+    });
+    await gw.initialize();
+
+    const trikDir = await createTempTrik({
+      id: 'test-config-skip',
+      configRequired: [
+        { key: 'API_KEY', description: 'The API key' },
+      ],
+    });
+
+    await gw.loadTrik(trikDir);
+
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not warn when trik has no required config', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const configStore = new InMemoryConfigStore();
+    const gw = new TrikGateway({
+      configStore,
+      storageProvider: new InMemoryStorageProvider(),
+      sessionStorage: new InMemorySessionStorage(),
+    });
+    await gw.initialize();
+
+    const trikDir = await createTempTrik({
+      id: 'test-no-config',
+    });
+
+    await gw.loadTrik(trikDir);
+
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });
