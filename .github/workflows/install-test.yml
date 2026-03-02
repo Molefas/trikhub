@@ -40,6 +40,22 @@ jobs:
       - name: Install a trik
         run: cd my-agent && trik install @molefas/trik-demo-notes
 
+      - name: Verify gateway loads trik
+        run: |
+          cd my-agent
+          npm install @trikhub/gateway
+          node --input-type=module -e "
+          import { TrikGateway } from '@trikhub/gateway';
+
+          const gw = new TrikGateway();
+          await gw.initialize();
+          await gw.loadTriksFromConfig();
+          const triks = gw.getLoadedTriks();
+          if (triks.length === 0) throw new Error('No triks loaded');
+          console.log('Gateway loaded ' + triks.length + ' trik(s)');
+          await gw.shutdown();
+          "
+
   python-install-test:
     runs-on: ${{ matrix.os }}
     strategy:
