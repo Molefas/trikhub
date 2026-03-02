@@ -34,7 +34,7 @@ from trikhub.cli.commands.search import info_command, search_command
 
 
 @click.group()
-@click.version_option(version="0.16.0", prog_name="trik")
+@click.version_option(version="0.17.0", prog_name="trik")
 @click.option("--dev", is_flag=True, help="Use development registry (localhost:3001)")
 @click.pass_context
 def cli(ctx: click.Context, dev: bool) -> None:
