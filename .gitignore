@@ -38,4 +38,3 @@ coverage/
 # Docs
 docs/*
 scripts/*
-!scripts/test-install.sh
