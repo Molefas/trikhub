@@ -182,7 +182,7 @@ local-playground/
 **Trik not loading**
 
 → Check `.trikhub/config.json` has the trik listed
-→ If you're running JavaScript Triks you need to have Node.js 18+ installed (see below)
+→ If you're running JavaScript Triks you need to have Node.js 22.5+ installed (see below)
 
 **Import errors**
 
@@ -194,7 +194,7 @@ The Python gateway can execute JavaScript triks through a Node.js worker subproc
 
 ### Installing a JavaScript Trik
 
-1. Ensure Node.js 18+ is installed
+1. Ensure Node.js 22.5+ is installed
 2. Install the JS trik using the CLI:
 
    ```bash

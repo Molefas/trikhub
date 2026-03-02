@@ -33,34 +33,40 @@ def validate_name(name: str) -> str | None:
 
 @click.command("create-agent")
 @click.argument("language", type=click.Choice(["ts", "typescript", "py", "python"]))
-def create_agent_command(language: str) -> None:
+@click.option("-y", "--yes", is_flag=True, help="Skip prompts, use defaults")
+def create_agent_command(language: str, yes: bool) -> None:
     """Scaffold a minimal agent project ready to consume triks."""
     lang = "ts" if language in ("ts", "typescript") else "py"
 
-    click.echo()
-    click.echo(click.style("  Create a new Agent", bold=True))
-    click.echo()
+    if yes:
+        name = "my-agent"
+        provider = "openai"
+        target_dir = Path.cwd() / name
+    else:
+        click.echo()
+        click.echo(click.style("  Create a new Agent", bold=True))
+        click.echo()
 
-    # Project name
-    name = click.prompt("Project name", default="my-agent").lower()
-    error = validate_name(name)
-    if error:
-        click.echo(click.style(f"Error: {error}", fg="red"))
-        sys.exit(1)
+        # Project name
+        name = click.prompt("Project name", default="my-agent").lower()
+        error = validate_name(name)
+        if error:
+            click.echo(click.style(f"Error: {error}", fg="red"))
+            sys.exit(1)
 
-    # LLM provider
-    click.echo("\nLLM Provider:")
-    for i, (_, label) in enumerate(PROVIDERS, 1):
-        click.echo(f"  {i}. {label}")
-    provider_idx = click.prompt("Provider (number)", type=int, default=1)
-    provider = PROVIDERS[max(0, min(provider_idx - 1, len(PROVIDERS) - 1))][0]
+        # LLM provider
+        click.echo("\nLLM Provider:")
+        for i, (_, label) in enumerate(PROVIDERS, 1):
+            click.echo(f"  {i}. {label}")
+        provider_idx = click.prompt("Provider (number)", type=int, default=1)
+        provider = PROVIDERS[max(0, min(provider_idx - 1, len(PROVIDERS) - 1))][0]
 
-    # Path
-    target_dir = Path.cwd() / name
-    use_current = click.confirm(f"Create in ./{name}?", default=True)
-    if not use_current:
-        custom = click.prompt("Enter path", default=f"./{name}")
-        target_dir = Path.cwd() / custom
+        # Path
+        target_dir = Path.cwd() / name
+        use_current = click.confirm(f"Create in ./{name}?", default=True)
+        if not use_current:
+            custom = click.prompt("Enter path", default=f"./{name}")
+            target_dir = Path.cwd() / custom
 
     if target_dir.exists():
         click.echo(click.style(f"\nDirectory already exists: {target_dir}", fg="red"))

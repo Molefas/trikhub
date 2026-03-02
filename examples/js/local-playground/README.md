@@ -23,7 +23,7 @@ This demo shows how to enhance an existing LangGraph agent with TrikHub support 
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 22.5+
 - pnpm (or npm)
 - OpenAI / Anthropic / Google API key
 

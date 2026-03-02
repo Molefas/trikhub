@@ -102,6 +102,24 @@ function generateManifest(config: InitConfig): string {
   return JSON.stringify(manifest, null, 2);
 }
 
+/**
+ * Generate a manifest for inclusion inside the pip-installable package.
+ * Paths are relative to the package directory (src/{pkg}/) instead of the repo root.
+ */
+function generatePackageManifest(config: InitConfig): string {
+  const manifest = JSON.parse(generateManifest(config));
+
+  // Adjust entry.module to be relative to the package directory
+  manifest.entry.module = './main.py';
+
+  // Adjust systemPromptFile if present
+  if (manifest.agent.systemPromptFile) {
+    manifest.agent.systemPromptFile = './prompts/system.md';
+  }
+
+  return JSON.stringify(manifest, null, 2);
+}
+
 function generateTrikhubJson(config: InitConfig): string {
   const metadata = {
     displayName: config.displayName,
@@ -122,7 +140,7 @@ function generatePyprojectToml(config: InitConfig): string {
   const isToolMode = config.agentMode === 'tool';
   const pkg = toPythonPackage(config.name);
 
-  const deps = ['    "trikhub-sdk>=0.1.0",'];
+  const deps = ['    "trikhub>=0.16.0",'];
   if (!isToolMode) {
     deps.push('    "langchain-anthropic>=0.3.0",');
     deps.push('    "langchain-core>=0.3.0",');
@@ -147,6 +165,9 @@ ${deps.join('\n')}
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["${pkg}*"]
+
+[tool.setuptools.package-data]
+${pkg} = ["manifest.json", "prompts/*.md"]
 `;
 }
 
@@ -343,6 +364,11 @@ export function generatePythonProject(config: InitConfig): Record<string, string
   if (config.agentMode === 'conversational') {
     files[`src/${pkg}/prompts/system.md`] = generateSystemPrompt(config);
   }
+
+  // Include manifest inside the pip-installable package so the gateway can
+  // discover it after `pip install`. Paths are adjusted to be relative to
+  // the package directory rather than the repo root.
+  files[`src/${pkg}/manifest.json`] = generatePackageManifest(config);
 
   return files;
 }

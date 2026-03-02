@@ -46,7 +46,7 @@ function parseLanguage(lang: string): Language | null {
   return null;
 }
 
-export async function createAgentCommand(languageArg: string): Promise<void> {
+export async function createAgentCommand(languageArg: string, options: { yes?: boolean } = {}): Promise<void> {
   const spinner = ora();
 
   try {
@@ -58,46 +58,55 @@ export async function createAgentCommand(languageArg: string): Promise<void> {
       process.exit(1);
     }
 
-    console.log();
-    console.log(chalk.bold('  Create a new Agent'));
-    console.log();
-
-    // Interactive prompts
-    const name = await input({
-      message: 'Project name:',
-      default: 'my-agent',
-      validate: validateProjectName,
-      transformer: (value) => value.toLowerCase(),
-    });
-
-    const provider = await select<'openai' | 'anthropic' | 'google'>({
-      message: 'LLM Provider:',
-      choices: [
-        { value: 'openai', name: 'OpenAI (gpt-4o-mini)' },
-        { value: 'anthropic', name: 'Anthropic (claude-sonnet)' },
-        { value: 'google', name: 'Google (gemini-2.0-flash)' },
-      ],
-      default: 'openai',
-    });
-
-    // Path selection
-    const pathChoice = await select<'current' | 'other'>({
-      message: 'Where to create the project?',
-      choices: [
-        { value: 'current', name: `Current folder (./${name})` },
-        { value: 'other', name: 'Other location...' },
-      ],
-    });
-
+    let name: string;
+    let provider: 'openai' | 'anthropic' | 'google';
     let targetDir: string;
-    if (pathChoice === 'current') {
+
+    if (options.yes) {
+      name = 'my-agent';
+      provider = 'openai';
       targetDir = resolve(process.cwd(), name);
     } else {
-      const customPath = await input({
-        message: 'Enter path:',
-        default: `./${name}`,
+      console.log();
+      console.log(chalk.bold('  Create a new Agent'));
+      console.log();
+
+      // Interactive prompts
+      name = await input({
+        message: 'Project name:',
+        default: 'my-agent',
+        validate: validateProjectName,
+        transformer: (value) => value.toLowerCase(),
       });
-      targetDir = resolve(process.cwd(), customPath);
+
+      provider = await select<'openai' | 'anthropic' | 'google'>({
+        message: 'LLM Provider:',
+        choices: [
+          { value: 'openai', name: 'OpenAI (gpt-4o-mini)' },
+          { value: 'anthropic', name: 'Anthropic (claude-sonnet)' },
+          { value: 'google', name: 'Google (gemini-2.0-flash)' },
+        ],
+        default: 'openai',
+      });
+
+      // Path selection
+      const pathChoice = await select<'current' | 'other'>({
+        message: 'Where to create the project?',
+        choices: [
+          { value: 'current', name: `Current folder (./${name})` },
+          { value: 'other', name: 'Other location...' },
+        ],
+      });
+
+      if (pathChoice === 'current') {
+        targetDir = resolve(process.cwd(), name);
+      } else {
+        const customPath = await input({
+          message: 'Enter path:',
+          default: `./${name}`,
+        });
+        targetDir = resolve(process.cwd(), customPath);
+      }
     }
 
     // Check if directory exists

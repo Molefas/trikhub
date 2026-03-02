@@ -2,7 +2,7 @@
 
 ## Setup
 
-Requires Node.js >= 18 and pnpm >= 8.
+Requires Node.js >= 22.5 and pnpm >= 8.
 
 ```bash
 git clone https://github.com/Molefas/trikhub.git

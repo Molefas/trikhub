@@ -57,6 +57,10 @@ def generate_python_project(config: PyTemplateConfig) -> list[GeneratedFile]:
     else:
         files.append(GeneratedFile("src/agent.py", _generate_tool_agent(config)))
 
+    # Include manifest inside src/ so it's included in the pip wheel.
+    # The gateway can discover it after `pip install`.
+    files.append(GeneratedFile("src/manifest.json", _generate_package_manifest(config)))
+
     return files
 
 
@@ -134,6 +138,23 @@ def _generate_manifest(config: PyTemplateConfig) -> str:
     return json.dumps(manifest, indent=2) + "\n"
 
 
+def _generate_package_manifest(config: PyTemplateConfig) -> str:
+    """Generate a manifest for inclusion inside the pip wheel.
+
+    Paths are adjusted to be relative to the src/ directory instead of the repo root.
+    """
+    manifest = json.loads(_generate_manifest(config))
+
+    # Adjust entry.module to be relative to the package directory
+    manifest["entry"]["module"] = "./agent.py"
+
+    # Adjust systemPromptFile if present
+    if "systemPromptFile" in manifest.get("agent", {}):
+        manifest["agent"]["systemPromptFile"] = "./prompts/system.md"
+
+    return json.dumps(manifest, indent=2) + "\n"
+
+
 def _generate_trikhub_json(config: PyTemplateConfig) -> str:
     trikhub = {
         "displayName": config.display_name,
@@ -184,6 +205,9 @@ Repository = "https://github.com/{config.author_github}/{config.name}"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"manifest.json" = "src/manifest.json"
 
 [tool.hatch.build.targets.sdist]
 include = [
