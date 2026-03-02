@@ -326,6 +326,10 @@ Triks can declare required and optional configuration values (typically API keys
 }
 \`\`\`
 
+The gateway checks required config on load and prints a warning to stderr if any keys are missing.
+The CLI also shows config setup hints after \`trik install\` when a trik declares required config.
+Values are read at runtime via \`context.config.get('KEY')\` from \`~/.trikhub/secrets.json\` or \`.trikhub/secrets.json\`.
+
 ## Security Constraints
 
 ### Log Schema (conversational mode)

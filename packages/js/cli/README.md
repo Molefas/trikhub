@@ -237,6 +237,7 @@ The install process:
 4. **Falls back to npm** - If not found on TrikHub, tries npm as fallback
 5. **Validates** the trik (manifest structure, security rules)
 6. Registers the trik in `.trikhub/config.json`
+7. **Shows config hints** - If the trik declares `config.required`, displays setup instructions for `secrets.json`
 
 ### `trik search <query>`
 
