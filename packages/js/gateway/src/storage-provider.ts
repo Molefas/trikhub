@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import Database from 'better-sqlite3';
-import type { Database as DatabaseType, Statement } from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
+import type { StatementSync } from 'node:sqlite';
 import type { TrikStorageContext, StorageCapabilities } from '@trikhub/manifest';
 
 /**
@@ -49,17 +49,17 @@ interface StorageEntry {
  * SQLite-based storage context for a single trik
  */
 class SqliteStorageContext implements TrikStorageContext {
-  private readonly getStmt: Statement;
-  private readonly setStmt: Statement;
-  private readonly deleteStmt: Statement;
-  private readonly listStmt: Statement;
-  private readonly listPrefixStmt: Statement;
-  private readonly cleanupStmt: Statement;
-  private readonly usageStmt: Statement;
-  private readonly clearStmt: Statement;
+  private readonly getStmt: StatementSync;
+  private readonly setStmt: StatementSync;
+  private readonly deleteStmt: StatementSync;
+  private readonly listStmt: StatementSync;
+  private readonly listPrefixStmt: StatementSync;
+  private readonly cleanupStmt: StatementSync;
+  private readonly usageStmt: StatementSync;
+  private readonly clearStmt: StatementSync;
 
   constructor(
-    private readonly db: DatabaseType,
+    private readonly db: DatabaseSync,
     private readonly trikId: string,
     private readonly maxSizeBytes: number
   ) {
@@ -184,7 +184,7 @@ class SqliteStorageContext implements TrikStorageContext {
  * Stores all trik data in a single database at ~/.trikhub/storage/storage.db
  */
 export class SqliteStorageProvider implements StorageProvider {
-  private readonly db: DatabaseType;
+  private readonly db: DatabaseSync;
   private readonly contexts = new Map<string, SqliteStorageContext>();
   private readonly dbPath: string;
 
@@ -197,11 +197,11 @@ export class SqliteStorageProvider implements StorageProvider {
     }
 
     this.dbPath = join(storageDir, 'storage.db');
-    this.db = new Database(this.dbPath);
+    this.db = new DatabaseSync(this.dbPath);
 
     // Configure for concurrency and durability
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('busy_timeout = 5000');
+    this.db.exec('PRAGMA journal_mode = WAL');
+    this.db.exec('PRAGMA busy_timeout = 5000');
 
     // Initialize schema
     this.db.exec(`

@@ -147,6 +147,7 @@ program
 program
   .command('create-agent <language>')
   .description('Scaffold a minimal agent project ready to consume triks')
+  .option('-y, --yes', 'Skip prompts, use defaults')
   .action(createAgentCommand);
 
 // Lint command

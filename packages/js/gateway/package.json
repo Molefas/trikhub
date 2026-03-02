@@ -46,7 +46,7 @@
     "access": "public"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.5.0"
   },
   "scripts": {
     "build": "tsc",
@@ -55,12 +55,10 @@
   "dependencies": {
     "@trikhub/manifest": "workspace:*",
     "ajv": "^8.17.1",
-    "better-sqlite3": "^11.0.0",
     "uuid": "^9.0.0"
   },
   "devDependencies": {
     "@langchain/core": "^0.3.0",
-    "@types/better-sqlite3": "^7.6.0",
     "@types/uuid": "^9.0.0",
     "zod": "^3.0.0"
   },
