@@ -811,3 +811,135 @@ class TestErrorAutoTransferBackSanitization:
             assert isinstance(result, RouteTransferBack)
             # User-facing message should contain the error info
             assert "error" in result.message.lower()
+
+
+# ============================================================================
+# Tests: Config Validation Warning on load_trik
+# ============================================================================
+
+
+def _add_config_to_manifest(trik_dir: str, config: dict) -> None:
+    """Patch a trik's manifest.json to add a config section."""
+    manifest_path = os.path.join(trik_dir, "manifest.json")
+    with open(manifest_path) as f:
+        data = json.load(f)
+    data["config"] = config
+    with open(manifest_path, "w") as f:
+        json.dump(data, f)
+
+
+@pytest.mark.asyncio
+async def test_load_trik_warns_on_missing_config(capfd):
+    """load_trik should warn to stderr when required config keys are missing."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        trik_dir = _create_trik_dir(tmpdir, "needs-config")
+        _add_config_to_manifest(trik_dir, {
+            "required": [
+                {"key": "API_KEY", "description": "The API key"},
+                {"key": "SECRET", "description": "The secret"},
+            ]
+        })
+
+        gw = _make_gateway()
+        await gw.initialize()
+        await gw.load_trik(trik_dir)
+
+        captured = capfd.readouterr()
+        assert "needs-config" in captured.err
+        assert "API_KEY" in captured.err
+        assert "SECRET" in captured.err
+        assert "Warning" in captured.err
+        assert "secrets.json" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_load_trik_no_warn_when_config_present(capfd):
+    """No warning when all required config keys are provided."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        trik_dir = _create_trik_dir(tmpdir, "has-config")
+        _add_config_to_manifest(trik_dir, {
+            "required": [
+                {"key": "API_KEY", "description": "The API key"},
+            ]
+        })
+
+        config_store = InMemoryConfigStore()
+        config_store.set_for_trik("has-config", {"API_KEY": "my-key"})
+
+        gw = TrikGateway(TrikGatewayConfig(
+            config_store=config_store,
+            storage_provider=InMemoryStorageProvider(),
+            session_storage=InMemorySessionStorage(),
+        ))
+        await gw.initialize()
+        await gw.load_trik(trik_dir)
+
+        captured = capfd.readouterr()
+        assert captured.err == ""
+
+
+@pytest.mark.asyncio
+async def test_load_trik_no_warn_when_validate_config_false(capfd):
+    """No warning when validate_config is False on gateway config."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        trik_dir = _create_trik_dir(tmpdir, "skip-validation")
+        _add_config_to_manifest(trik_dir, {
+            "required": [
+                {"key": "API_KEY", "description": "The API key"},
+            ]
+        })
+
+        gw = TrikGateway(TrikGatewayConfig(
+            config_store=InMemoryConfigStore(),
+            storage_provider=InMemoryStorageProvider(),
+            session_storage=InMemorySessionStorage(),
+            validate_config=False,
+        ))
+        await gw.initialize()
+        await gw.load_trik(trik_dir)
+
+        captured = capfd.readouterr()
+        assert captured.err == ""
+
+
+@pytest.mark.asyncio
+async def test_load_trik_no_warn_when_no_required_config(capfd):
+    """No warning when trik has no config section at all."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        trik_dir = _create_trik_dir(tmpdir, "no-config")
+
+        gw = _make_gateway()
+        await gw.initialize()
+        await gw.load_trik(trik_dir)
+
+        captured = capfd.readouterr()
+        assert captured.err == ""
+
+
+@pytest.mark.asyncio
+async def test_load_trik_warns_only_missing_keys(capfd):
+    """Warning should only mention the missing keys, not the provided ones."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        trik_dir = _create_trik_dir(tmpdir, "partial-config")
+        _add_config_to_manifest(trik_dir, {
+            "required": [
+                {"key": "API_KEY", "description": "The API key"},
+                {"key": "SECRET", "description": "The secret"},
+            ]
+        })
+
+        config_store = InMemoryConfigStore()
+        config_store.set_for_trik("partial-config", {"API_KEY": "my-key"})
+
+        gw = TrikGateway(TrikGatewayConfig(
+            config_store=config_store,
+            storage_provider=InMemoryStorageProvider(),
+            session_storage=InMemorySessionStorage(),
+        ))
+        await gw.initialize()
+        await gw.load_trik(trik_dir)
+
+        captured = capfd.readouterr()
+        assert "SECRET" in captured.err
+        assert "API_KEY" not in captured.err
+        assert "Warning" in captured.err
