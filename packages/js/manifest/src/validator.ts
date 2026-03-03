@@ -126,6 +126,14 @@ const manifestSchema = {
           required: ['enabled'],
           additionalProperties: false,
         },
+        trikManagement: {
+          type: 'object',
+          properties: {
+            enabled: { type: 'boolean' },
+          },
+          required: ['enabled'],
+          additionalProperties: false,
+        },
       },
       additionalProperties: false,
     },

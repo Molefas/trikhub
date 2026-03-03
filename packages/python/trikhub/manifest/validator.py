@@ -138,6 +138,14 @@ MANIFEST_SCHEMA: dict[str, Any] = {
                     "required": ["enabled"],
                     "additionalProperties": False,
                 },
+                "trikManagement": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                    },
+                    "required": ["enabled"],
+                    "additionalProperties": False,
+                },
             },
             "additionalProperties": False,
         },

@@ -20,6 +20,7 @@ from trikhub.manifest.types import (
     StorageCapabilities,
     FilesystemCapabilities,
     ShellCapabilities,
+    TrikManagementCapabilities,
     # Configuration
     ConfigRequirement,
     TrikConfig,
@@ -31,11 +32,20 @@ from trikhub.manifest.types import (
     # Runtime communication
     TrikConfigContext,
     TrikStorageContext,
+    TrikRegistryContext,
     TrikContext,
     TrikAgent,
     TrikResponse,
     ToolCallRecord,
     ToolExecutionResult,
+    # Registry context return types
+    TrikSearchResult,
+    TrikSearchResultItem,
+    InstalledTrikInfo,
+    TrikInstallResult,
+    TrikUninstallResult,
+    TrikUpgradeResult,
+    TrikDetailInfo,
     # Gateway session
     HandoffLogType,
     HandoffLogEntry,
@@ -65,6 +75,7 @@ __all__ = [
     "StorageCapabilities",
     "FilesystemCapabilities",
     "ShellCapabilities",
+    "TrikManagementCapabilities",
     # Configuration
     "ConfigRequirement",
     "TrikConfig",
@@ -76,11 +87,20 @@ __all__ = [
     # Runtime communication
     "TrikConfigContext",
     "TrikStorageContext",
+    "TrikRegistryContext",
     "TrikContext",
     "TrikAgent",
     "TrikResponse",
     "ToolCallRecord",
     "ToolExecutionResult",
+    # Registry context return types
+    "TrikSearchResult",
+    "TrikSearchResultItem",
+    "InstalledTrikInfo",
+    "TrikInstallResult",
+    "TrikUninstallResult",
+    "TrikUpgradeResult",
+    "TrikDetailInfo",
     # Gateway session
     "HandoffLogType",
     "HandoffLogEntry",

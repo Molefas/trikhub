@@ -154,6 +154,15 @@ export interface ShellCapabilities {
 }
 
 /**
+ * Trik management capabilities — allows managing installed triks.
+ * Triks declaring this capability can search, install, uninstall, and upgrade other triks.
+ */
+export interface TrikManagementCapabilities {
+  /** Whether trik management is enabled */
+  enabled: boolean;
+}
+
+/**
  * Trik capabilities declared in manifest
  */
 export interface TrikCapabilities {
@@ -180,6 +189,13 @@ export interface TrikCapabilities {
    * @enforcement enforced - Gateway runs trik in Docker container. Requires filesystem.
    */
   shell?: ShellCapabilities;
+
+  /**
+   * Trik management capabilities.
+   * @enforcement enforced - Gateway injects registry context only when declared.
+   * Users are warned about this capability during install.
+   */
+  trikManagement?: TrikManagementCapabilities;
 }
 
 /**
@@ -279,6 +295,95 @@ export interface TrikStorageContext {
 }
 
 /**
+ * A single trik search result item.
+ */
+export interface TrikSearchResultItem {
+  name: string;
+  description: string;
+  version: string;
+  downloads: number;
+  verified: boolean;
+}
+
+/**
+ * Search results from the trik registry.
+ */
+export interface TrikSearchResult {
+  triks: TrikSearchResultItem[];
+  total: number;
+  hasMore: boolean;
+}
+
+/**
+ * Information about an installed trik.
+ */
+export interface InstalledTrikInfo {
+  id: string;
+  name: string;
+  version: string;
+  mode: 'conversational' | 'tool';
+  description: string;
+  capabilities: string[];
+}
+
+/**
+ * Result of a trik install operation.
+ */
+export interface TrikInstallResult {
+  status: 'installed' | 'already_installed' | 'failed';
+  trikId: string;
+  version: string;
+  error?: string;
+}
+
+/**
+ * Result of a trik uninstall operation.
+ */
+export interface TrikUninstallResult {
+  status: 'uninstalled' | 'not_found' | 'failed';
+  trikId: string;
+  error?: string;
+}
+
+/**
+ * Result of a trik upgrade operation.
+ */
+export interface TrikUpgradeResult {
+  status: 'upgraded' | 'already_latest' | 'not_found' | 'failed';
+  trikId: string;
+  previousVersion: string;
+  newVersion: string;
+  error?: string;
+}
+
+/**
+ * Detailed information about a trik from the registry.
+ */
+export interface TrikDetailInfo {
+  name: string;
+  description: string;
+  latestVersion: string;
+  versions: string[];
+  downloads: number;
+  verified: boolean;
+  mode: 'conversational' | 'tool';
+}
+
+/**
+ * Registry context for managing triks.
+ * Provides search, install, uninstall, upgrade, and list operations.
+ * Only populated when trikManagement capability is declared.
+ */
+export interface TrikRegistryContext {
+  search(query: string, options?: { page?: number; pageSize?: number }): Promise<TrikSearchResult>;
+  list(): Promise<InstalledTrikInfo[]>;
+  install(trikId: string, version?: string): Promise<TrikInstallResult>;
+  uninstall(trikId: string): Promise<TrikUninstallResult>;
+  upgrade(trikId: string, version?: string): Promise<TrikUpgradeResult>;
+  getInfo(trikId: string): Promise<TrikDetailInfo | null>;
+}
+
+/**
  * Context passed to a trik agent on each message.
  */
 export interface TrikContext {
@@ -287,6 +392,8 @@ export interface TrikContext {
   storage: TrikStorageContext;
   /** Capabilities declared in the trik's manifest, populated by the gateway/worker. */
   capabilities?: TrikCapabilities;
+  /** Registry context for trik management, only populated when trikManagement.enabled is true. */
+  registry?: TrikRegistryContext;
 }
 
 /**
