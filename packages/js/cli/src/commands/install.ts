@@ -580,6 +580,57 @@ async function isTrikInTriksDir(trikPath: string): Promise<boolean> {
   }
 }
 
+/**
+ * Read a trik's manifest and return required config entries.
+ */
+async function getRequiredConfig(
+  packageName: string,
+  baseDir: string,
+  isCrossLanguage: boolean
+): Promise<{ key: string; description: string }[]> {
+  try {
+    let manifestPath: string;
+
+    if (isCrossLanguage) {
+      // Cross-language triks are in .trikhub/triks/
+      manifestPath = join(baseDir, '.trikhub', 'triks', ...packageName.split('/'), 'manifest.json');
+    } else {
+      // JS triks are in node_modules/
+      manifestPath = join(baseDir, 'node_modules', ...packageName.split('/'), 'manifest.json');
+    }
+
+    if (!existsSync(manifestPath)) {
+      return [];
+    }
+
+    const content = await readFile(manifestPath, 'utf-8');
+    const manifest = JSON.parse(content);
+    return manifest.config?.required ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Print a hint about required configuration for a trik.
+ */
+function printConfigHint(
+  packageName: string,
+  requiredConfig: { key: string; description: string }[],
+  trikId?: string
+): void {
+  console.log();
+  console.log(chalk.yellow('  This trik requires configuration:'));
+  for (const cfg of requiredConfig) {
+    console.log(chalk.yellow(`    - ${cfg.key}: ${cfg.description}`));
+  }
+  console.log();
+  const id = trikId ?? packageName;
+  const jsonKeys = requiredConfig.map(c => `"${c.key}": "your-key-here"`).join(', ');
+  console.log(chalk.dim(`  Add to .trikhub/secrets.json:`));
+  console.log(chalk.dim(`    { "${id}": { ${jsonKeys} } }`));
+}
+
 export async function installCommand(
   trikInput: string,
   options: InstallOptions
@@ -649,6 +700,11 @@ export async function installCommand(
           } else {
             console.log(chalk.dim('The trik will be available to your AI agent.'));
           }
+
+          const requiredConfigCross = await getRequiredConfig(packageName, baseDir, true);
+          if (requiredConfigCross.length > 0) {
+            printConfigHint(packageName, requiredConfigCross);
+          }
         } else {
           spinner.fail(`Failed to install ${chalk.red(packageName)}`);
           process.exit(1);
@@ -669,6 +725,11 @@ export async function installCommand(
           console.log(chalk.dim(`  Registered in: .trikhub/config.json`));
           console.log();
           console.log(chalk.dim('The trik will be available to your AI agent.'));
+
+          const requiredConfigSame = await getRequiredConfig(packageName, baseDir, false);
+          if (requiredConfigSame.length > 0) {
+            printConfigHint(packageName, requiredConfigSame);
+          }
         } else {
           spinner.fail(`Failed to install ${chalk.red(packageName)}`);
           process.exit(1);

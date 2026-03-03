@@ -84,6 +84,43 @@ def _download_to_triks_directory(
     return target
 
 
+def _show_config_hint(package_name: str, runtime: str) -> None:
+    """Show required config hint after install if the trik needs configuration."""
+    try:
+        if runtime == "python":
+            # Python triks: find manifest in site-packages
+            from trikhub.cli.discovery import discover_triks_in_site_packages
+            triks = discover_triks_in_site_packages()
+            manifest = None
+            for t in triks:
+                if t.package_name == package_name or t.trik_id == package_name:
+                    manifest = t.manifest
+                    break
+        else:
+            # Node triks: read from .trikhub/triks/
+            from trikhub.cli.discovery import load_trik_manifest
+            if package_name.startswith("@"):
+                parts = package_name.split("/", 1)
+                trik_path = get_config_dir() / "triks" / parts[0] / parts[1]
+            else:
+                trik_path = get_config_dir() / "triks" / package_name
+            result = load_trik_manifest(trik_path)
+            manifest = result[0] if result else None
+
+        if manifest and manifest.config and manifest.config.required:
+            click.echo()
+            click.echo(click.style("  This trik requires configuration:", fg="yellow"))
+            for cfg in manifest.config.required:
+                click.echo(click.style(f"    - {cfg.key}: {cfg.description}", fg="yellow"))
+            click.echo()
+            json_keys = ", ".join(f'"{c.key}": "your-key-here"' for c in manifest.config.required)
+            trik_id = manifest.id
+            click.echo(f"  Add to .trikhub/secrets.json:")
+            click.echo(f'    {{ "{trik_id}": {{ {json_keys} }} }}')
+    except Exception:
+        pass  # Don't fail install if config check fails
+
+
 async def _install_from_registry(
     registry: RegistryClient, package_name: str, version: str | None,
 ) -> None:
@@ -116,6 +153,8 @@ async def _install_from_registry(
     await registry.report_download(package_name, install_version)
 
     click.echo(click.style(f"  Installed {package_name}@{install_version}", fg="green"))
+
+    _show_config_hint(package_name, runtime)
 
 
 @click.command("install")

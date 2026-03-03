@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -614,6 +615,18 @@ class TrikGateway:
         if self._config.allowed_triks and manifest.id not in self._config.allowed_triks:
             raise ValueError(f'Trik "{manifest.id}" is not in the allowlist')
 
+        # Validate required config
+        if self._config.validate_config is not False:
+            missing_keys = self._config_store.validate_config(manifest)
+            if missing_keys:
+                keys_str = ", ".join(missing_keys)
+                json_example = ", ".join(f'"{k}": "..."' for k in missing_keys)
+                print(
+                    f'[TrikGateway] Warning: trik "{manifest.id}" is missing required config: {keys_str}\n'
+                    f'  Add to .trikhub/secrets.json: {{ "{manifest.id}": {{ {json_example} }} }}',
+                    file=sys.stderr,
+                )
+
         runtime = manifest.entry.runtime or TrikRuntime.NODE
         is_tool_mode = manifest.agent.mode == "tool"
 
@@ -772,7 +785,6 @@ class TrikGateway:
                         errors.append((entry_path, str(e)))
 
         if errors:
-            import sys
             for path, err in errors:
                 print(f"[TrikGateway] Failed to load {path}: {err}", file=sys.stderr)
 
@@ -848,7 +860,6 @@ class TrikGateway:
                 errors.append((trik_name, str(e)))
 
         if errors:
-            import sys
             for trik_name, err in errors:
                 print(f"[TrikGateway] Failed to load {trik_name}: {err}", file=sys.stderr)
 
