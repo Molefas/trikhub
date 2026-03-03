@@ -280,6 +280,129 @@ describe('lintManifest TDPS rules', () => {
     expect(capResults).toHaveLength(0);
   });
 
+});
+
+// ============================================================================
+// Tier adjustment for manifest capabilities
+// ============================================================================
+
+describe('tier adjustment for manifest capabilities', () => {
+  it('upgrades tier to C when filesystem capability declared on clean trik', async () => {
+    const trikDir = await writeTrik('tier-fs', {
+      schemaVersion: 2,
+      id: 'tier-fs',
+      name: 'Tier FS',
+      description: 'A conversational trik with filesystem but clean code',
+      version: '1.0.0',
+      agent: {
+        mode: 'conversational',
+        handoffDescription: 'Builder agent',
+        systemPrompt: 'You are a builder.',
+        domain: ['test'],
+      },
+      capabilities: {
+        filesystem: { enabled: true },
+      },
+      entry: { module: 'src/index.js', export: 'default' },
+    });
+
+    const linter = new TrikLinter();
+    const { scan } = await linter.lint(trikDir);
+
+    // Source code is clean (tier A), but filesystem capability → at least C
+    expect(scan.tier).toBe('C');
+    expect(scan.tierLabel).toBe('System');
+  });
+
+  it('upgrades tier to D when shell capability declared on clean trik', async () => {
+    const trikDir = await writeTrik('tier-shell', {
+      schemaVersion: 2,
+      id: 'tier-shell',
+      name: 'Tier Shell',
+      description: 'A conversational trik with shell but clean code',
+      version: '1.0.0',
+      agent: {
+        mode: 'conversational',
+        handoffDescription: 'Builder agent',
+        systemPrompt: 'You are a builder.',
+        domain: ['test'],
+      },
+      capabilities: {
+        filesystem: { enabled: true },
+        shell: { enabled: true },
+      },
+      entry: { module: 'src/index.js', export: 'default' },
+    });
+
+    const linter = new TrikLinter();
+    const { scan } = await linter.lint(trikDir);
+
+    // Source code is clean (tier A), but shell capability → D
+    expect(scan.tier).toBe('D');
+    expect(scan.tierLabel).toBe('Unrestricted');
+  });
+
+  it('does not downgrade tier when code already at higher tier', async () => {
+    // Trik with filesystem capability but code that uses process (tier D)
+    const trikDir = await writeTrik('tier-no-downgrade', {
+      schemaVersion: 2,
+      id: 'tier-no-downgrade',
+      name: 'Tier No Downgrade',
+      description: 'A trik with process code and filesystem capability',
+      version: '1.0.0',
+      agent: {
+        mode: 'conversational',
+        handoffDescription: 'Builder agent',
+        systemPrompt: 'You are a builder.',
+        domain: ['test'],
+      },
+      capabilities: {
+        filesystem: { enabled: true },
+      },
+      entry: { module: 'src/index.js', export: 'default' },
+    });
+    // Write source that triggers tier D
+    await writeFile(join(trikDir, 'src', 'index.ts'), `import { exec } from 'node:child_process';\nexport default {};`);
+
+    const linter = new TrikLinter();
+    const { scan } = await linter.lint(trikDir);
+
+    // Code is tier D, filesystem would only imply C — stays D
+    expect(scan.tier).toBe('D');
+  });
+
+  it('does not adjust tier when no filesystem/shell capabilities', async () => {
+    const trikDir = await writeTrik('tier-no-caps', {
+      schemaVersion: 2,
+      id: 'tier-no-caps',
+      name: 'Tier No Caps',
+      description: 'A trik without filesystem/shell',
+      version: '1.0.0',
+      agent: {
+        mode: 'conversational',
+        handoffDescription: 'Helper agent',
+        systemPrompt: 'You are a helper.',
+        domain: ['test'],
+      },
+      capabilities: {
+        session: { enabled: true },
+      },
+      entry: { module: 'src/index.js', export: 'default' },
+    });
+
+    const linter = new TrikLinter();
+    const { scan } = await linter.lint(trikDir);
+
+    // Clean code, no filesystem/shell caps → tier A
+    expect(scan.tier).toBe('A');
+  });
+});
+
+// ============================================================================
+// logTemplate placeholder classification
+// ============================================================================
+
+describe('logTemplate classification', () => {
   it('classifies logTemplate placeholder errors correctly', async () => {
     const trikDir = await writeTrik('bad-template', {
       schemaVersion: 2,

@@ -9,7 +9,7 @@ from pathlib import Path
 import click
 
 from trikhub.cli.output import ok, fail, warn, info
-from trikhub.linter.scanner import scan_capabilities, format_scan_result
+from trikhub.linter.scanner import scan_capabilities, format_scan_result, adjust_tier_for_manifest
 from trikhub.manifest import validate_manifest
 
 
@@ -44,14 +44,13 @@ def lint_command(path: str, warnings_as_errors: bool, skip: tuple[str, ...]) -> 
 
     click.echo(f"Linting trik at: {trik_dir}\n")
 
-    # Capability scan
-    scan_result = scan_capabilities(trik_dir)
-    click.echo(format_scan_result(scan_result))
-    click.echo("")
-
     # Find manifest
     result = _find_manifest(trik_dir)
     if not result:
+        # Still show scan even without manifest
+        scan_result = scan_capabilities(trik_dir)
+        click.echo(format_scan_result(scan_result))
+        click.echo("")
         fail("Missing manifest.json")
         info("Create a manifest.json file with your trik definition")
         info("For Node.js triks: place manifest.json at repository root")
@@ -60,6 +59,32 @@ def lint_command(path: str, warnings_as_errors: bool, skip: tuple[str, ...]) -> 
 
     manifest_path, manifest_data = result
     ok("manifest.json found")
+
+    # Capability scan — adjusted for manifest-declared capabilities
+    scan_result = scan_capabilities(trik_dir)
+    scan_result = adjust_tier_for_manifest(scan_result, manifest_data)
+    click.echo(format_scan_result(scan_result))
+    click.echo("")
+
+    # Check filesystem/shell capability rules
+    caps = manifest_data.get("capabilities") or {}
+    fs_enabled = (caps.get("filesystem") or {}).get("enabled") is True
+    shell_enabled = (caps.get("shell") or {}).get("enabled") is True
+    agent_mode = (manifest_data.get("agent") or {}).get("mode", "")
+
+    if agent_mode == "tool":
+        if fs_enabled:
+            warn("Tool-mode triks should not declare filesystem capabilities. "
+                 "Filesystem and shell tools are designed for conversational triks.")
+        if shell_enabled:
+            warn("Tool-mode triks should not declare shell capabilities. "
+                 "Filesystem and shell tools are designed for conversational triks.")
+
+    if fs_enabled or shell_enabled:
+        cap_list = " and ".join(
+            c for c in ["filesystem", "shell"] if (c == "filesystem" and fs_enabled) or (c == "shell" and shell_enabled)
+        )
+        info(f"This trik declares {cap_list} capabilities and requires Docker for execution.")
 
     # Check entry point exists
     manifest_dir = manifest_path.parent
