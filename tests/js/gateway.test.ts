@@ -10,6 +10,7 @@ import { TrikGateway } from '../../packages/js/gateway/dist/gateway.js';
 import { InMemoryConfigStore } from '../../packages/js/gateway/dist/config-store.js';
 import { InMemoryStorageProvider } from '../../packages/js/gateway/dist/storage-provider.js';
 import { InMemorySessionStorage } from '../../packages/js/gateway/dist/session-storage.js';
+import { GatewayRegistryProvider } from '../../packages/js/gateway/dist/registry-provider.js';
 
 // Access private methods via prototype for testing
 const gateway = new TrikGateway();
@@ -434,5 +435,129 @@ describe('loadTrik config validation warning', () => {
     await gw.loadTrik(trikDir);
 
     expect(warnSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// Registry injection into TrikContext
+// ============================================================================
+
+describe('registry injection into TrikContext', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * Create a temporary trik directory with optional capabilities.
+   */
+  async function createTrikWithCapabilities(options: {
+    id: string;
+    mode?: 'tool' | 'conversational';
+    capabilities?: Record<string, unknown>;
+  }): Promise<string> {
+    const trikDir = await mkdtemp(join(tmpdir(), 'trik-registry-test-'));
+
+    const manifest: Record<string, unknown> = {
+      schemaVersion: 2,
+      id: options.id,
+      name: `Test Trik ${options.id}`,
+      description: 'A test trik for registry injection',
+      version: '1.0.0',
+      agent: {
+        mode: options.mode ?? 'tool',
+        domain: ['testing'],
+        ...(options.mode === 'conversational'
+          ? { handoffDescription: `Talk to ${options.id}`, systemPrompt: `You are ${options.id}.` }
+          : {}),
+      },
+      tools: options.mode === 'conversational' ? undefined : {
+        testTool: {
+          description: 'A test tool',
+          inputSchema: { type: 'object', properties: { query: { type: 'string' } } },
+          outputSchema: { type: 'object', properties: { status: { type: 'string', enum: ['ok', 'error'] } } },
+          outputTemplate: 'Status: {{status}}',
+        },
+      },
+      entry: { module: 'index.mjs', export: 'agent' },
+    };
+
+    if (options.capabilities) {
+      manifest.capabilities = options.capabilities;
+    }
+
+    await writeFile(join(trikDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+
+    const entryCode = options.mode === 'conversational'
+      ? `export const agent = {
+          async processMessage(message, context) {
+            return { message: 'hello', toolCalls: [] };
+          }
+        };`
+      : `export const agent = {
+          async executeTool(toolName, input, context) {
+            return { output: { status: 'ok' } };
+          }
+        };`;
+    await writeFile(join(trikDir, 'index.mjs'), entryCode);
+
+    return trikDir;
+  }
+
+  it('injects registry context when trikManagement is enabled', async () => {
+    const gw = new TrikGateway({
+      configStore: new InMemoryConfigStore(),
+      storageProvider: new InMemoryStorageProvider(),
+      sessionStorage: new InMemorySessionStorage(),
+    });
+    await gw.initialize();
+
+    const trikDir = await createTrikWithCapabilities({
+      id: 'test-mgmt-trik',
+      mode: 'tool',
+      capabilities: { trikManagement: { enabled: true } },
+    });
+
+    await gw.loadTrik(trikDir);
+
+    // Access private buildTrikContext to verify injection
+    const loaded = (gw as any).triks.get('test-mgmt-trik');
+    expect(loaded).toBeDefined();
+
+    const ctx = (gw as any).buildTrikContext('test-session', loaded);
+    expect(ctx.registry).toBeDefined();
+    expect(ctx.registry).toBeInstanceOf(GatewayRegistryProvider);
+    expect(ctx.capabilities).toBeDefined();
+    expect(ctx.capabilities.trikManagement.enabled).toBe(true);
+  });
+
+  it('does not inject registry context when trikManagement is not declared', async () => {
+    const gw = new TrikGateway({
+      configStore: new InMemoryConfigStore(),
+      storageProvider: new InMemoryStorageProvider(),
+      sessionStorage: new InMemorySessionStorage(),
+    });
+    await gw.initialize();
+
+    const trikDir = await createTrikWithCapabilities({
+      id: 'test-no-mgmt-trik',
+      mode: 'tool',
+    });
+
+    await gw.loadTrik(trikDir);
+
+    const loaded = (gw as any).triks.get('test-no-mgmt-trik');
+    const ctx = (gw as any).buildTrikContext('test-session', loaded);
+    expect(ctx.registry).toBeUndefined();
+  });
+
+  it('exposes registry provider via getRegistryProvider', () => {
+    const gw = new TrikGateway({
+      configStore: new InMemoryConfigStore(),
+      storageProvider: new InMemoryStorageProvider(),
+      sessionStorage: new InMemorySessionStorage(),
+    });
+
+    const provider = gw.getRegistryProvider();
+    expect(provider).toBeInstanceOf(GatewayRegistryProvider);
   });
 });

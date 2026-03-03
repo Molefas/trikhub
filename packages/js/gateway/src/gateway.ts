@@ -29,6 +29,7 @@ import {
 import { type ConfigStore, FileConfigStore } from './config-store.js';
 import { type StorageProvider, SqliteStorageProvider } from './storage-provider.js';
 import { type SessionStorage, InMemorySessionStorage } from './session-storage.js';
+import { GatewayRegistryProvider } from './registry-provider.js';
 
 // ============================================================================
 // Types
@@ -87,6 +88,11 @@ export interface TrikGatewayConfig {
    * with filesystem/shell capabilities).
    */
   containerManagerConfig?: ContainerManagerConfig;
+  /**
+   * Base URL for the TrikHub registry API (used by registry provider for trik management).
+   * Defaults to 'https://api.trikhub.com'.
+   */
+  registryBaseUrl?: string;
 }
 
 /**
@@ -187,6 +193,7 @@ export class TrikGateway {
   private configStore: ConfigStore;
   private storageProvider: StorageProvider;
   private sessionStorage: SessionStorage;
+  private registryProvider: GatewayRegistryProvider;
   private configLoaded = false;
   private pythonWorker: PythonWorker | null = null;
   private containerManager: DockerContainerManager | null = null;
@@ -204,6 +211,17 @@ export class TrikGateway {
     this.storageProvider = config.storageProvider ?? new SqliteStorageProvider();
     this.sessionStorage = config.sessionStorage ?? new InMemorySessionStorage();
     this.maxTurnsPerHandoff = config.maxTurnsPerHandoff ?? 20;
+    this.registryProvider = new GatewayRegistryProvider({
+      registryBaseUrl: config.registryBaseUrl,
+      configDir: config.triksDirectory
+        ? resolve(config.triksDirectory.replace(/^~/, homedir()), '..')
+        : join(process.cwd(), '.trikhub'),
+      gateway: {
+        getLoadedTriks: () => this.triks,
+        loadTrik: (path) => this.loadTrik(path),
+        unloadTrik: (id) => this.unloadTrik(id),
+      },
+    });
   }
 
   // ==========================================================================
@@ -240,6 +258,13 @@ export class TrikGateway {
    */
   getSessionStorage(): SessionStorage {
     return this.sessionStorage;
+  }
+
+  /**
+   * Get the registry provider (for trik management capability)
+   */
+  getRegistryProvider(): GatewayRegistryProvider {
+    return this.registryProvider;
   }
 
   // ==========================================================================
@@ -743,12 +768,17 @@ export class TrikGateway {
       storage: storageContext,
     };
 
-    // Include capabilities if the trik declares filesystem/shell
+    // Include capabilities if the trik declares filesystem/shell/trikManagement
     if (loaded.manifest.capabilities) {
       const caps = loaded.manifest.capabilities;
-      if (caps.filesystem?.enabled || caps.shell?.enabled) {
+      if (caps.filesystem?.enabled || caps.shell?.enabled || caps.trikManagement?.enabled) {
         ctx.capabilities = caps;
       }
+    }
+
+    // Inject registry context if trikManagement declared
+    if (loaded.manifest.capabilities?.trikManagement?.enabled) {
+      ctx.registry = this.registryProvider;
     }
 
     return ctx;
