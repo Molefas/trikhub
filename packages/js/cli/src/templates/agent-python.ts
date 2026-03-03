@@ -64,14 +64,18 @@ dependencies = [
     "langchain-core>=0.3.0",
     "langgraph>=0.2.0",
     "trikhub>=0.6.0",
-    "python-dotenv>=1.0.0",
+    "python-dotenv>=1.0.0",${config.channels === 'cli+telegram' ? `\n    "python-telegram-bot>=21.0",` : ''}
 ]
 `;
 }
 
 function generateEnvExample(config: CreateAgentConfig): string {
   const provider = PROVIDERS[config.provider];
-  return `${provider.envVar}=your-api-key-here\n`;
+  let env = `${provider.envVar}=your-api-key-here\n`;
+  if (config.channels === 'cli+telegram') {
+    env += `TELEGRAM_BOT_TOKEN=your-token-from-botfather\n`;
+  }
+  return env;
 }
 
 function generateGitignore(): string {
@@ -187,6 +191,197 @@ if __name__ == "__main__":
 `;
 }
 
+function generateTelegramPy(): string {
+  return `#!/usr/bin/env python3
+"""Telegram bot for the TrikHub-powered agent."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import time
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from telegram import Update
+from telegram.ext import Application, MessageHandler, filters, ContextTypes
+
+from agent import initialize_agent
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+async def main() -> None:
+    print("Loading agent...\\n")
+
+    app, handoff_tools, exposed_tools = await initialize_agent()
+
+    if handoff_tools:
+        print(f"Handoff triks: {', '.join(t.name for t in handoff_tools)}")
+    if exposed_tools:
+        print(f"Tool-mode triks: {', '.join(t.name for t in exposed_tools)}")
+
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token:
+        print("TELEGRAM_BOT_TOKEN is not set in .env")
+        raise SystemExit(1)
+
+    session_id = f"telegram-{int(time.time())}"
+
+    async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.message or not update.message.text:
+            return
+        try:
+            result = await app.process_message(update.message.text, session_id)
+            await update.message.reply_text(result.message)
+        except Exception as e:
+            logger.error("Error processing message: %s", e)
+            await update.message.reply_text("Something went wrong. Please try again.")
+
+    application = Application.builder().token(token).build()
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    print("\\nTelegram bot started! Send a message to your bot.\\n")
+    await application.run_polling()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+`;
+}
+
+function generateReadme(config: CreateAgentConfig): string {
+  const provider = PROVIDERS[config.provider];
+  const hasTelegram = config.channels === 'cli+telegram';
+
+  let readme = `# ${config.name}
+
+An AI agent powered by [TrikHub](https://trikhub.com). This agent uses **${provider.className}** and can be extended with triks — composable capabilities that plug into your agent.
+
+## What can this agent do?
+
+Out of the box, your agent is a general-purpose assistant. Its real power comes from **triks** — install them to give your agent new capabilities:
+
+\`\`\`bash
+# Browse and search available triks
+trik search <query>
+
+# Install a trik
+trik install @scope/trik-name
+\`\`\`
+
+Triks come in two flavors:
+- **Handoff triks** — take over the conversation for a specialized task (e.g. a coding assistant, a travel planner). Use \`/back\` to return.
+- **Tool triks** — appear as native tools the agent can call (e.g. web search, calculator).
+
+## Setup
+
+\`\`\`bash
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
+pip install -e .
+cp .env.example .env
+\`\`\`
+
+Add your **${provider.envVar}** to \`.env\`.
+`;
+
+  if (hasTelegram) {
+    readme += `
+### Telegram Bot Token
+
+To run the Telegram bot, you need a bot token:
+
+1. Open Telegram and message [@BotFather](https://t.me/BotFather)
+2. Send \`/newbot\`
+3. Choose a display name (e.g. "${config.name}")
+4. Choose a username (must end in \`bot\`, e.g. \`${config.name.replace(/-/g, '_')}_bot\`)
+5. Copy the token into \`.env\` as \`TELEGRAM_BOT_TOKEN\`
+`;
+  }
+
+  readme += `
+## Running
+
+### CLI mode
+
+\`\`\`bash
+python cli.py
+\`\`\`
+
+Chat with your agent in the terminal. Type \`/back\` to return from a trik handoff, \`exit\` to quit.
+`;
+
+  if (hasTelegram) {
+    readme += `
+### Telegram mode
+
+\`\`\`bash
+python telegram_bot.py
+\`\`\`
+
+Your agent runs as a Telegram bot. Open Telegram, find your bot by username, and start chatting.
+
+## Keeping your bot running
+
+The Telegram bot needs to stay running to receive messages. Here are a few options:
+
+### pm2 (Recommended)
+
+\`\`\`bash
+npm install -g pm2
+pm2 start python --name "${config.name}" -- telegram_bot.py
+pm2 save
+pm2 startup  # auto-start on boot
+\`\`\`
+
+### Docker
+
+\`\`\`dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+COPY pyproject.toml .
+COPY *.py .
+RUN pip install .
+CMD ["python", "telegram_bot.py"]
+\`\`\`
+
+### systemd (Linux VPS)
+
+\`\`\`ini
+[Unit]
+Description=${config.name} Telegram bot
+After=network.target
+
+[Service]
+ExecStart=/home/user/${config.name}/.venv/bin/python /home/user/${config.name}/telegram_bot.py
+WorkingDirectory=/home/user/${config.name}
+Restart=always
+EnvironmentFile=/home/user/${config.name}/.env
+
+[Install]
+WantedBy=multi-user.target
+\`\`\`
+`;
+  }
+
+  readme += `
+## Installing triks
+
+\`\`\`bash
+trik install @scope/trik-name
+\`\`\`
+
+Installed triks are saved to \`.trikhub/config.json\` and loaded automatically when your agent starts.
+`;
+
+  return readme;
+}
+
 // ============================================================================
 // Public API
 // ============================================================================
@@ -203,8 +398,13 @@ export function generateAgentPythonProject(config: CreateAgentConfig): Record<st
   files['.env.example'] = generateEnvExample(config);
   files['.gitignore'] = generateGitignore();
   files['.trikhub/config.json'] = generateTrikhubConfig();
+  files['README.md'] = generateReadme(config);
   files['agent.py'] = generateAgentPy(config);
   files['cli.py'] = generateCliPy();
+
+  if (config.channels === 'cli+telegram') {
+    files['telegram_bot.py'] = generateTelegramPy();
+  }
 
   return files;
 }

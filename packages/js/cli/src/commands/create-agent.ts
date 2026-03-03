@@ -60,6 +60,7 @@ export async function createAgentCommand(languageArg: string, options: { yes?: b
 
     let name: string;
     let provider: 'openai' | 'anthropic' | 'google';
+    let channels: 'cli' | 'cli+telegram' = 'cli';
     let targetDir: string;
 
     if (options.yes) {
@@ -107,6 +108,16 @@ export async function createAgentCommand(languageArg: string, options: { yes?: b
         });
         targetDir = resolve(process.cwd(), customPath);
       }
+
+      // Channel selection
+      channels = await select<'cli' | 'cli+telegram'>({
+        message: 'Communication channels:',
+        choices: [
+          { value: 'cli', name: 'CLI only' },
+          { value: 'cli+telegram', name: 'CLI + Telegram' },
+        ],
+        default: 'cli',
+      });
     }
 
     // Check if directory exists
@@ -120,7 +131,7 @@ export async function createAgentCommand(languageArg: string, options: { yes?: b
     spinner.start('Creating agent project...');
 
     // Build config
-    const config: CreateAgentConfig = { name, provider };
+    const config: CreateAgentConfig = { name, provider, channels };
 
     // Generate project files
     const files = language === 'ts'
@@ -160,20 +171,38 @@ export async function createAgentCommand(languageArg: string, options: { yes?: b
     }
 
     // Show success message
+    const hasTelegram = channels === 'cli+telegram';
+    const run = packageManager === 'pnpm' ? 'pnpm' : 'npm run';
+
     console.log();
     console.log(chalk.green.bold('  Your agent is ready!'));
     console.log();
     console.log(chalk.dim('  Next steps:'));
     console.log(`    cd ${name}`);
     console.log('    cp .env.example .env');
-    console.log('    # Add your API key to .env');
+
+    if (hasTelegram) {
+      console.log('    # Add your API key and TELEGRAM_BOT_TOKEN to .env');
+    } else {
+      console.log('    # Add your API key to .env');
+    }
 
     if (language === 'py') {
       console.log('    python -m venv .venv && source .venv/bin/activate');
       console.log('    pip install -e .');
       console.log('    python cli.py');
     } else {
-      console.log(`    ${packageManager === 'pnpm' ? 'pnpm' : 'npm run'} dev`);
+      console.log(`    ${run} dev`);
+    }
+
+    if (hasTelegram) {
+      console.log();
+      console.log(chalk.dim('  Run Telegram bot:'));
+      if (language === 'py') {
+        console.log('    python telegram_bot.py');
+      } else {
+        console.log(`    ${run} telegram`);
+      }
     }
 
     console.log();

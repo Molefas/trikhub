@@ -13,6 +13,7 @@
 export interface CreateAgentConfig {
   name: string;
   provider: 'openai' | 'anthropic' | 'google';
+  channels?: 'cli' | 'cli+telegram';
 }
 
 interface ProviderInfo {
@@ -53,22 +54,34 @@ const PROVIDERS: Record<string, ProviderInfo> = {
 
 function generatePackageJson(config: CreateAgentConfig): string {
   const provider = PROVIDERS[config.provider];
+  const hasTelegram = config.channels === 'cli+telegram';
+
+  const scripts: Record<string, string> = {
+    dev: 'node --import tsx src/cli.ts',
+    build: 'tsc',
+  };
+  if (hasTelegram) {
+    scripts.telegram = 'node --import tsx src/telegram.ts';
+  }
+
+  const dependencies: Record<string, string> = {
+    [provider.npmPackage]: '^1.0.0',
+    '@langchain/core': '^1.0.0',
+    '@langchain/langgraph': '^1.0.0',
+    '@trikhub/gateway': 'latest',
+    dotenv: '^16.4.0',
+  };
+  if (hasTelegram) {
+    dependencies.grammy = '^1.0.0';
+  }
+
   const pkg = {
     name: config.name,
     version: '0.1.0',
     description: 'AI agent powered by TrikHub',
     type: 'module',
-    scripts: {
-      dev: 'node --import tsx src/cli.ts',
-      build: 'tsc',
-    },
-    dependencies: {
-      [provider.npmPackage]: '^1.0.0',
-      '@langchain/core': '^1.0.0',
-      '@langchain/langgraph': '^1.0.0',
-      '@trikhub/gateway': 'latest',
-      dotenv: '^16.4.0',
-    },
+    scripts,
+    dependencies,
     devDependencies: {
       tsx: '^4.19.0',
       typescript: '^5.7.0',
@@ -98,7 +111,11 @@ function generateTsConfig(): string {
 
 function generateEnvExample(config: CreateAgentConfig): string {
   const provider = PROVIDERS[config.provider];
-  return `${provider.envVar}=your-api-key-here\n`;
+  let env = `${provider.envVar}=your-api-key-here\n`;
+  if (config.channels === 'cli+telegram') {
+    env += `TELEGRAM_BOT_TOKEN=your-token-from-botfather\n`;
+  }
+  return env;
 }
 
 function generateGitignore(): string {
@@ -216,6 +233,180 @@ main().catch((error) => {
 `;
 }
 
+function generateTelegramTs(): string {
+  return `import 'dotenv/config';
+import { Bot } from 'grammy';
+import { initializeAgent } from './agent.js';
+
+async function main() {
+  console.log('Loading agent...\\n');
+
+  const { app, handoffTools, exposedTools } = await initializeAgent();
+
+  if (handoffTools.length > 0) {
+    console.log(\`Handoff triks: \${handoffTools.map((t) => t.name).join(', ')}\`);
+  }
+  if (exposedTools.length > 0) {
+    console.log(\`Tool-mode triks: \${exposedTools.map((t) => t.name).join(', ')}\`);
+  }
+
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    console.error('TELEGRAM_BOT_TOKEN is not set in .env');
+    process.exit(1);
+  }
+
+  const bot = new Bot(token);
+  const sessionId = \`telegram-\${Date.now()}\`;
+
+  bot.on('message:text', async (ctx) => {
+    try {
+      const result = await app.processMessage(ctx.message.text, sessionId);
+      await ctx.reply(result.message);
+    } catch (error) {
+      console.error('Error processing message:', error);
+      await ctx.reply('Something went wrong. Please try again.');
+    }
+  });
+
+  bot.catch((err) => {
+    console.error('Bot error:', err);
+  });
+
+  console.log('\\nTelegram bot started! Send a message to your bot.\\n');
+  bot.start();
+}
+
+main().catch(console.error);
+`;
+}
+
+function generateReadme(config: CreateAgentConfig): string {
+  const provider = PROVIDERS[config.provider];
+  const hasTelegram = config.channels === 'cli+telegram';
+
+  let readme = `# ${config.name}
+
+An AI agent powered by [TrikHub](https://trikhub.com). This agent uses **${provider.className}** and can be extended with triks — composable capabilities that plug into your agent.
+
+## What can this agent do?
+
+Out of the box, your agent is a general-purpose assistant. Its real power comes from **triks** — install them to give your agent new capabilities:
+
+\`\`\`bash
+# Browse and search available triks
+trik search <query>
+
+# Install a trik
+trik install @scope/trik-name
+\`\`\`
+
+Triks come in two flavors:
+- **Handoff triks** — take over the conversation for a specialized task (e.g. a coding assistant, a travel planner). Use \`/back\` to return.
+- **Tool triks** — appear as native tools the agent can call (e.g. web search, calculator).
+
+## Setup
+
+\`\`\`bash
+cp .env.example .env
+\`\`\`
+
+Add your **${provider.envVar}** to \`.env\`.
+`;
+
+  if (hasTelegram) {
+    readme += `
+### Telegram Bot Token
+
+To run the Telegram bot, you need a bot token:
+
+1. Open Telegram and message [@BotFather](https://t.me/BotFather)
+2. Send \`/newbot\`
+3. Choose a display name (e.g. "${config.name}")
+4. Choose a username (must end in \`bot\`, e.g. \`${config.name.replace(/-/g, '_')}_bot\`)
+5. Copy the token into \`.env\` as \`TELEGRAM_BOT_TOKEN\`
+`;
+  }
+
+  readme += `
+## Running
+
+### CLI mode
+
+\`\`\`bash
+npm run dev
+\`\`\`
+
+Chat with your agent in the terminal. Type \`/back\` to return from a trik handoff, \`exit\` to quit.
+`;
+
+  if (hasTelegram) {
+    readme += `
+### Telegram mode
+
+\`\`\`bash
+npm run telegram
+\`\`\`
+
+Your agent runs as a Telegram bot. Open Telegram, find your bot by username, and start chatting.
+
+## Keeping your bot running
+
+The Telegram bot needs to stay running to receive messages. Here are a few options:
+
+### pm2 (Recommended)
+
+\`\`\`bash
+npm install -g pm2
+pm2 start npm --name "${config.name}" -- run telegram
+pm2 save
+pm2 startup  # auto-start on boot
+\`\`\`
+
+### Docker
+
+\`\`\`dockerfile
+FROM node:22-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm install --production
+COPY . .
+RUN npm run build
+CMD ["node", "dist/telegram.js"]
+\`\`\`
+
+### systemd (Linux VPS)
+
+\`\`\`ini
+[Unit]
+Description=${config.name} Telegram bot
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/node /home/user/${config.name}/dist/telegram.js
+WorkingDirectory=/home/user/${config.name}
+Restart=always
+EnvironmentFile=/home/user/${config.name}/.env
+
+[Install]
+WantedBy=multi-user.target
+\`\`\`
+`;
+  }
+
+  readme += `
+## Installing triks
+
+\`\`\`bash
+trik install @scope/trik-name
+\`\`\`
+
+Installed triks are saved to \`.trikhub/config.json\` and loaded automatically when your agent starts.
+`;
+
+  return readme;
+}
+
 // ============================================================================
 // Public API
 // ============================================================================
@@ -233,8 +424,13 @@ export function generateAgentTypescriptProject(config: CreateAgentConfig): Recor
   files['.env.example'] = generateEnvExample(config);
   files['.gitignore'] = generateGitignore();
   files['.trikhub/config.json'] = generateTrikhubConfig();
+  files['README.md'] = generateReadme(config);
   files['src/agent.ts'] = generateAgentTs(config);
   files['src/cli.ts'] = generateCliTs();
+
+  if (config.channels === 'cli+telegram') {
+    files['src/telegram.ts'] = generateTelegramTs();
+  }
 
   return files;
 }
