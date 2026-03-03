@@ -16,6 +16,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import chalk from 'chalk';
 import ora from 'ora';
 import * as semver from 'semver';
@@ -72,6 +73,7 @@ function detectProjectType(baseDir: string): ProjectType {
 
 interface InstallOptions {
   version?: string;
+  yes?: boolean;
 }
 
 interface NpmTriksConfig {
@@ -631,6 +633,59 @@ function printConfigHint(
   console.log(chalk.dim(`    { "${id}": { ${jsonKeys} } }`));
 }
 
+const CAPABILITY_DESCRIPTIONS: Record<string, string> = {
+  storage: 'Can store persistent data',
+  filesystem: 'Can read and write files (runs in Docker container)',
+  shell: 'Can execute shell commands (runs in Docker container)',
+  trikManagement: 'Can search, install, uninstall, and upgrade triks',
+};
+
+/**
+ * Display capability warnings and prompt for consent before installing.
+ * Returns true if the user consents (or there are no capabilities to warn about).
+ */
+async function promptCapabilityConsent(
+  manifest: Record<string, unknown>,
+  githubRepo: string,
+  skipPrompt: boolean,
+): Promise<boolean> {
+  const caps = manifest.capabilities as Record<string, Record<string, unknown>> | undefined;
+  if (!caps) return true;
+
+  const declared: string[] = [];
+  for (const capName of ['storage', 'filesystem', 'shell', 'trikManagement']) {
+    const cap = caps[capName];
+    if (cap && cap.enabled === true) {
+      declared.push(capName);
+    }
+  }
+
+  // session is low-risk, don't warn about it
+  if (declared.length === 0) return true;
+
+  console.log();
+  console.log(chalk.yellow('  ⚠️  This trik declares the following capabilities:'));
+  console.log();
+  for (const cap of declared) {
+    const desc = CAPABILITY_DESCRIPTIONS[cap] ?? cap;
+    console.log(chalk.yellow(`     • ${cap} — ${desc}`));
+  }
+  console.log();
+  console.log(chalk.dim(`  These capabilities are granted at install time.`));
+  console.log(chalk.dim(`  Review the trik source at: github.com/${githubRepo}`));
+  console.log();
+
+  if (skipPrompt) return true;
+
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question('  Continue? [y/N] ', (answer) => {
+      rl.close();
+      resolve(answer.toLowerCase() === 'y');
+    });
+  });
+}
+
 export async function installCommand(
   trikInput: string,
   options: InstallOptions
@@ -674,6 +729,24 @@ export async function installCommand(
       const latestVersion = trikInfo.versions.find(v => v.version === trikInfo.latestVersion);
       if (latestVersion?.runtime) {
         trikRuntime = latestVersion.runtime;
+      }
+
+      // Check capabilities and prompt for consent before installing
+      const targetVersion = versionSpec
+        ? trikInfo.versions.find(v => v.version === versionSpec)
+        : latestVersion;
+      if (targetVersion?.manifest) {
+        spinner.stop();
+        const consent = await promptCapabilityConsent(
+          targetVersion.manifest,
+          trikInfo.githubRepo,
+          options.yes ?? false,
+        );
+        if (!consent) {
+          console.log(chalk.red('  Installation cancelled.'));
+          process.exit(1);
+        }
+        spinner.start();
       }
 
       const isCrossLanguage = projectType !== trikRuntime;

@@ -41,6 +41,7 @@ class TrikVersion:
     commit_sha: str
     published_at: str
     downloads: int = 0
+    manifest: dict[str, Any] | None = None
 
 
 @dataclass
@@ -205,6 +206,7 @@ class RegistryClient:
             commit_sha=api.get("commitSha", ""),
             published_at=api.get("publishedAt", ""),
             downloads=api.get("downloads", 0),
+            manifest=api.get("manifest"),
         )
 
     # -- Search / Info -------------------------------------------------------
