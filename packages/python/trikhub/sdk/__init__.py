@@ -15,6 +15,12 @@ from trikhub.sdk.workspace_tools import (
     WORKSPACE_TOOL_NAMES,
     WORKSPACE_SYSTEM_PROMPT,
 )
+from trikhub.sdk.registry_tools import (
+    get_registry_tools,
+    get_active_registry_tool_names,
+    REGISTRY_TOOL_NAMES,
+    REGISTRY_SYSTEM_PROMPT,
+)
 from trikhub.sdk.filesystem_tools import (
     FilesystemHandlers,
     create_filesystem_handlers,
@@ -54,6 +60,11 @@ __all__ = [
     "get_active_workspace_tool_names",
     "WORKSPACE_TOOL_NAMES",
     "WORKSPACE_SYSTEM_PROMPT",
+    # Registry tools (trik management capability)
+    "get_registry_tools",
+    "get_active_registry_tool_names",
+    "REGISTRY_TOOL_NAMES",
+    "REGISTRY_SYSTEM_PROMPT",
     # Filesystem + shell tool handlers (low-level)
     "FilesystemHandlers",
     "create_filesystem_handlers",
