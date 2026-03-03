@@ -26,6 +26,12 @@ from trikhub.gateway.node_worker import (
     NodeWorker,
     NodeWorkerConfig,
 )
+from trikhub.gateway.container_manager import (
+    ContainerWorkerHandle,
+    ContainerOptions,
+    ContainerManagerConfig,
+    DockerContainerManager,
+)
 from trikhub.gateway.session_storage import (
     InMemorySessionStorage,
     SessionStorage,
@@ -57,6 +63,11 @@ __all__ = [
     # Node worker
     "NodeWorker",
     "NodeWorkerConfig",
+    # Container manager
+    "ContainerWorkerHandle",
+    "ContainerOptions",
+    "ContainerManagerConfig",
+    "DockerContainerManager",
     # Session storage
     "SessionStorage",
     "InMemorySessionStorage",

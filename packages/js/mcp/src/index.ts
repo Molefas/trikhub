@@ -156,6 +156,8 @@ server.tool(
       .object({
         storage: z.boolean().optional(),
         session: z.boolean().optional(),
+        filesystem: z.boolean().optional().describe('Enable sandboxed filesystem access (requires Docker)'),
+        shell: z.boolean().optional().describe('Enable shell command execution (requires filesystem)'),
         config: z
           .array(z.object({ key: z.string(), description: z.string() }))
           .optional(),
@@ -250,7 +252,7 @@ const MANIFEST_SCHEMA_DOC = `# TrikHub v2 Manifest Schema
 | Field | Type | Description |
 |-------|------|-------------|
 | tools | Record<string, ToolDeclaration> | Internal tools the agent uses |
-| capabilities | { session?, storage? } | Session and storage capabilities |
+| capabilities | { session?, storage?, filesystem?, shell? } | Runtime capabilities |
 | limits | { maxTurnTimeMs } | Resource limits |
 | config | { required?, optional? } | Configuration requirements (API keys, tokens) |
 | author | string | Author name |
@@ -314,6 +316,31 @@ Tool-mode triks should NOT have handoffDescription or systemPrompt.
 | enabled | boolean | Whether persistent storage is enabled |
 | maxSizeBytes | number | Maximum storage size in bytes (default: 100MB) |
 | persistent | boolean | Whether storage persists across sessions (default: true) |
+
+### Filesystem
+
+Enables sandboxed filesystem access inside a Docker container. The trik gets a \`/workspace\` directory for reading, writing, and managing files. The SDK auto-injects filesystem tools (\`read_file\`, \`write_file\`, \`edit_file\`, \`list_directory\`, \`glob_files\`, \`grep_files\`, \`delete_file\`, \`create_directory\`) into the LLM's tool list.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| enabled | boolean | Whether filesystem access is enabled |
+| maxSizeBytes | number | Max total size of workspace directory in bytes (default: 500MB) |
+
+**Important:** Declaring filesystem capabilities triggers containerized execution via Docker. The trik runs inside a Docker container with \`/workspace\` mounted as the only writable directory. Docker must be available on the host.
+
+### Shell
+
+Enables shell command execution inside the container. The SDK auto-injects an \`execute_command\` tool into the LLM's tool list.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| enabled | boolean | Whether shell command execution is enabled |
+| timeoutMs | number | Max time per command in ms (default: 30000) |
+| maxConcurrent | number | Max concurrent processes (default: 3) |
+
+**Rule:** If \`shell\` is enabled, \`filesystem\` must also be enabled. Shell access without filesystem doesn't make practical sense — commands need a workspace to operate in.
+
+**Note:** Filesystem and shell capabilities are designed for conversational-mode triks. Tool-mode triks should not declare these capabilities (the linter will warn).
 
 ## Configuration
 
@@ -388,6 +415,34 @@ Integer, number, and boolean fields are always safe.
   "entry": { "module": "./dist/index.js", "export": "default" }
 }
 \`\`\`
+
+#### Conversational Mode with Filesystem + Shell (Containerized)
+
+\`\`\`json
+{
+  "schemaVersion": 2,
+  "id": "my-builder",
+  "name": "My Builder",
+  "description": "A builder assistant that creates and runs code",
+  "version": "1.0.0",
+  "agent": {
+    "mode": "conversational",
+    "handoffDescription": "Builds and runs small projects in a sandboxed workspace",
+    "systemPromptFile": "./src/prompts/system.md",
+    "model": { "capabilities": ["tool_use"] },
+    "domain": ["code-generation", "project-builder"]
+  },
+  "capabilities": {
+    "session": { "enabled": true },
+    "filesystem": { "enabled": true, "maxSizeBytes": 524288000 },
+    "shell": { "enabled": true, "timeoutMs": 60000, "maxConcurrent": 3 }
+  },
+  "limits": { "maxTurnTimeMs": 60000 },
+  "entry": { "module": "./dist/index.js", "export": "default" }
+}
+\`\`\`
+
+**Note:** The trik author does not need to define filesystem/shell tools or write Dockerfiles. Declaring the capabilities in the manifest is sufficient — the SDK auto-injects workspace tools and the gateway handles containerized execution.
 
 #### Python Conversational Example
 
@@ -564,8 +619,10 @@ create_react_agent(model=model, tools=tools, prompt=_SYSTEM_PROMPT)
 
 ## Runtime Context API
 
-Both conversational and tool-mode agents receive a \`TrikContext\` with three fields:
-\`{ sessionId, config, storage }\`.
+Both conversational and tool-mode agents receive a \`TrikContext\` with:
+\`{ sessionId, config, storage, capabilities }\`.
+
+The \`capabilities\` field contains the trik's declared capabilities from the manifest. When filesystem/shell capabilities are enabled, the SDK uses this to auto-inject workspace tools into the LLM's tool list.
 
 ### Config Access
 

@@ -38,6 +38,8 @@ interface ScaffoldInput {
   capabilities?: {
     storage?: boolean;
     session?: boolean;
+    filesystem?: boolean;
+    shell?: boolean;
     config?: Array<{ key: string; description: string }>;
   };
 }
@@ -153,6 +155,12 @@ function generateManifest(input: ScaffoldInput, pkgName?: string): string {
   }
   if (input.capabilities?.storage) {
     caps.storage = { enabled: true };
+  }
+  if (input.capabilities?.filesystem) {
+    caps.filesystem = { enabled: true, maxSizeBytes: 524288000 };
+  }
+  if (input.capabilities?.shell) {
+    caps.shell = { enabled: true, timeoutMs: 60000, maxConcurrent: 3 };
   }
   if (Object.keys(caps).length > 0) {
     manifest.capabilities = caps;

@@ -3,11 +3,13 @@
 import pytest
 from trikhub.manifest.types import (
     AgentDefinition,
+    FilesystemCapabilities,
     HandoffLogEntry,
     HandoffSession,
     JSONSchema,
     ModelPreferences,
     SessionCapabilities,
+    ShellCapabilities,
     StorageCapabilities,
     ToolCallRecord,
     ToolDeclaration,
@@ -272,3 +274,67 @@ class TestHandoffSession:
         )
         assert len(session.log) == 2
         assert session.log[0].type == "handoff_start"
+
+
+# ============================================================================
+# Filesystem and Shell capability types
+# ============================================================================
+
+
+class TestFilesystemCapabilities:
+    def test_minimal(self):
+        fs = FilesystemCapabilities(enabled=True)
+        assert fs.enabled is True
+        assert fs.maxSizeBytes is None
+
+    def test_with_max_size(self):
+        fs = FilesystemCapabilities(enabled=True, maxSizeBytes=524288000)
+        assert fs.maxSizeBytes == 524288000
+
+    def test_disabled(self):
+        fs = FilesystemCapabilities(enabled=False)
+        assert fs.enabled is False
+
+
+class TestShellCapabilities:
+    def test_minimal(self):
+        shell = ShellCapabilities(enabled=True)
+        assert shell.enabled is True
+        assert shell.timeoutMs is None
+        assert shell.maxConcurrent is None
+
+    def test_with_options(self):
+        shell = ShellCapabilities(enabled=True, timeoutMs=60000, maxConcurrent=3)
+        assert shell.timeoutMs == 60000
+        assert shell.maxConcurrent == 3
+
+
+class TestTrikCapabilitiesWithFilesystemShell:
+    def test_capabilities_with_filesystem(self):
+        caps = TrikCapabilities(
+            filesystem=FilesystemCapabilities(enabled=True),
+        )
+        assert caps.filesystem.enabled is True
+        assert caps.shell is None
+
+    def test_capabilities_with_filesystem_and_shell(self):
+        caps = TrikCapabilities(
+            filesystem=FilesystemCapabilities(enabled=True),
+            shell=ShellCapabilities(enabled=True, timeoutMs=30000),
+        )
+        assert caps.filesystem.enabled is True
+        assert caps.shell.enabled is True
+
+    def test_manifest_with_filesystem_capabilities(self):
+        data = make_conversational_manifest(
+            capabilities={
+                "filesystem": {"enabled": True, "maxSizeBytes": 524288000},
+                "shell": {"enabled": True, "timeoutMs": 60000, "maxConcurrent": 3},
+            }
+        )
+        manifest = TrikManifest(**data)
+        assert manifest.capabilities.filesystem.enabled is True
+        assert manifest.capabilities.filesystem.maxSizeBytes == 524288000
+        assert manifest.capabilities.shell.enabled is True
+        assert manifest.capabilities.shell.timeoutMs == 60000
+        assert manifest.capabilities.shell.maxConcurrent == 3

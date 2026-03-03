@@ -21,7 +21,7 @@ import sys
 import time
 from typing import Any
 
-from trikhub.manifest import TrikContext
+from trikhub.manifest import TrikCapabilities, TrikContext
 
 from trikhub.worker.protocol import (
     ErrorCode,
@@ -228,10 +228,13 @@ class PythonWorker:
     def _build_context(self, params: dict[str, Any]) -> TrikContext:
         config_record = params.get("config", {})
         config_ctx = _ConfigContext(config_record)
+        capabilities_data = params.get("capabilities")
+        capabilities = TrikCapabilities(**capabilities_data) if capabilities_data else None
         return TrikContext(
             sessionId=params.get("sessionId", ""),
             config=config_ctx,
             storage=self._storage_proxy,
+            capabilities=capabilities,
         )
 
     def _write_response(self, response: JsonRpcResponse) -> None:

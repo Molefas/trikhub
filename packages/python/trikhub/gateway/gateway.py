@@ -37,6 +37,12 @@ from trikhub.manifest import (
 from trikhub.worker.trik_loader import TrikLoader
 
 from trikhub.gateway.config_store import ConfigStore, FileConfigStore, InMemoryConfigStore
+from trikhub.gateway.container_manager import (
+    ContainerManagerConfig,
+    ContainerOptions,
+    ContainerWorkerHandle,
+    DockerContainerManager,
+)
 from trikhub.gateway.node_worker import NodeWorker, NodeWorkerConfig
 from trikhub.gateway.session_storage import InMemorySessionStorage, SessionStorage
 from trikhub.gateway.storage_provider import InMemoryStorageProvider, SqliteStorageProvider, StorageProvider
@@ -53,6 +59,7 @@ class _LoadedTrik:
     agent: Any  # TrikAgent (Protocol) — may be proxy for JS triks
     path: str
     runtime: TrikRuntime
+    containerized: bool = False
 
 
 @dataclass
@@ -72,6 +79,7 @@ class TrikGatewayConfig:
     validate_config: bool = True
     node_worker_config: NodeWorkerConfig | None = None
     max_turns_per_handoff: int = 20
+    container_manager_config: ContainerManagerConfig | None = None
 
 
 # ============================================================================
@@ -186,6 +194,7 @@ class TrikGateway:
         self._max_turns = cfg.max_turns_per_handoff
         self._config_loaded = False
         self._node_worker: NodeWorker | None = None
+        self._container_manager: DockerContainerManager | None = None
         self._trik_loader = TrikLoader()
         self._triks: dict[str, _LoadedTrik] = {}
         self._active_handoff: _ActiveHandoff | None = None
@@ -214,7 +223,7 @@ class TrikGateway:
     async def route_message(self, message: str, session_id: str) -> RouteResult:
         # /back escape
         if message.strip() == "/back" and self._active_handoff:
-            return self._force_transfer_back()
+            return await self._force_transfer_back()
 
         # Active handoff — route to trik
         if self._active_handoff:
@@ -374,7 +383,7 @@ class TrikGateway:
         handoff.turn_count += 1
 
         if handoff.turn_count > self._max_turns:
-            return self._auto_transfer_back(
+            return await self._auto_transfer_back(
                 f"Maximum turns ({self._max_turns}) exceeded. Automatically transferring back."
             )
 
@@ -386,7 +395,7 @@ class TrikGateway:
             user_message = f'Trik "{loaded.manifest.name}" encountered an error: {sanitized}'
             # Agent-facing log: generic message, no trik-controlled text
             agent_log = f'Trik "{loaded.manifest.name}" encountered an error and transferred back'
-            return self._auto_transfer_back(user_message, log_summary=agent_log)
+            return await self._auto_transfer_back(user_message, log_summary=agent_log)
 
         if response.toolCalls:
             self._process_tool_calls(handoff.session_id, loaded.manifest, response.toolCalls)
@@ -401,6 +410,7 @@ class TrikGateway:
                 ),
             )
             summary = self._build_session_summary(handoff.session_id, loaded.manifest)
+            await self._stop_container_if_needed(handoff.trik_id)
             result = RouteTransferBack(
                 trik_id=handoff.trik_id,
                 message=response.message,
@@ -416,7 +426,7 @@ class TrikGateway:
             session_id=handoff.session_id,
         )
 
-    def _force_transfer_back(self) -> RouteForceBack:
+    async def _force_transfer_back(self) -> RouteForceBack:
         handoff = self._active_handoff
         assert handoff is not None
         loaded = self._triks[handoff.trik_id]
@@ -430,6 +440,7 @@ class TrikGateway:
             ),
         )
         summary = self._build_session_summary(handoff.session_id, loaded.manifest)
+        await self._stop_container_if_needed(handoff.trik_id)
         result = RouteForceBack(
             trik_id=handoff.trik_id,
             message="",
@@ -452,7 +463,7 @@ class TrikGateway:
             return cleaned
         return cleaned[:max_length] + "..."
 
-    def _auto_transfer_back(self, reason: str, log_summary: str | None = None) -> RouteTransferBack:
+    async def _auto_transfer_back(self, reason: str, log_summary: str | None = None) -> RouteTransferBack:
         handoff = self._active_handoff
         assert handoff is not None
         loaded = self._triks[handoff.trik_id]
@@ -467,6 +478,7 @@ class TrikGateway:
             ),
         )
         summary = self._build_session_summary(handoff.session_id, loaded.manifest)
+        await self._stop_container_if_needed(handoff.trik_id)
         result = RouteTransferBack(
             trik_id=handoff.trik_id,
             message=reason,
@@ -595,7 +607,26 @@ class TrikGateway:
             loaded.manifest.id,
             loaded.manifest.capabilities.storage if loaded.manifest.capabilities else None,
         )
-        return TrikContext(sessionId=session_id, config=config_ctx, storage=storage_ctx)
+        ctx = TrikContext(sessionId=session_id, config=config_ctx, storage=storage_ctx)
+
+        # Include capabilities if the trik declares filesystem/shell
+        if loaded.manifest.capabilities:
+            caps = loaded.manifest.capabilities
+            if (caps.filesystem and caps.filesystem.enabled) or (caps.shell and caps.shell.enabled):
+                ctx.capabilities = caps
+
+        return ctx
+
+    @staticmethod
+    def _needs_containerization(manifest: TrikManifest) -> bool:
+        """Check whether a manifest requires containerized execution."""
+        caps = manifest.capabilities
+        if not caps:
+            return False
+        return bool(
+            (caps.filesystem and caps.filesystem.enabled)
+            or (caps.shell and caps.shell.enabled)
+        )
 
     # -- Trik Loading ---------------------------------------------------------
 
@@ -629,8 +660,17 @@ class TrikGateway:
 
         runtime = manifest.entry.runtime or TrikRuntime.NODE
         is_tool_mode = manifest.agent.mode == "tool"
+        containerized = self._needs_containerization(manifest)
 
-        if runtime == TrikRuntime.PYTHON or runtime == "python":
+        if containerized:
+            # Containerized triks — always run inside Docker regardless of runtime
+            agent = self._create_container_agent_proxy(manifest, trik_path, runtime)
+            self._triks[manifest.id] = _LoadedTrik(
+                manifest=manifest, agent=agent, path=trik_path,
+                runtime=runtime if isinstance(runtime, TrikRuntime) else TrikRuntime(runtime),
+                containerized=True,
+            )
+        elif runtime == TrikRuntime.PYTHON or runtime == "python":
             # Load Python triks in-process
             agent = self._trik_loader.load(trik_path)
             self._triks[manifest.id] = _LoadedTrik(
@@ -730,6 +770,101 @@ class TrikGateway:
 
         return proxy
 
+    def _create_container_agent_proxy(
+        self, manifest: TrikManifest, trik_path: str, runtime: TrikRuntime | str
+    ) -> Any:
+        """Create a proxy TrikAgent for containerized triks that delegates to Docker containers."""
+        gateway = self
+        runtime_str = runtime.value if isinstance(runtime, TrikRuntime) else str(runtime)
+
+        class _ContainerAgentProxy:
+            pass
+
+        proxy = _ContainerAgentProxy()
+
+        if manifest.agent.mode == "conversational":
+
+            async def _process_message(message: str, context: TrikContext) -> TrikResponse:
+                manager = gateway._ensure_container_manager()
+                workspace_path = manager.get_workspace_path(manifest.id)
+                handle = await manager.launch(
+                    manifest.id,
+                    ContainerOptions(
+                        runtime=runtime_str,
+                        workspace_path=workspace_path,
+                        trik_path=os.path.abspath(trik_path),
+                    ),
+                )
+                handle.set_storage_context(context.storage)
+                try:
+                    result = await handle.process_message(
+                        trik_path=trik_path,
+                        message=message,
+                        session_id=context.sessionId,
+                        config=_config_to_record(context.config),
+                        storage_namespace=manifest.id,
+                    )
+                    return TrikResponse(
+                        message=result.message,
+                        transferBack=result.transfer_back,
+                        toolCalls=(
+                            [ToolCallRecord(**tc) for tc in result.tool_calls]
+                            if result.tool_calls
+                            else None
+                        ),
+                    )
+                finally:
+                    handle.set_storage_context(None)
+
+            proxy.process_message = _process_message  # type: ignore[attr-defined]
+
+        if manifest.agent.mode == "tool":
+
+            async def _execute_tool(
+                tool_name: str, input: dict[str, Any], context: TrikContext
+            ) -> ToolExecutionResult:
+                manager = gateway._ensure_container_manager()
+                workspace_path = manager.get_workspace_path(manifest.id)
+                handle = await manager.launch(
+                    manifest.id,
+                    ContainerOptions(
+                        runtime=runtime_str,
+                        workspace_path=workspace_path,
+                        trik_path=os.path.abspath(trik_path),
+                    ),
+                )
+                handle.set_storage_context(context.storage)
+                try:
+                    result = await handle.execute_tool(
+                        trik_path=trik_path,
+                        tool_name=tool_name,
+                        input=input,
+                        session_id=context.sessionId,
+                        config=_config_to_record(context.config),
+                        storage_namespace=manifest.id,
+                    )
+                    return ToolExecutionResult(output=result.output)
+                finally:
+                    handle.set_storage_context(None)
+
+            proxy.execute_tool = _execute_tool  # type: ignore[attr-defined]
+
+        return proxy
+
+    def _ensure_container_manager(self) -> DockerContainerManager:
+        """Ensure container manager is initialized."""
+        if self._container_manager is None:
+            self._container_manager = DockerContainerManager(
+                self._config.container_manager_config
+            )
+        return self._container_manager
+
+    async def _stop_container_if_needed(self, trik_id: str) -> None:
+        """Stop a trik's container if it is containerized and running."""
+        loaded = self._triks.get(trik_id)
+        if loaded and loaded.containerized and self._container_manager:
+            await self._container_manager.stop(trik_id)
+
     async def _ensure_node_worker(self) -> NodeWorker:
         if self._node_worker is None:
             self._node_worker = NodeWorker(self._config.node_worker_config)
@@ -741,6 +876,9 @@ class TrikGateway:
         if self._node_worker:
             await self._node_worker.shutdown()
             self._node_worker = None
+        if self._container_manager:
+            await self._container_manager.stop_all()
+            self._container_manager = None
 
     # -- Directory Loading ----------------------------------------------------
 

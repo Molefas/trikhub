@@ -18,6 +18,8 @@ from trikhub.manifest.types import (
     TrikLimits,
     SessionCapabilities,
     StorageCapabilities,
+    FilesystemCapabilities,
+    ShellCapabilities,
     # Configuration
     ConfigRequirement,
     TrikConfig,
@@ -61,6 +63,8 @@ __all__ = [
     "TrikLimits",
     "SessionCapabilities",
     "StorageCapabilities",
+    "FilesystemCapabilities",
+    "ShellCapabilities",
     # Configuration
     "ConfigRequirement",
     "TrikConfig",

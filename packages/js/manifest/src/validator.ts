@@ -107,6 +107,25 @@ const manifestSchema = {
           required: ['enabled'],
           additionalProperties: false,
         },
+        filesystem: {
+          type: 'object',
+          properties: {
+            enabled: { type: 'boolean' },
+            maxSizeBytes: { type: 'number', minimum: 0 },
+          },
+          required: ['enabled'],
+          additionalProperties: false,
+        },
+        shell: {
+          type: 'object',
+          properties: {
+            enabled: { type: 'boolean' },
+            timeoutMs: { type: 'number', minimum: 0 },
+            maxConcurrent: { type: 'integer', minimum: 1 },
+          },
+          required: ['enabled'],
+          additionalProperties: false,
+        },
       },
       additionalProperties: false,
     },
@@ -399,6 +418,21 @@ function validateSemantics(manifest: Record<string, unknown>): SemanticIssue[] {
       issues.push({
         type: 'warning',
         message: 'agent: systemPromptFile is unnecessary for tool mode (no LLM agent)',
+      });
+    }
+  }
+
+  // --- Capability consistency ---
+
+  const capabilities = manifest.capabilities as Record<string, Record<string, unknown>> | undefined;
+  if (capabilities) {
+    const shellEnabled = capabilities.shell?.enabled === true;
+    const filesystemEnabled = capabilities.filesystem?.enabled === true;
+
+    if (shellEnabled && !filesystemEnabled) {
+      issues.push({
+        type: 'error',
+        message: 'capabilities: shell requires filesystem to be enabled',
       });
     }
   }

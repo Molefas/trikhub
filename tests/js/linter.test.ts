@@ -126,6 +126,283 @@ describe('lintManifest TDPS rules', () => {
     expect(tdpsErrors.length).toBe(0);
   });
 
+  it('warns when tool-mode trik declares filesystem capabilities', async () => {
+    const trikDir = await writeTrik('tool-with-fs', {
+      schemaVersion: 2,
+      id: 'tool-with-fs',
+      name: 'Tool With FS',
+      description: 'A tool-mode trik with filesystem',
+      version: '1.0.0',
+      agent: { mode: 'tool', domain: ['test'] },
+      tools: {
+        myTool: {
+          description: 'Does stuff',
+          inputSchema: { type: 'object', properties: { q: { type: 'string' } }, required: ['q'] },
+          outputSchema: {
+            type: 'object',
+            properties: { status: { type: 'string', enum: ['ok'] } },
+          },
+          outputTemplate: 'Status: {{status}}',
+        },
+      },
+      capabilities: {
+        filesystem: { enabled: true },
+      },
+      entry: { module: 'src/index.js', export: 'default' },
+    });
+
+    const linter = new TrikLinter();
+    const results = await linter.lintManifestOnly(trikDir);
+
+    const fsWarning = results.find((r) => r.rule === 'capability-tool-mode-filesystem');
+    expect(fsWarning).toBeDefined();
+    expect(fsWarning!.severity).toBe('warning');
+  });
+
+  it('warns when tool-mode trik declares shell capabilities', async () => {
+    const trikDir = await writeTrik('tool-with-shell', {
+      schemaVersion: 2,
+      id: 'tool-with-shell',
+      name: 'Tool With Shell',
+      description: 'A tool-mode trik with shell',
+      version: '1.0.0',
+      agent: { mode: 'tool', domain: ['test'] },
+      tools: {
+        myTool: {
+          description: 'Does stuff',
+          inputSchema: { type: 'object', properties: { q: { type: 'string' } }, required: ['q'] },
+          outputSchema: {
+            type: 'object',
+            properties: { status: { type: 'string', enum: ['ok'] } },
+          },
+          outputTemplate: 'Status: {{status}}',
+        },
+      },
+      capabilities: {
+        filesystem: { enabled: true },
+        shell: { enabled: true },
+      },
+      entry: { module: 'src/index.js', export: 'default' },
+    });
+
+    const linter = new TrikLinter();
+    const results = await linter.lintManifestOnly(trikDir);
+
+    const shellWarning = results.find((r) => r.rule === 'capability-tool-mode-shell');
+    expect(shellWarning).toBeDefined();
+    expect(shellWarning!.severity).toBe('warning');
+  });
+
+  it('emits info when conversational trik declares filesystem capabilities', async () => {
+    const trikDir = await writeTrik('conv-with-fs', {
+      schemaVersion: 2,
+      id: 'conv-with-fs',
+      name: 'Conv With FS',
+      description: 'A conversational trik with filesystem',
+      version: '1.0.0',
+      agent: {
+        mode: 'conversational',
+        handoffDescription: 'Talk to this builder agent',
+        systemPrompt: 'You are a builder.',
+        domain: ['test'],
+      },
+      capabilities: {
+        filesystem: { enabled: true },
+      },
+      entry: { module: 'src/index.js', export: 'default' },
+    });
+
+    const linter = new TrikLinter();
+    const results = await linter.lintManifestOnly(trikDir);
+
+    // Should have Docker info, not tool-mode warning
+    const dockerInfo = results.find((r) => r.rule === 'capability-docker');
+    expect(dockerInfo).toBeDefined();
+    expect(dockerInfo!.severity).toBe('info');
+    expect(dockerInfo!.message).toContain('Docker');
+
+    const toolWarning = results.find((r) => r.rule === 'capability-tool-mode-filesystem');
+    expect(toolWarning).toBeUndefined();
+  });
+
+  it('emits Docker info for filesystem and shell together', async () => {
+    const trikDir = await writeTrik('conv-fs-shell', {
+      schemaVersion: 2,
+      id: 'conv-fs-shell',
+      name: 'Conv FS Shell',
+      description: 'A conversational trik with both capabilities',
+      version: '1.0.0',
+      agent: {
+        mode: 'conversational',
+        handoffDescription: 'Talk to this builder agent',
+        systemPrompt: 'You are a builder.',
+        domain: ['test'],
+      },
+      capabilities: {
+        filesystem: { enabled: true },
+        shell: { enabled: true },
+      },
+      entry: { module: 'src/index.js', export: 'default' },
+    });
+
+    const linter = new TrikLinter();
+    const results = await linter.lintManifestOnly(trikDir);
+
+    const dockerInfo = results.find((r) => r.rule === 'capability-docker');
+    expect(dockerInfo).toBeDefined();
+    expect(dockerInfo!.message).toContain('filesystem and shell');
+  });
+
+  it('no capability warnings for trik without filesystem/shell', async () => {
+    const trikDir = await writeTrik('no-fs-shell', {
+      schemaVersion: 2,
+      id: 'no-fs-shell',
+      name: 'No FS Shell',
+      description: 'A trik with only session and storage',
+      version: '1.0.0',
+      agent: {
+        mode: 'conversational',
+        handoffDescription: 'Talk to this agent',
+        systemPrompt: 'You are a helper.',
+        domain: ['test'],
+      },
+      capabilities: {
+        session: { enabled: true },
+        storage: { enabled: true },
+      },
+      entry: { module: 'src/index.js', export: 'default' },
+    });
+
+    const linter = new TrikLinter();
+    const results = await linter.lintManifestOnly(trikDir);
+
+    const capResults = results.filter((r) => r.rule.startsWith('capability-'));
+    expect(capResults).toHaveLength(0);
+  });
+
+});
+
+// ============================================================================
+// Tier adjustment for manifest capabilities
+// ============================================================================
+
+describe('tier adjustment for manifest capabilities', () => {
+  it('upgrades tier to C when filesystem capability declared on clean trik', async () => {
+    const trikDir = await writeTrik('tier-fs', {
+      schemaVersion: 2,
+      id: 'tier-fs',
+      name: 'Tier FS',
+      description: 'A conversational trik with filesystem but clean code',
+      version: '1.0.0',
+      agent: {
+        mode: 'conversational',
+        handoffDescription: 'Builder agent',
+        systemPrompt: 'You are a builder.',
+        domain: ['test'],
+      },
+      capabilities: {
+        filesystem: { enabled: true },
+      },
+      entry: { module: 'src/index.js', export: 'default' },
+    });
+
+    const linter = new TrikLinter();
+    const { scan } = await linter.lint(trikDir);
+
+    // Source code is clean (tier A), but filesystem capability → at least C
+    expect(scan.tier).toBe('C');
+    expect(scan.tierLabel).toBe('System');
+  });
+
+  it('upgrades tier to D when shell capability declared on clean trik', async () => {
+    const trikDir = await writeTrik('tier-shell', {
+      schemaVersion: 2,
+      id: 'tier-shell',
+      name: 'Tier Shell',
+      description: 'A conversational trik with shell but clean code',
+      version: '1.0.0',
+      agent: {
+        mode: 'conversational',
+        handoffDescription: 'Builder agent',
+        systemPrompt: 'You are a builder.',
+        domain: ['test'],
+      },
+      capabilities: {
+        filesystem: { enabled: true },
+        shell: { enabled: true },
+      },
+      entry: { module: 'src/index.js', export: 'default' },
+    });
+
+    const linter = new TrikLinter();
+    const { scan } = await linter.lint(trikDir);
+
+    // Source code is clean (tier A), but shell capability → D
+    expect(scan.tier).toBe('D');
+    expect(scan.tierLabel).toBe('Unrestricted');
+  });
+
+  it('does not downgrade tier when code already at higher tier', async () => {
+    // Trik with filesystem capability but code that uses process (tier D)
+    const trikDir = await writeTrik('tier-no-downgrade', {
+      schemaVersion: 2,
+      id: 'tier-no-downgrade',
+      name: 'Tier No Downgrade',
+      description: 'A trik with process code and filesystem capability',
+      version: '1.0.0',
+      agent: {
+        mode: 'conversational',
+        handoffDescription: 'Builder agent',
+        systemPrompt: 'You are a builder.',
+        domain: ['test'],
+      },
+      capabilities: {
+        filesystem: { enabled: true },
+      },
+      entry: { module: 'src/index.js', export: 'default' },
+    });
+    // Write source that triggers tier D
+    await writeFile(join(trikDir, 'src', 'index.ts'), `import { exec } from 'node:child_process';\nexport default {};`);
+
+    const linter = new TrikLinter();
+    const { scan } = await linter.lint(trikDir);
+
+    // Code is tier D, filesystem would only imply C — stays D
+    expect(scan.tier).toBe('D');
+  });
+
+  it('does not adjust tier when no filesystem/shell capabilities', async () => {
+    const trikDir = await writeTrik('tier-no-caps', {
+      schemaVersion: 2,
+      id: 'tier-no-caps',
+      name: 'Tier No Caps',
+      description: 'A trik without filesystem/shell',
+      version: '1.0.0',
+      agent: {
+        mode: 'conversational',
+        handoffDescription: 'Helper agent',
+        systemPrompt: 'You are a helper.',
+        domain: ['test'],
+      },
+      capabilities: {
+        session: { enabled: true },
+      },
+      entry: { module: 'src/index.js', export: 'default' },
+    });
+
+    const linter = new TrikLinter();
+    const { scan } = await linter.lint(trikDir);
+
+    // Clean code, no filesystem/shell caps → tier A
+    expect(scan.tier).toBe('A');
+  });
+});
+
+// ============================================================================
+// logTemplate placeholder classification
+// ============================================================================
+
+describe('logTemplate classification', () => {
   it('classifies logTemplate placeholder errors correctly', async () => {
     const trikDir = await writeTrik('bad-template', {
       schemaVersion: 2,

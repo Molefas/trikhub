@@ -444,6 +444,166 @@ class TestDiagnoseError:
 # ============================================================================
 
 
+# ============================================================================
+# Filesystem and Shell capability validation
+# ============================================================================
+
+
+class TestFilesystemCapabilityValidation:
+    def test_valid_filesystem_only(self):
+        result = validate_manifest(
+            make_conversational_manifest(
+                capabilities={"filesystem": {"enabled": True}}
+            )
+        )
+        assert result.valid is True
+
+    def test_filesystem_with_max_size(self):
+        result = validate_manifest(
+            make_conversational_manifest(
+                capabilities={"filesystem": {"enabled": True, "maxSizeBytes": 524288000}}
+            )
+        )
+        assert result.valid is True
+
+    def test_filesystem_disabled(self):
+        result = validate_manifest(
+            make_conversational_manifest(
+                capabilities={"filesystem": {"enabled": False}}
+            )
+        )
+        assert result.valid is True
+
+    def test_rejects_filesystem_without_enabled(self):
+        result = validate_manifest(
+            make_conversational_manifest(
+                capabilities={"filesystem": {"maxSizeBytes": 1000}}
+            )
+        )
+        assert result.valid is False
+
+    def test_rejects_filesystem_non_boolean_enabled(self):
+        result = validate_manifest(
+            make_conversational_manifest(
+                capabilities={"filesystem": {"enabled": "yes"}}
+            )
+        )
+        assert result.valid is False
+
+    def test_rejects_filesystem_additional_properties(self):
+        result = validate_manifest(
+            make_conversational_manifest(
+                capabilities={"filesystem": {"enabled": True, "unknownProp": True}}
+            )
+        )
+        assert result.valid is False
+
+
+class TestShellCapabilityValidation:
+    def test_valid_filesystem_plus_shell(self):
+        result = validate_manifest(
+            make_conversational_manifest(
+                capabilities={
+                    "filesystem": {"enabled": True},
+                    "shell": {"enabled": True},
+                }
+            )
+        )
+        assert result.valid is True
+
+    def test_shell_with_options(self):
+        result = validate_manifest(
+            make_conversational_manifest(
+                capabilities={
+                    "filesystem": {"enabled": True},
+                    "shell": {"enabled": True, "timeoutMs": 60000, "maxConcurrent": 3},
+                }
+            )
+        )
+        assert result.valid is True
+
+    def test_rejects_shell_without_filesystem(self):
+        result = validate_manifest(
+            make_conversational_manifest(
+                capabilities={"shell": {"enabled": True}}
+            )
+        )
+        assert result.valid is False
+        assert any("shell requires filesystem" in e for e in result.errors)
+
+    def test_rejects_shell_enabled_with_filesystem_disabled(self):
+        result = validate_manifest(
+            make_conversational_manifest(
+                capabilities={
+                    "filesystem": {"enabled": False},
+                    "shell": {"enabled": True},
+                }
+            )
+        )
+        assert result.valid is False
+        assert any("shell requires filesystem" in e for e in result.errors)
+
+    def test_accepts_shell_disabled_without_filesystem(self):
+        result = validate_manifest(
+            make_conversational_manifest(
+                capabilities={"shell": {"enabled": False}}
+            )
+        )
+        assert result.valid is True
+
+    def test_rejects_shell_without_enabled(self):
+        result = validate_manifest(
+            make_conversational_manifest(
+                capabilities={
+                    "filesystem": {"enabled": True},
+                    "shell": {"timeoutMs": 5000},
+                }
+            )
+        )
+        assert result.valid is False
+
+    def test_rejects_shell_additional_properties(self):
+        result = validate_manifest(
+            make_conversational_manifest(
+                capabilities={
+                    "filesystem": {"enabled": True},
+                    "shell": {"enabled": True, "unknownProp": True},
+                }
+            )
+        )
+        assert result.valid is False
+
+
+class TestCapabilityRegression:
+    def test_existing_manifest_without_capabilities_passes(self):
+        result = validate_manifest(make_conversational_manifest())
+        assert result.valid is True
+
+    def test_manifest_with_session_storage_still_passes(self):
+        result = validate_manifest(
+            make_conversational_manifest(
+                capabilities={
+                    "session": {"enabled": True},
+                    "storage": {"enabled": True},
+                }
+            )
+        )
+        assert result.valid is True
+
+    def test_all_capabilities_together(self):
+        result = validate_manifest(
+            make_conversational_manifest(
+                capabilities={
+                    "session": {"enabled": True},
+                    "storage": {"enabled": True},
+                    "filesystem": {"enabled": True, "maxSizeBytes": 524288000},
+                    "shell": {"enabled": True, "timeoutMs": 30000, "maxConcurrent": 3},
+                }
+            )
+        )
+        assert result.valid is True
+
+
 class TestValidateData:
     def test_valid_data(self):
         schema = {

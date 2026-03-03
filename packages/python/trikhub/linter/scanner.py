@@ -247,6 +247,46 @@ def scan_capabilities(trik_path: Path | str) -> ScanResult:
 
 
 # ---------------------------------------------------------------------------
+# Tier adjustment for manifest capabilities
+# ---------------------------------------------------------------------------
+
+TIER_ORDER: dict[str, int] = {"A": 0, "B": 1, "C": 2, "D": 3}
+
+
+def adjust_tier_for_manifest(scan: ScanResult, manifest: dict) -> ScanResult:
+    """Adjust scan tier based on manifest-declared capabilities.
+
+    The source scanner only sees code-level imports. But manifest capabilities
+    (filesystem, shell) are auto-injected at runtime by the SDK. The effective
+    tier must account for both.
+
+    - filesystem.enabled → at least tier C (System)
+    - shell.enabled → at least tier D (Unrestricted — process execution)
+    """
+    caps = manifest.get("capabilities") or {}
+    fs_enabled = (caps.get("filesystem") or {}).get("enabled") is True
+    shell_enabled = (caps.get("shell") or {}).get("enabled") is True
+
+    if not fs_enabled and not shell_enabled:
+        return scan
+
+    current_tier = scan["tier"]
+
+    if shell_enabled and TIER_ORDER.get(current_tier, 0) < TIER_ORDER["D"]:
+        implied_tier = "D"
+    elif fs_enabled and TIER_ORDER.get(current_tier, 0) < TIER_ORDER["C"]:
+        implied_tier = "C"
+    else:
+        return scan
+
+    return {
+        **scan,
+        "tier": implied_tier,
+        "tier_label": TIER_LABELS[implied_tier],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Formatting
 # ---------------------------------------------------------------------------
 

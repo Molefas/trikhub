@@ -8,7 +8,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import type { ToolCallRecord } from '@trikhub/manifest';
+import type { ToolCallRecord, TrikCapabilities } from '@trikhub/manifest';
 
 // ============================================================================
 // JSON-RPC 2.0 Base Types
@@ -55,6 +55,8 @@ export interface ProcessMessageInput {
   config: Record<string, string>;
   /** Storage namespace for the trik */
   storageNamespace: string;
+  /** Capabilities declared in the trik's manifest (for auto-injection in worker) */
+  capabilities?: TrikCapabilities;
 }
 
 /**
@@ -86,6 +88,8 @@ export interface ExecuteToolInput {
   config: Record<string, string>;
   /** Storage namespace for the trik */
   storageNamespace: string;
+  /** Capabilities declared in the trik's manifest (for auto-injection in worker) */
+  capabilities?: TrikCapabilities;
 }
 
 /**

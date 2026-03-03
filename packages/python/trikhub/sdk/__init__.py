@@ -9,6 +9,23 @@ from trikhub.sdk.wrap_agent import wrap_agent, InvokableAgent, AgentFactory
 from trikhub.sdk.wrap_tool_handlers import wrap_tool_handlers, ToolHandler
 from trikhub.sdk.transfer_back import transfer_back_tool, TRANSFER_BACK_TOOL_NAME
 from trikhub.sdk.interceptor import extract_tool_info, ExtractedToolInfo
+from trikhub.sdk.workspace_tools import (
+    get_workspace_tools,
+    get_active_workspace_tool_names,
+    WORKSPACE_TOOL_NAMES,
+    WORKSPACE_SYSTEM_PROMPT,
+)
+from trikhub.sdk.filesystem_tools import (
+    FilesystemHandlers,
+    create_filesystem_handlers,
+    FILESYSTEM_TOOL_SCHEMAS,
+)
+from trikhub.sdk.shell_tools import (
+    ShellHandlers,
+    ShellDefaults,
+    create_shell_handlers,
+    SHELL_TOOL_SCHEMAS,
+)
 
 # Convenience re-exports from trikhub.manifest
 from trikhub.manifest import (
@@ -32,6 +49,19 @@ __all__ = [
     # Transfer-back tool
     "transfer_back_tool",
     "TRANSFER_BACK_TOOL_NAME",
+    # Workspace tools (filesystem + shell for containerized triks)
+    "get_workspace_tools",
+    "get_active_workspace_tool_names",
+    "WORKSPACE_TOOL_NAMES",
+    "WORKSPACE_SYSTEM_PROMPT",
+    # Filesystem + shell tool handlers (low-level)
+    "FilesystemHandlers",
+    "create_filesystem_handlers",
+    "FILESYSTEM_TOOL_SCHEMAS",
+    "ShellHandlers",
+    "ShellDefaults",
+    "create_shell_handlers",
+    "SHELL_TOOL_SCHEMAS",
     # Advanced/internal
     "extract_tool_info",
     "ExtractedToolInfo",
