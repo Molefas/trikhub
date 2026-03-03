@@ -269,6 +269,8 @@ class TrikContext(BaseModel):
     sessionId: str
     config: Any  # TrikConfigContext at runtime
     storage: Any  # TrikStorageContext at runtime
+    capabilities: TrikCapabilities | None = None
+    """Capabilities declared in the trik's manifest, populated by the gateway/worker."""
 
 
 class ToolCallRecord(BaseModel):

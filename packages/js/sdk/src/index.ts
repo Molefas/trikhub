@@ -17,6 +17,20 @@ export { transferBackTool, TRANSFER_BACK_TOOL_NAME } from './transfer-back.js';
 export { extractToolInfo } from './interceptor.js';
 export type { ExtractedToolInfo } from './interceptor.js';
 
+// Workspace tools (filesystem + shell for containerized triks)
+export {
+  getWorkspaceTools,
+  getActiveWorkspaceToolNames,
+  WORKSPACE_TOOL_NAMES,
+  WORKSPACE_SYSTEM_PROMPT,
+} from './workspace-tools.js';
+
+// Filesystem + shell tool handlers (low-level)
+export { createFilesystemHandlers, filesystemToolSchemas } from './filesystem-tools.js';
+export type { FilesystemHandlers, ToolSchema } from './filesystem-tools.js';
+export { createShellHandlers, shellToolSchemas } from './shell-tools.js';
+export type { ShellHandlers, ShellDefaults } from './shell-tools.js';
+
 // Re-exported types from @trikhub/manifest (convenience)
 export type {
   TrikAgent,

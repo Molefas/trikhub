@@ -285,6 +285,8 @@ export interface TrikContext {
   sessionId: string;
   config: TrikConfigContext;
   storage: TrikStorageContext;
+  /** Capabilities declared in the trik's manifest, populated by the gateway/worker. */
+  capabilities?: TrikCapabilities;
 }
 
 /**
