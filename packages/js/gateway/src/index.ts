@@ -41,6 +41,14 @@ export {
   shutdownSharedPythonWorker,
 } from './python-worker.js';
 
+// Container manager (for containerized triks with filesystem/shell)
+export {
+  DockerContainerManager,
+  ContainerWorkerHandle,
+  type ContainerOptions,
+  type ContainerManagerConfig,
+} from './container-manager.js';
+
 // Worker protocol (for cross-language trik execution)
 export {
   // JSON-RPC types
