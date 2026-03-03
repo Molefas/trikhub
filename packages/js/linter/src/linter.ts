@@ -375,7 +375,7 @@ export class TrikLinter {
    * Maps validator warnings and errors to categorized lint results.
    */
   private lintManifest(
-    _manifest: TrikManifest,
+    manifest: TrikManifest,
     manifestPath: string,
     validation: ValidationResult,
   ): LintResult[] {
@@ -403,6 +403,60 @@ export class TrikLinter {
           file: manifestPath,
         });
       }
+    }
+
+    // Check filesystem/shell capability rules
+    if (!this.shouldSkipRule('capability-docker')) {
+      results.push(...this.checkCapabilityRules(manifest, manifestPath));
+    }
+
+    return results;
+  }
+
+  /**
+   * Check manifest capability rules for filesystem and shell.
+   * - Warn if tool-mode trik declares filesystem or shell (designed for conversational triks)
+   * - Info when filesystem/shell declared (requires Docker for execution)
+   */
+  private checkCapabilityRules(manifest: TrikManifest, manifestPath: string): LintResult[] {
+    const results: LintResult[] = [];
+    const caps = manifest.capabilities as Record<string, unknown> | undefined;
+    if (!caps) return results;
+
+    const fsEnabled = (caps.filesystem as Record<string, unknown> | undefined)?.enabled === true;
+    const shellEnabled = (caps.shell as Record<string, unknown> | undefined)?.enabled === true;
+
+    if (!fsEnabled && !shellEnabled) return results;
+
+    // Warn if tool-mode trik declares filesystem or shell
+    if (manifest.agent.mode === 'tool') {
+      if (fsEnabled) {
+        results.push({
+          rule: 'capability-tool-mode-filesystem',
+          severity: 'warning',
+          message: 'Tool-mode triks should not declare filesystem capabilities. Filesystem and shell tools are designed for conversational triks with LLMs that use the injected tools.',
+          file: manifestPath,
+        });
+      }
+      if (shellEnabled) {
+        results.push({
+          rule: 'capability-tool-mode-shell',
+          severity: 'warning',
+          message: 'Tool-mode triks should not declare shell capabilities. Filesystem and shell tools are designed for conversational triks with LLMs that use the injected tools.',
+          file: manifestPath,
+        });
+      }
+    }
+
+    // Info: filesystem/shell capabilities require Docker
+    if (fsEnabled || shellEnabled) {
+      const capList = [fsEnabled && 'filesystem', shellEnabled && 'shell'].filter(Boolean).join(' and ');
+      results.push({
+        rule: 'capability-docker',
+        severity: 'info',
+        message: `This trik declares ${capList} capabilities and requires Docker for execution.`,
+        file: manifestPath,
+      });
     }
 
     return results;
