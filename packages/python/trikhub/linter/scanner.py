@@ -257,24 +257,26 @@ def adjust_tier_for_manifest(scan: ScanResult, manifest: dict) -> ScanResult:
     """Adjust scan tier based on manifest-declared capabilities.
 
     The source scanner only sees code-level imports. But manifest capabilities
-    (filesystem, shell) are auto-injected at runtime by the SDK. The effective
-    tier must account for both.
+    (filesystem, shell, trikManagement) are auto-injected at runtime by the SDK.
+    The effective tier must account for both.
 
     - filesystem.enabled → at least tier C (System)
+    - trikManagement.enabled → at least tier C (System)
     - shell.enabled → at least tier D (Unrestricted — process execution)
     """
     caps = manifest.get("capabilities") or {}
     fs_enabled = (caps.get("filesystem") or {}).get("enabled") is True
     shell_enabled = (caps.get("shell") or {}).get("enabled") is True
+    trik_mgmt_enabled = (caps.get("trikManagement") or {}).get("enabled") is True
 
-    if not fs_enabled and not shell_enabled:
+    if not fs_enabled and not shell_enabled and not trik_mgmt_enabled:
         return scan
 
     current_tier = scan["tier"]
 
     if shell_enabled and TIER_ORDER.get(current_tier, 0) < TIER_ORDER["D"]:
         implied_tier = "D"
-    elif fs_enabled and TIER_ORDER.get(current_tier, 0) < TIER_ORDER["C"]:
+    elif (fs_enabled or trik_mgmt_enabled) and TIER_ORDER.get(current_tier, 0) < TIER_ORDER["C"]:
         implied_tier = "C"
     else:
         return scan

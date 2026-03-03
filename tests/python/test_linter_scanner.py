@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from trikhub.linter.scanner import scan_capabilities, format_scan_result
+from trikhub.linter.scanner import scan_capabilities, format_scan_result, adjust_tier_for_manifest
 
 
 def _write(path: Path, content: str) -> None:
@@ -115,3 +115,48 @@ def test_includes_file_and_line_references(tmp_path: Path) -> None:
     assert len(proc_loc) == 1
     assert proc_loc[0]["file"] == "main.py"
     assert proc_loc[0]["line"] == 4
+
+
+# ── Tier adjustment for manifest capabilities ────────────────────────────
+
+
+def test_adjust_tier_filesystem_to_c(tmp_path: Path) -> None:
+    _write(tmp_path / "index.js", "console.log('clean');\n")
+    scan = scan_capabilities(tmp_path)
+    assert scan["tier"] == "A"
+    adjusted = adjust_tier_for_manifest(scan, {"capabilities": {"filesystem": {"enabled": True}}})
+    assert adjusted["tier"] == "C"
+    assert adjusted["tier_label"] == "System"
+
+
+def test_adjust_tier_shell_to_d(tmp_path: Path) -> None:
+    _write(tmp_path / "index.js", "console.log('clean');\n")
+    scan = scan_capabilities(tmp_path)
+    adjusted = adjust_tier_for_manifest(scan, {"capabilities": {"shell": {"enabled": True}}})
+    assert adjusted["tier"] == "D"
+    assert adjusted["tier_label"] == "Unrestricted"
+
+
+def test_adjust_tier_trik_management_to_c(tmp_path: Path) -> None:
+    _write(tmp_path / "index.js", "console.log('clean');\n")
+    scan = scan_capabilities(tmp_path)
+    assert scan["tier"] == "A"
+    adjusted = adjust_tier_for_manifest(scan, {"capabilities": {"trikManagement": {"enabled": True}}})
+    assert adjusted["tier"] == "C"
+    assert adjusted["tier_label"] == "System"
+
+
+def test_adjust_tier_no_downgrade(tmp_path: Path) -> None:
+    _write(tmp_path / "run.py", "import subprocess\n")
+    scan = scan_capabilities(tmp_path)
+    assert scan["tier"] == "D"
+    adjusted = adjust_tier_for_manifest(scan, {"capabilities": {"trikManagement": {"enabled": True}}})
+    # trikManagement implies C, but code is already D — stays D
+    assert adjusted["tier"] == "D"
+
+
+def test_adjust_tier_no_caps(tmp_path: Path) -> None:
+    _write(tmp_path / "index.js", "console.log('clean');\n")
+    scan = scan_capabilities(tmp_path)
+    adjusted = adjust_tier_for_manifest(scan, {"capabilities": {"session": {"enabled": True}}})
+    assert adjusted["tier"] == "A"
