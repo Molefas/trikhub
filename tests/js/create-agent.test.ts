@@ -30,9 +30,10 @@ describe('generateAgentTypescriptProject', () => {
     expect(paths).toContain('.env.example');
     expect(paths).toContain('.gitignore');
     expect(paths).toContain('.trikhub/config.json');
+    expect(paths).toContain('README.md');
     expect(paths).toContain('src/agent.ts');
     expect(paths).toContain('src/cli.ts');
-    expect(paths).toHaveLength(7);
+    expect(paths).toHaveLength(8);
   });
 
   it('generates empty .trikhub/config.json', () => {
@@ -135,9 +136,10 @@ describe('generateAgentPythonProject', () => {
     expect(paths).toContain('.env.example');
     expect(paths).toContain('.gitignore');
     expect(paths).toContain('.trikhub/config.json');
+    expect(paths).toContain('README.md');
     expect(paths).toContain('agent.py');
     expect(paths).toContain('cli.py');
-    expect(paths).toHaveLength(6);
+    expect(paths).toHaveLength(7);
   });
 
   it('generates empty .trikhub/config.json', () => {
