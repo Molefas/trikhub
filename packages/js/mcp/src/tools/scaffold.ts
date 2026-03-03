@@ -697,6 +697,8 @@ dist/
 *.egg
 .venv/
 venv/
+.env
+.trikhub/secrets.json
 .DS_Store
 `;
 }
@@ -852,14 +854,37 @@ export function scaffoldTrik(input: ScaffoldInput): ScaffoldResult {
   // Config secrets template
   if (input.capabilities?.config && input.capabilities.config.length > 0) {
     const secrets: Record<string, string> = {};
+    const secretsExample: Record<string, string> = {};
     for (const cfg of input.capabilities.config) {
       secrets[cfg.key] = '';
+      secretsExample[cfg.key] = `your-${cfg.key.toLowerCase().replace(/_/g, '-')}-here`;
     }
     files.push({
       path: '.trikhub/secrets.json',
       content: JSON.stringify(secrets, null, 2),
     });
-    nextSteps.push(`- Add your API keys to .trikhub/secrets.json`);
+    files.push({
+      path: '.trikhub/secrets.json.example',
+      content: JSON.stringify(secretsExample, null, 2),
+    });
+    nextSteps.push(`- Copy .trikhub/secrets.json.example to .trikhub/secrets.json and add your API keys`);
+  }
+
+  // .env.example for conversational triks (they need an LLM API key)
+  if (input.mode === 'conversational') {
+    const envLines: string[] = ['# Environment variables for local development'];
+    // Check if ANTHROPIC_API_KEY is already in config — if not, add it to .env.example
+    const configKeys = (input.capabilities?.config || []).map((c) => c.key);
+    if (!configKeys.includes('ANTHROPIC_API_KEY')) {
+      envLines.push('ANTHROPIC_API_KEY=sk-ant-your-key-here');
+    }
+    for (const cfg of input.capabilities?.config || []) {
+      envLines.push(`${cfg.key}=your-${cfg.key.toLowerCase().replace(/_/g, '-')}-here`);
+    }
+    files.push({
+      path: '.env.example',
+      content: envLines.join('\n') + '\n',
+    });
   }
 
   return { files, nextSteps };
