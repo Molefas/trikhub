@@ -134,6 +134,26 @@ class TrikConfig(BaseModel):
     optional: list[ConfigRequirement] | None = None
 
 
+class FilesystemCapabilities(BaseModel):
+    """Filesystem capabilities for sandboxed file access.
+    Triks declaring this capability run inside a Docker container with a mounted /workspace directory."""
+
+    enabled: bool
+    maxSizeBytes: int | None = None
+    """Max total size of workspace directory in bytes (default: 500MB)."""
+
+
+class ShellCapabilities(BaseModel):
+    """Shell capabilities for command execution.
+    Requires filesystem to also be enabled. Triks run inside a Docker container."""
+
+    enabled: bool
+    timeoutMs: int | None = None
+    """Max time per command in ms (default: 30000)."""
+    maxConcurrent: int | None = None
+    """Max concurrent processes (default: 3)."""
+
+
 class TrikCapabilities(BaseModel):
     """Trik capabilities declared in manifest."""
 
@@ -141,6 +161,10 @@ class TrikCapabilities(BaseModel):
     """Session capabilities. Enforced — gateway creates/manages sessions."""
     storage: StorageCapabilities | None = None
     """Storage capabilities. Enforced — gateway provides storage context."""
+    filesystem: FilesystemCapabilities | None = None
+    """Filesystem capabilities. Enforced — gateway runs trik in Docker container."""
+    shell: ShellCapabilities | None = None
+    """Shell capabilities. Enforced — gateway runs trik in Docker container. Requires filesystem."""
 
 
 class TrikLimits(BaseModel):

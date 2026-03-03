@@ -130,6 +130,30 @@ export interface TrikConfig {
 }
 
 /**
+ * Filesystem capabilities for sandboxed file access.
+ * Triks declaring this capability run inside a Docker container with a mounted /workspace directory.
+ */
+export interface FilesystemCapabilities {
+  /** Whether filesystem access is enabled */
+  enabled: boolean;
+  /** Max total size of workspace directory in bytes (default: 500MB) */
+  maxSizeBytes?: number;
+}
+
+/**
+ * Shell capabilities for command execution.
+ * Requires filesystem to also be enabled. Triks run inside a Docker container.
+ */
+export interface ShellCapabilities {
+  /** Whether shell command execution is enabled */
+  enabled: boolean;
+  /** Max time per command in ms (default: 30000) */
+  timeoutMs?: number;
+  /** Max concurrent processes (default: 3) */
+  maxConcurrent?: number;
+}
+
+/**
  * Trik capabilities declared in manifest
  */
 export interface TrikCapabilities {
@@ -144,6 +168,18 @@ export interface TrikCapabilities {
    * @enforcement enforced - Gateway provides storage context and enforces quotas
    */
   storage?: StorageCapabilities;
+
+  /**
+   * Filesystem capabilities for sandboxed file access.
+   * @enforcement enforced - Gateway runs trik in Docker container with mounted workspace
+   */
+  filesystem?: FilesystemCapabilities;
+
+  /**
+   * Shell capabilities for command execution.
+   * @enforcement enforced - Gateway runs trik in Docker container. Requires filesystem.
+   */
+  shell?: ShellCapabilities;
 }
 
 /**

@@ -119,6 +119,25 @@ MANIFEST_SCHEMA: dict[str, Any] = {
                     "required": ["enabled"],
                     "additionalProperties": False,
                 },
+                "filesystem": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "maxSizeBytes": {"type": "number", "minimum": 0},
+                    },
+                    "required": ["enabled"],
+                    "additionalProperties": False,
+                },
+                "shell": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "timeoutMs": {"type": "number", "minimum": 0},
+                        "maxConcurrent": {"type": "integer", "minimum": 1},
+                    },
+                    "required": ["enabled"],
+                    "additionalProperties": False,
+                },
             },
             "additionalProperties": False,
         },
@@ -360,6 +379,19 @@ def _validate_semantics(manifest: dict[str, Any]) -> list[_SemanticIssue]:
             issues.append(_SemanticIssue(
                 type="warning",
                 message="agent: systemPromptFile is unnecessary for tool mode (no LLM agent)",
+            ))
+
+    # --- Capability consistency ---
+
+    capabilities = manifest.get("capabilities")
+    if capabilities:
+        shell_enabled = capabilities.get("shell", {}).get("enabled") is True
+        filesystem_enabled = capabilities.get("filesystem", {}).get("enabled") is True
+
+        if shell_enabled and not filesystem_enabled:
+            issues.append(_SemanticIssue(
+                type="error",
+                message="capabilities: shell requires filesystem to be enabled",
             ))
 
     # --- Generic domain tags ---
