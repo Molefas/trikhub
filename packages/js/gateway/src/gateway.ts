@@ -11,6 +11,7 @@ import {
   type TrikContext,
   type TrikConfigContext,
   type TrikResponse,
+  type TrikCapabilities,
   type ToolCallRecord,
   type ToolDeclaration,
   type JSONSchema,
@@ -19,6 +20,12 @@ import {
   validateData,
 } from '@trikhub/manifest';
 import { PythonWorker, type PythonWorkerConfig } from './python-worker.js';
+import {
+  DockerContainerManager,
+  ContainerWorkerHandle,
+  type ContainerOptions,
+  type ContainerManagerConfig,
+} from './container-manager.js';
 import { type ConfigStore, FileConfigStore } from './config-store.js';
 import { type StorageProvider, SqliteStorageProvider } from './storage-provider.js';
 import { type SessionStorage, InMemorySessionStorage } from './session-storage.js';
@@ -32,6 +39,8 @@ interface LoadedTrik {
   agent: TrikAgent;
   path: string;
   runtime: TrikRuntime;
+  /** Whether this trik requires containerized execution (has filesystem/shell capabilities) */
+  containerized: boolean;
 }
 
 export interface TrikGatewayConfig {
@@ -73,6 +82,11 @@ export interface TrikGatewayConfig {
    * Defaults to 20.
    */
   maxTurnsPerHandoff?: number;
+  /**
+   * Configuration for Docker container manager (used for containerized triks
+   * with filesystem/shell capabilities).
+   */
+  containerManagerConfig?: ContainerManagerConfig;
 }
 
 /**
@@ -175,6 +189,7 @@ export class TrikGateway {
   private sessionStorage: SessionStorage;
   private configLoaded = false;
   private pythonWorker: PythonWorker | null = null;
+  private containerManager: DockerContainerManager | null = null;
   private maxTurnsPerHandoff: number;
 
   // Loaded triks (by trik ID)
@@ -478,6 +493,9 @@ export class TrikGateway {
       const handoffSessionId = handoff.sessionId;
       const trikId = handoff.trikId;
 
+      // Stop container if containerized
+      await this.stopContainerIfNeeded(trikId);
+
       // Clear active handoff
       this.activeHandoff = null;
 
@@ -502,7 +520,7 @@ export class TrikGateway {
   /**
    * Force transfer-back via /back command.
    */
-  private forceTransferBack(): RouteForceBack {
+  private async forceTransferBack(): Promise<RouteForceBack> {
     const handoff = this.activeHandoff!;
     const loaded = this.triks.get(handoff.trikId)!;
 
@@ -521,6 +539,9 @@ export class TrikGateway {
       summary,
       sessionId: handoff.sessionId,
     };
+
+    // Stop container if containerized
+    await this.stopContainerIfNeeded(handoff.trikId);
 
     // Clear active handoff
     this.activeHandoff = null;
@@ -542,7 +563,7 @@ export class TrikGateway {
   /**
    * Auto transfer-back due to max turns or error.
    */
-  private autoTransferBack(reason: string, logSummary?: string): RouteTransferBack {
+  private async autoTransferBack(reason: string, logSummary?: string): Promise<RouteTransferBack> {
     const handoff = this.activeHandoff!;
     const loaded = this.triks.get(handoff.trikId)!;
 
@@ -561,6 +582,9 @@ export class TrikGateway {
       summary,
       sessionId: handoff.sessionId,
     };
+
+    // Stop container if containerized
+    await this.stopContainerIfNeeded(handoff.trikId);
 
     // Clear active handoff
     this.activeHandoff = null;
@@ -713,11 +737,29 @@ export class TrikGateway {
       loaded.manifest.capabilities?.storage
     );
 
-    return {
+    const ctx: TrikContext = {
       sessionId,
       config: configContext,
       storage: storageContext,
     };
+
+    // Include capabilities if the trik declares filesystem/shell
+    if (loaded.manifest.capabilities) {
+      const caps = loaded.manifest.capabilities;
+      if (caps.filesystem?.enabled || caps.shell?.enabled) {
+        ctx.capabilities = caps;
+      }
+    }
+
+    return ctx;
+  }
+
+  /**
+   * Check whether a manifest requires containerized execution.
+   */
+  private static needsContainerization(manifest: TrikManifest): boolean {
+    const caps = manifest.capabilities;
+    return !!(caps?.filesystem?.enabled || caps?.shell?.enabled);
   }
 
   // ==========================================================================
@@ -752,14 +794,19 @@ export class TrikGateway {
     }
 
     const runtime: TrikRuntime = manifest.entry.runtime ?? 'node';
+    const containerized = TrikGateway.needsContainerization(manifest);
 
     const isToolMode = manifest.agent.mode === 'tool';
 
-    if (runtime === 'python') {
+    if (containerized) {
+      // Containerized triks — always run inside Docker regardless of runtime
+      const agent = this.createContainerAgentProxy(manifest, trikPath, runtime);
+      this.triks.set(manifest.id, { manifest, agent, path: trikPath, runtime, containerized });
+    } else if (runtime === 'python') {
       // Python triks use the worker protocol — create a proxy TrikAgent
       await this.ensurePythonWorker();
       const agent = this.createPythonAgentProxy(manifest, trikPath);
-      this.triks.set(manifest.id, { manifest, agent, path: trikPath, runtime });
+      this.triks.set(manifest.id, { manifest, agent, path: trikPath, runtime, containerized });
     } else {
       // Node triks — dynamic import and extract TrikAgent
       const modulePath = join(trikPath, manifest.entry.module);
@@ -801,7 +848,7 @@ export class TrikGateway {
         }
       }
 
-      this.triks.set(manifest.id, { manifest, agent: agent as TrikAgent, path: trikPath, runtime });
+      this.triks.set(manifest.id, { manifest, agent: agent as TrikAgent, path: trikPath, runtime, containerized });
     }
 
     return manifest;
@@ -869,6 +916,103 @@ export class TrikGateway {
   }
 
   /**
+   * Create a proxy TrikAgent for containerized triks that delegates to Docker containers.
+   * The container is launched lazily on first interaction via the ContainerManager.
+   */
+  private createContainerAgentProxy(
+    manifest: TrikManifest,
+    trikPath: string,
+    runtime: TrikRuntime
+  ): TrikAgent {
+    const agent: TrikAgent = {};
+
+    if (manifest.agent.mode === 'conversational') {
+      agent.processMessage = async (message: string, context: TrikContext): Promise<TrikResponse> => {
+        const manager = this.ensureContainerManager();
+        const workspacePath = manager.getWorkspacePath(manifest.id);
+        const handle = await manager.launch(manifest.id, {
+          runtime,
+          workspacePath,
+          trikPath: resolve(trikPath),
+        });
+
+        handle.setStorageContext(context.storage);
+        try {
+          const result = await handle.processMessage({
+            trikPath,
+            message,
+            sessionId: context.sessionId,
+            config: this.configToRecord(context.config),
+            storageNamespace: manifest.id,
+          });
+
+          return {
+            message: result.message,
+            transferBack: result.transferBack,
+            toolCalls: result.toolCalls,
+          };
+        } finally {
+          handle.setStorageContext(null);
+        }
+      };
+    }
+
+    if (manifest.agent.mode === 'tool') {
+      agent.executeTool = async (
+        toolName: string,
+        input: Record<string, unknown>,
+        context: TrikContext
+      ): Promise<ToolExecutionResult> => {
+        const manager = this.ensureContainerManager();
+        const workspacePath = manager.getWorkspacePath(manifest.id);
+        const handle = await manager.launch(manifest.id, {
+          runtime,
+          workspacePath,
+          trikPath: resolve(trikPath),
+        });
+
+        handle.setStorageContext(context.storage);
+        try {
+          const result = await handle.executeTool({
+            trikPath,
+            toolName,
+            input,
+            sessionId: context.sessionId,
+            config: this.configToRecord(context.config),
+            storageNamespace: manifest.id,
+          });
+
+          return { output: result.output };
+        } finally {
+          handle.setStorageContext(null);
+        }
+      };
+    }
+
+    return agent;
+  }
+
+  /**
+   * Stop a trik's container if it is containerized and running.
+   */
+  private async stopContainerIfNeeded(trikId: string): Promise<void> {
+    const loaded = this.triks.get(trikId);
+    if (loaded?.containerized && this.containerManager) {
+      await this.containerManager.stop(trikId);
+    }
+  }
+
+  /**
+   * Ensure container manager is initialized.
+   */
+  private ensureContainerManager(): DockerContainerManager {
+    if (!this.containerManager) {
+      this.containerManager = new DockerContainerManager(this.config.containerManagerConfig);
+    }
+    return this.containerManager;
+  }
+
+  /**
    * Convert TrikConfigContext to a plain Record for the worker protocol.
    */
   private configToRecord(config: TrikConfigContext): Record<string, string> {
@@ -896,12 +1040,16 @@ export class TrikGateway {
   }
 
   /**
-   * Shutdown the Python worker if running.
+   * Shutdown all workers and containers.
    */
   async shutdown(): Promise<void> {
     if (this.pythonWorker) {
       await this.pythonWorker.shutdown();
       this.pythonWorker = null;
+    }
+    if (this.containerManager) {
+      await this.containerManager.stopAll();
+      this.containerManager = null;
     }
   }
 

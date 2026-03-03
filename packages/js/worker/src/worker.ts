@@ -28,6 +28,7 @@ import type {
   TrikContext,
   TrikConfigContext,
   TrikStorageContext,
+  TrikCapabilities,
 } from '@trikhub/manifest';
 
 // ============================================================================
@@ -295,13 +296,18 @@ function buildConfigContext(config: Record<string, string>): TrikConfigContext {
 function buildTrikContext(
   sessionId: string,
   config: Record<string, string>,
-  storage: TrikStorageContext
+  storage: TrikStorageContext,
+  capabilities?: TrikCapabilities
 ): TrikContext {
-  return {
+  const ctx: TrikContext = {
     sessionId,
     config: buildConfigContext(config),
     storage,
   };
+  if (capabilities) {
+    ctx.capabilities = capabilities;
+  }
+  return ctx;
 }
 
 // ============================================================================
@@ -314,6 +320,7 @@ interface ProcessMessageParams {
   sessionId: string;
   config: Record<string, string>;
   storageNamespace: string;
+  capabilities?: TrikCapabilities;
 }
 
 interface ExecuteToolParams {
@@ -323,6 +330,7 @@ interface ExecuteToolParams {
   sessionId: string;
   config: Record<string, string>;
   storageNamespace: string;
+  capabilities?: TrikCapabilities;
 }
 
 // ============================================================================
@@ -464,7 +472,8 @@ class JavaScriptWorker {
       const context = buildTrikContext(
         params.sessionId,
         params.config ?? {},
-        this.storageProxy
+        this.storageProxy,
+        params.capabilities
       );
 
       const response = await agent.processMessage(params.message, context);
@@ -524,7 +533,8 @@ class JavaScriptWorker {
       const context = buildTrikContext(
         params.sessionId,
         params.config ?? {},
-        this.storageProxy
+        this.storageProxy,
+        params.capabilities
       );
 
       const result = await agent.executeTool(params.toolName, params.input ?? {}, context);
