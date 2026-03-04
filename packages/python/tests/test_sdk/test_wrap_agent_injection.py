@@ -15,7 +15,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from trikhub.manifest import TrikCapabilities, TrikContext, FilesystemCapabilities, ShellCapabilities
-from trikhub.sdk.workspace_tools import WORKSPACE_SYSTEM_PROMPT, get_active_workspace_tool_names
+from trikhub.sdk.workspace_tools import get_active_workspace_tool_names
 from trikhub.sdk.wrap_agent import wrap_agent
 
 
@@ -124,14 +124,14 @@ class TestWrapAgentWithoutCapabilities:
 
 
 # ============================================================================
-# Tests: System prompt injection
+# Tests: No system prompt injection (SystemMessage removed to avoid API errors)
 # ============================================================================
 
 
 class TestWrapAgentSystemPrompt:
-    """Tests for workspace system prompt auto-injection."""
+    """Tests that wrap_agent does NOT inject SystemMessages."""
 
-    async def test_prepends_system_prompt_with_filesystem_caps(self):
+    async def test_no_system_prompt_with_filesystem_caps(self):
         agent, captured = _make_capturing_mock()
         wrapped = wrap_agent(agent)
         ctx = _make_context("sess-1", FILESYSTEM_CAPS)
@@ -139,12 +139,10 @@ class TestWrapAgentSystemPrompt:
         await wrapped.process_message("Hello", ctx)
 
         messages = captured[0]
-        assert len(messages) == 2  # SystemMessage + HumanMessage
-        assert isinstance(messages[0], SystemMessage)
-        assert messages[0].content == WORKSPACE_SYSTEM_PROMPT
-        assert isinstance(messages[1], HumanMessage)
+        assert len(messages) == 1  # Only HumanMessage
+        assert isinstance(messages[0], HumanMessage)
 
-    async def test_system_prompt_once_per_session(self):
+    async def test_no_system_messages_across_turns(self):
         agent, captured = _make_capturing_mock()
         wrapped = wrap_agent(agent)
         ctx = _make_context("sess-1", FILESYSTEM_CAPS)
@@ -152,12 +150,12 @@ class TestWrapAgentSystemPrompt:
         await wrapped.process_message("First", ctx)
         await wrapped.process_message("Second", ctx)
 
-        # Second call should not have a second SystemMessage
-        second_messages = captured[1]
-        system_msgs = [m for m in second_messages if isinstance(m, SystemMessage)]
-        assert len(system_msgs) == 1  # Only the one from first call
+        all_system = [
+            m for msgs in captured for m in msgs if isinstance(m, SystemMessage)
+        ]
+        assert len(all_system) == 0
 
-    async def test_system_prompt_per_session(self):
+    async def test_no_system_messages_across_sessions(self):
         agent, captured = _make_capturing_mock()
         wrapped = wrap_agent(agent)
 
@@ -168,11 +166,10 @@ class TestWrapAgentSystemPrompt:
             "Hello", _make_context("sess-b", FILESYSTEM_CAPS)
         )
 
-        # Both sessions should have gotten the system prompt
-        assert isinstance(captured[0][0], SystemMessage)
-        assert isinstance(captured[1][0], SystemMessage)
+        assert isinstance(captured[0][0], HumanMessage)
+        assert isinstance(captured[1][0], HumanMessage)
 
-    async def test_system_prompt_with_shell_caps(self):
+    async def test_no_system_prompt_with_shell_caps(self):
         agent, captured = _make_capturing_mock()
         wrapped = wrap_agent(agent)
         ctx = _make_context("sess-1", FILESYSTEM_AND_SHELL_CAPS)
@@ -180,8 +177,8 @@ class TestWrapAgentSystemPrompt:
         await wrapped.process_message("Hello", ctx)
 
         messages = captured[0]
-        assert isinstance(messages[0], SystemMessage)
-        assert "execute_command" in messages[0].content
+        assert len(messages) == 1  # Only HumanMessage
+        assert isinstance(messages[0], HumanMessage)
 
 
 # ============================================================================

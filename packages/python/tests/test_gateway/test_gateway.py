@@ -943,3 +943,148 @@ async def test_load_trik_warns_only_missing_keys(capfd):
         assert "SECRET" in captured.err
         assert "API_KEY" not in captured.err
         assert "Warning" in captured.err
+
+
+# ============================================================================
+# Registry injection into TrikContext
+# ============================================================================
+
+
+def _create_trik_dir_with_capabilities(
+    tmpdir: str,
+    trik_id: str,
+    capabilities: dict | None = None,
+    mode: str = "tool",
+) -> str:
+    """Create a trik directory with optional capabilities for registry injection tests."""
+    trik_dir = os.path.join(tmpdir, trik_id)
+    os.makedirs(trik_dir, exist_ok=True)
+
+    manifest: dict = {
+        "schemaVersion": 2,
+        "id": trik_id,
+        "name": trik_id,
+        "description": f"Test trik {trik_id}",
+        "version": "0.1.0",
+        "agent": {
+            "mode": mode,
+            "domain": ["test"],
+        },
+        "entry": {
+            "module": "./agent.py",
+            "export": "agent",
+            "runtime": "python",
+        },
+    }
+
+    if mode == "conversational":
+        manifest["agent"]["handoffDescription"] = f"Talk to {trik_id}"
+        manifest["agent"]["systemPrompt"] = f"You are {trik_id}."
+
+    if mode == "tool":
+        manifest["tools"] = {
+            "testTool": {
+                "description": "A test tool",
+                "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}},
+                "outputSchema": {"type": "object", "properties": {"status": {"type": "string", "enum": ["ok", "error"]}}},
+                "outputTemplate": "Status: {{status}}",
+            },
+        }
+
+    if capabilities:
+        manifest["capabilities"] = capabilities
+
+    with open(os.path.join(trik_dir, "manifest.json"), "w") as f:
+        json.dump(manifest, f)
+
+    if mode == "conversational":
+        agent_code = """
+from trikhub.manifest import TrikResponse, TrikContext
+
+class _Agent:
+    async def process_message(self, message: str, context: TrikContext) -> TrikResponse:
+        return TrikResponse(message=f"Echo: {message}", transferBack=False)
+
+agent = _Agent()
+"""
+    else:
+        agent_code = """
+from trikhub.manifest import ToolExecutionResult, TrikContext
+
+class _Agent:
+    async def execute_tool(self, tool_name: str, input: dict, context: TrikContext) -> ToolExecutionResult:
+        return ToolExecutionResult(output={"status": "ok"})
+
+agent = _Agent()
+"""
+    with open(os.path.join(trik_dir, "agent.py"), "w") as f:
+        f.write(agent_code)
+
+    return trik_dir
+
+
+@pytest.mark.asyncio
+async def test_injects_registry_context_when_trik_management_enabled():
+    """buildTrikContext should inject registry when trikManagement.enabled is true."""
+    from trikhub.gateway.registry_provider import GatewayRegistryProvider
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        trik_dir = _create_trik_dir_with_capabilities(
+            tmpdir, "mgmt-trik",
+            capabilities={"trikManagement": {"enabled": True}},
+            mode="tool",
+        )
+
+        gw = TrikGateway(TrikGatewayConfig(
+            config_store=InMemoryConfigStore(),
+            storage_provider=InMemoryStorageProvider(),
+            session_storage=InMemorySessionStorage(),
+        ))
+        await gw.initialize()
+        await gw.load_trik(trik_dir)
+
+        loaded = gw._triks["mgmt-trik"]
+        ctx = gw._build_trik_context("test-session", loaded)
+
+        assert ctx.registry is not None
+        assert isinstance(ctx.registry, GatewayRegistryProvider)
+        assert ctx.capabilities is not None
+        assert ctx.capabilities.trikManagement is not None
+        assert ctx.capabilities.trikManagement.enabled is True
+
+
+@pytest.mark.asyncio
+async def test_does_not_inject_registry_when_no_trik_management():
+    """buildTrikContext should not inject registry when trikManagement is not declared."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        trik_dir = _create_trik_dir_with_capabilities(
+            tmpdir, "no-mgmt-trik",
+            mode="tool",
+        )
+
+        gw = TrikGateway(TrikGatewayConfig(
+            config_store=InMemoryConfigStore(),
+            storage_provider=InMemoryStorageProvider(),
+            session_storage=InMemorySessionStorage(),
+        ))
+        await gw.initialize()
+        await gw.load_trik(trik_dir)
+
+        loaded = gw._triks["no-mgmt-trik"]
+        ctx = gw._build_trik_context("test-session", loaded)
+
+        assert ctx.registry is None
+
+
+@pytest.mark.asyncio
+async def test_registry_provider_property():
+    """Gateway should expose registry_provider property."""
+    from trikhub.gateway.registry_provider import GatewayRegistryProvider
+
+    gw = TrikGateway(TrikGatewayConfig(
+        config_store=InMemoryConfigStore(),
+        storage_provider=InMemoryStorageProvider(),
+        session_storage=InMemorySessionStorage(),
+    ))
+
+    assert isinstance(gw.registry_provider, GatewayRegistryProvider)

@@ -10,12 +10,13 @@ from __future__ import annotations
 
 from typing import Any, Protocol, Union, runtime_checkable
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 
 from trikhub.manifest import TrikContext, TrikResponse
 
 from .interceptor import extract_tool_info
-from .workspace_tools import WORKSPACE_SYSTEM_PROMPT, get_active_workspace_tool_names
+from .workspace_tools import get_active_workspace_tool_names
+from .registry_tools import get_active_registry_tool_names
 
 
 @runtime_checkable
@@ -46,7 +47,6 @@ class _WrappedAgent:
         self._agent_or_factory = agent_or_factory
         self._resolved_agent: InvokableAgent | None = None
         self._session_messages: dict[str, list[BaseMessage]] = {}
-        self._session_has_system_prompt: set[str] = set()
 
         # If it's already an invokable agent (has ainvoke), use it directly
         if hasattr(agent_or_factory, "ainvoke"):
@@ -71,17 +71,13 @@ class _WrappedAgent:
         """
         agent = await self._get_agent(context)
 
-        # Determine which workspace tools are active (for output filtering)
+        # Determine which internal tools are active (for output filtering)
         workspace_tool_names = get_active_workspace_tool_names(context.capabilities)
+        registry_tool_names = get_active_registry_tool_names(context.capabilities)
 
         # Get or create session history
         session_id = context.sessionId
         messages = self._session_messages.get(session_id, [])
-
-        # Prepend workspace system prompt on first message of a session
-        if workspace_tool_names and session_id not in self._session_has_system_prompt:
-            messages.append(SystemMessage(content=WORKSPACE_SYSTEM_PROMPT))
-            self._session_has_system_prompt.add(session_id)
 
         # Mark start of this turn for interceptor
         start_index = len(messages)
@@ -99,10 +95,11 @@ class _WrappedAgent:
         # Extract tool info from new messages only
         info = extract_tool_info(result_messages, start_index)
 
-        # Filter out workspace tool calls from the output (they're internal)
-        if workspace_tool_names:
+        # Filter out internal tool calls from the output (workspace + registry)
+        internal_tool_names = workspace_tool_names | registry_tool_names
+        if internal_tool_names:
             filtered_tool_calls = [
-                tc for tc in info.tool_calls if tc.tool not in workspace_tool_names
+                tc for tc in info.tool_calls if tc.tool not in internal_tool_names
             ]
         else:
             filtered_tool_calls = info.tool_calls

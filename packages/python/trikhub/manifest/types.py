@@ -152,6 +152,14 @@ class ShellCapabilities(BaseModel):
     """Max time per command in ms (default: 30000)."""
     maxConcurrent: int | None = None
     """Max concurrent processes (default: 3)."""
+    exposePorts: list[int] | None = None
+    """Ports to expose from the container to the host (e.g., [3000, 8080])."""
+
+
+class TrikManagementCapabilities(BaseModel):
+    """Trik management capabilities — allows managing installed triks."""
+
+    enabled: bool
 
 
 class TrikCapabilities(BaseModel):
@@ -165,6 +173,8 @@ class TrikCapabilities(BaseModel):
     """Filesystem capabilities. Enforced — gateway runs trik in Docker container."""
     shell: ShellCapabilities | None = None
     """Shell capabilities. Enforced — gateway runs trik in Docker container. Requires filesystem."""
+    trikManagement: TrikManagementCapabilities | None = None
+    """Trik management capabilities. Enforced — gateway injects registry context only when declared."""
 
 
 class TrikLimits(BaseModel):
@@ -261,6 +271,98 @@ class TrikStorageContext(Protocol):
     async def set_many(self, entries: dict[str, Any]) -> None: ...
 
 
+class TrikSearchResultItem(BaseModel):
+    """A single trik search result item."""
+
+    name: str
+    description: str
+    version: str
+    downloads: int
+    verified: bool
+
+
+class TrikSearchResult(BaseModel):
+    """Search results from the trik registry."""
+
+    triks: list[TrikSearchResultItem]
+    total: int
+    hasMore: bool
+
+
+class InstalledTrikInfo(BaseModel):
+    """Information about an installed trik."""
+
+    id: str
+    name: str
+    version: str
+    mode: Literal["conversational", "tool"]
+    description: str
+    capabilities: list[str]
+
+
+class TrikInstallResult(BaseModel):
+    """Result of a trik install operation."""
+
+    status: Literal["installed", "already_installed", "failed"]
+    trikId: str
+    version: str
+    error: str | None = None
+
+
+class TrikUninstallResult(BaseModel):
+    """Result of a trik uninstall operation."""
+
+    status: Literal["uninstalled", "not_found", "failed"]
+    trikId: str
+    error: str | None = None
+
+
+class TrikUpgradeResult(BaseModel):
+    """Result of a trik upgrade operation."""
+
+    status: Literal["upgraded", "already_latest", "not_found", "failed"]
+    trikId: str
+    previousVersion: str
+    newVersion: str
+    error: str | None = None
+
+
+class TrikDetailInfo(BaseModel):
+    """Detailed information about a trik from the registry."""
+
+    name: str
+    description: str
+    latestVersion: str
+    versions: list[str]
+    downloads: int
+    verified: bool
+    mode: Literal["conversational", "tool"]
+
+
+@runtime_checkable
+class TrikRegistryContext(Protocol):
+    """Registry context for managing triks.
+    Only populated when trikManagement capability is declared."""
+
+    async def search(
+        self, query: str, page: int = 1, page_size: int = 10
+    ) -> TrikSearchResult: ...
+
+    async def list(self) -> list[InstalledTrikInfo]: ...
+
+    async def install(
+        self, trik_id: str, version: str | None = None
+    ) -> TrikInstallResult: ...
+
+    async def uninstall(self, trik_id: str) -> TrikUninstallResult: ...
+
+    async def upgrade(
+        self, trik_id: str, version: str | None = None
+    ) -> TrikUpgradeResult: ...
+
+    async def get_info(self, trik_id: str) -> TrikDetailInfo | None: ...
+
+
 class TrikContext(BaseModel):
     """Context passed to a trik agent on each message."""
 
@@ -271,6 +373,8 @@ class TrikContext(BaseModel):
     storage: Any  # TrikStorageContext at runtime
     capabilities: TrikCapabilities | None = None
     """Capabilities declared in the trik's manifest, populated by the gateway/worker."""
+    registry: Any | None = None
+    """TrikRegistryContext at runtime — only populated when trikManagement.enabled is true."""
 
 
 class ToolCallRecord(BaseModel):

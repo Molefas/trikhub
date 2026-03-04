@@ -419,9 +419,10 @@ export class TrikLinter {
   }
 
   /**
-   * Check manifest capability rules for filesystem and shell.
-   * - Warn if tool-mode trik declares filesystem or shell (designed for conversational triks)
+   * Check manifest capability rules for filesystem, shell, and trikManagement.
+   * - Warn if tool-mode trik declares filesystem, shell, or trikManagement
    * - Info when filesystem/shell declared (requires Docker for execution)
+   * - Info when trikManagement declared (can manage other triks)
    */
   private checkCapabilityRules(manifest: TrikManifest, manifestPath: string): LintResult[] {
     const results: LintResult[] = [];
@@ -430,8 +431,9 @@ export class TrikLinter {
 
     const fsEnabled = (caps.filesystem as Record<string, unknown> | undefined)?.enabled === true;
     const shellEnabled = (caps.shell as Record<string, unknown> | undefined)?.enabled === true;
+    const trikMgmtEnabled = (caps.trikManagement as Record<string, unknown> | undefined)?.enabled === true;
 
-    if (!fsEnabled && !shellEnabled) return results;
+    if (!fsEnabled && !shellEnabled && !trikMgmtEnabled) return results;
 
     // Warn if tool-mode trik declares filesystem or shell
     if (manifest.agent.mode === 'tool') {
@@ -451,6 +453,14 @@ export class TrikLinter {
           file: manifestPath,
         });
       }
+      if (trikMgmtEnabled) {
+        results.push({
+          rule: 'capability-tool-mode-trik-management',
+          severity: 'warning',
+          message: 'Tool-mode triks with trikManagement capability must ensure all outputs use TDPS-safe types in their outputSchema.',
+          file: manifestPath,
+        });
+      }
     }
 
     // Info: filesystem/shell capabilities require Docker
@@ -464,6 +474,16 @@ export class TrikLinter {
       });
     }
 
+    // Info: trikManagement capability
+    if (trikMgmtEnabled) {
+      results.push({
+        rule: 'capability-trik-management',
+        severity: 'info',
+        message: 'This trik declares trikManagement capabilities and can search, install, uninstall, and upgrade triks.',
+        file: manifestPath,
+      });
+    }
+
     return results;
   }
 
@@ -471,10 +491,11 @@ export class TrikLinter {
    * Adjust scan tier based on manifest-declared capabilities.
    *
    * The source scanner only sees code-level imports. But manifest capabilities
-   * (filesystem, shell) are auto-injected at runtime by the SDK. The effective
-   * tier must account for both.
+   * (filesystem, shell, trikManagement) are auto-injected at runtime by the SDK.
+   * The effective tier must account for both.
    *
    * - filesystem.enabled → at least tier C (System)
+   * - trikManagement.enabled → at least tier C (System)
    * - shell.enabled → at least tier D (Unrestricted — process execution)
    */
   private adjustTierForManifestCapabilities(scan: ScanResult, manifest: TrikManifest): ScanResult {
@@ -483,8 +504,9 @@ export class TrikLinter {
 
     const fsEnabled = (caps.filesystem as Record<string, unknown> | undefined)?.enabled === true;
     const shellEnabled = (caps.shell as Record<string, unknown> | undefined)?.enabled === true;
+    const trikMgmtEnabled = (caps.trikManagement as Record<string, unknown> | undefined)?.enabled === true;
 
-    if (!fsEnabled && !shellEnabled) return scan;
+    if (!fsEnabled && !shellEnabled && !trikMgmtEnabled) return scan;
 
     const TIER_ORDER: Record<SecurityTier, number> = { A: 0, B: 1, C: 2, D: 3 };
     const TIER_LABELS: Record<SecurityTier, string> = {
@@ -494,7 +516,7 @@ export class TrikLinter {
     let impliedTier: SecurityTier = scan.tier;
     if (shellEnabled && TIER_ORDER[impliedTier] < TIER_ORDER['D']) {
       impliedTier = 'D';
-    } else if (fsEnabled && TIER_ORDER[impliedTier] < TIER_ORDER['C']) {
+    } else if ((fsEnabled || trikMgmtEnabled) && TIER_ORDER[impliedTier] < TIER_ORDER['C']) {
       impliedTier = 'C';
     }
 

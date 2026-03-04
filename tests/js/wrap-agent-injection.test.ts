@@ -10,7 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import type { TrikContext, TrikCapabilities } from '../../packages/js/manifest/dist/types.js';
 import { wrapAgent } from '../../packages/js/sdk/dist/wrap-agent.js';
-import { WORKSPACE_SYSTEM_PROMPT, getActiveWorkspaceToolNames } from '../../packages/js/sdk/dist/workspace-tools.js';
+import { getActiveWorkspaceToolNames } from '../../packages/js/sdk/dist/workspace-tools.js';
 
 // ============================================================================
 // Helpers — mock LangChain messages without importing @langchain/core
@@ -157,11 +157,11 @@ describe('wrapAgent without capabilities (regression)', () => {
 });
 
 // ============================================================================
-// Tests: System prompt injection
+// Tests: No system prompt injection (SystemMessage removed to avoid API errors)
 // ============================================================================
 
-describe('wrapAgent workspace system prompt', () => {
-  it('prepends system prompt on first message when filesystem capability is present', async () => {
+describe('wrapAgent does NOT inject system prompts', () => {
+  it('does not inject system prompt when filesystem capability is present', async () => {
     const { agent, capturedMessages } = createCapturingMockAgent();
     const wrapped = wrapAgent(agent);
     const ctx = makeContext('sess-1', filesystemCaps);
@@ -169,13 +169,23 @@ describe('wrapAgent workspace system prompt', () => {
     await wrapped.processMessage!('Hello', ctx);
 
     const messages = capturedMessages[0];
-    expect(messages.length).toBe(2); // SystemMessage + HumanMessage
-    expect(getMessageType(messages[0])).toBe('system');
-    expect(getMessageContent(messages[0])).toBe(WORKSPACE_SYSTEM_PROMPT);
-    expect(getMessageType(messages[1])).toBe('human');
+    expect(messages.length).toBe(1); // Only HumanMessage
+    expect(getMessageType(messages[0])).toBe('human');
   });
 
-  it('prepends system prompt only once per session', async () => {
+  it('does not inject system prompt for filesystem+shell capabilities', async () => {
+    const { agent, capturedMessages } = createCapturingMockAgent();
+    const wrapped = wrapAgent(agent);
+    const ctx = makeContext('sess-1', filesystemAndShellCaps);
+
+    await wrapped.processMessage!('Hello', ctx);
+
+    const messages = capturedMessages[0];
+    expect(messages.length).toBe(1); // Only HumanMessage
+    expect(getMessageType(messages[0])).toBe('human');
+  });
+
+  it('no system messages across multiple turns', async () => {
     const { agent, capturedMessages } = createCapturingMockAgent();
     const wrapped = wrapAgent(agent);
     const ctx = makeContext('sess-1', filesystemCaps);
@@ -183,31 +193,21 @@ describe('wrapAgent workspace system prompt', () => {
     await wrapped.processMessage!('First', ctx);
     await wrapped.processMessage!('Second', ctx);
 
-    const secondCallMessages = capturedMessages[1];
-    const systemMessages = secondCallMessages.filter((m) => getMessageType(m) === 'system');
-    expect(systemMessages.length).toBe(1); // Only the one from first call
+    const allSystemMessages = capturedMessages.flatMap(
+      (msgs) => msgs.filter((m) => getMessageType(m) === 'system')
+    );
+    expect(allSystemMessages.length).toBe(0);
   });
 
-  it('prepends system prompt for each distinct session', async () => {
+  it('no system messages across different sessions', async () => {
     const { agent, capturedMessages } = createCapturingMockAgent();
     const wrapped = wrapAgent(agent);
 
     await wrapped.processMessage!('Hello', makeContext('sess-a', filesystemCaps));
     await wrapped.processMessage!('Hello', makeContext('sess-b', filesystemCaps));
 
-    expect(getMessageType(capturedMessages[0][0])).toBe('system');
-    expect(getMessageType(capturedMessages[1][0])).toBe('system');
-  });
-
-  it('includes system prompt for filesystem+shell capabilities', async () => {
-    const { agent, capturedMessages } = createCapturingMockAgent();
-    const wrapped = wrapAgent(agent);
-    const ctx = makeContext('sess-1', filesystemAndShellCaps);
-
-    await wrapped.processMessage!('Hello', ctx);
-
-    expect(getMessageType(capturedMessages[0][0])).toBe('system');
-    expect(getMessageContent(capturedMessages[0][0])).toContain('execute_command');
+    expect(getMessageType(capturedMessages[0][0])).toBe('human');
+    expect(getMessageType(capturedMessages[1][0])).toBe('human');
   });
 });
 

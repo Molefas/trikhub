@@ -158,6 +158,7 @@ server.tool(
         session: z.boolean().optional(),
         filesystem: z.boolean().optional().describe('Enable sandboxed filesystem access (requires Docker)'),
         shell: z.boolean().optional().describe('Enable shell command execution (requires filesystem)'),
+        trikManagement: z.boolean().optional().describe('Allow the trik to manage installed triks (search, install, uninstall, upgrade)'),
         config: z
           .array(z.object({ key: z.string(), description: z.string() }))
           .optional(),
@@ -252,7 +253,7 @@ const MANIFEST_SCHEMA_DOC = `# TrikHub v2 Manifest Schema
 | Field | Type | Description |
 |-------|------|-------------|
 | tools | Record<string, ToolDeclaration> | Internal tools the agent uses |
-| capabilities | { session?, storage?, filesystem?, shell? } | Runtime capabilities |
+| capabilities | { session?, storage?, filesystem?, shell?, trikManagement? } | Runtime capabilities |
 | limits | { maxTurnTimeMs } | Resource limits |
 | config | { required?, optional? } | Configuration requirements (API keys, tokens) |
 | author | string | Author name |
@@ -337,10 +338,31 @@ Enables shell command execution inside the container. The SDK auto-injects an \`
 | enabled | boolean | Whether shell command execution is enabled |
 | timeoutMs | number | Max time per command in ms (default: 30000) |
 | maxConcurrent | number | Max concurrent processes (default: 3) |
+| exposePorts | number[] | Ports to expose from container to host (e.g., [3000, 8080]). Only ports 1024-65535 allowed. |
 
 **Rule:** If \`shell\` is enabled, \`filesystem\` must also be enabled. Shell access without filesystem doesn't make practical sense — commands need a workspace to operate in.
 
 **Note:** Filesystem and shell capabilities are designed for conversational-mode triks. Tool-mode triks should not declare these capabilities (the linter will warn).
+
+### Trik Management
+
+Allows the trik to manage installed triks — search, install, uninstall, and upgrade.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| enabled | boolean | Whether trik management is enabled |
+
+\`\`\`json
+"trikManagement": {
+  "enabled": true
+}
+\`\`\`
+
+When enabled:
+- The gateway injects a \`TrikRegistryContext\` into the trik's context
+- The SDK provides LangChain tools: \`search_triks\`, \`list_installed_triks\`, \`install_trik\`, \`uninstall_trik\`, \`upgrade_trik\`, \`get_trik_info\`
+- Security tier is bumped to at least C (System)
+- Users are warned about this capability during \`trik install\`
 
 ## Configuration
 
@@ -435,7 +457,7 @@ Integer, number, and boolean fields are always safe.
   "capabilities": {
     "session": { "enabled": true },
     "filesystem": { "enabled": true, "maxSizeBytes": 524288000 },
-    "shell": { "enabled": true, "timeoutMs": 60000, "maxConcurrent": 3 }
+    "shell": { "enabled": true, "timeoutMs": 60000, "maxConcurrent": 3, "exposePorts": [3000] }
   },
   "limits": { "maxTurnTimeMs": 60000 },
   "entry": { "module": "./dist/index.js", "export": "default" }
@@ -620,9 +642,9 @@ create_react_agent(model=model, tools=tools, prompt=_SYSTEM_PROMPT)
 ## Runtime Context API
 
 Both conversational and tool-mode agents receive a \`TrikContext\` with:
-\`{ sessionId, config, storage, capabilities }\`.
+\`{ sessionId, config, storage, capabilities, registry }\`.
 
-The \`capabilities\` field contains the trik's declared capabilities from the manifest. When filesystem/shell capabilities are enabled, the SDK uses this to auto-inject workspace tools into the LLM's tool list.
+The \`capabilities\` field contains the trik's declared capabilities from the manifest. When filesystem/shell capabilities are enabled, the SDK uses this to auto-inject workspace tools into the LLM's tool list. When trikManagement is enabled, a \`registry\` context is injected with methods for managing installed triks.
 
 ### Config Access
 

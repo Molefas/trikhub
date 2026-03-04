@@ -112,6 +112,10 @@ class ExecuteCommandInput(BaseModel):
     env: dict[str, str] | None = Field(
         default=None, description="Additional environment variables"
     )
+    background: bool | None = Field(
+        default=None,
+        description="Run in background — returns immediately with PID. Use for dev servers and long-running processes.",
+    )
 
 
 # ============================================================================
@@ -192,20 +196,22 @@ def _create_shell_langchain_tools(
         cwd: str | None = None,
         timeoutMs: int | None = None,
         env: dict[str, str] | None = None,
+        background: bool | None = None,
     ) -> str:
-        """Run a shell command in the workspace. Returns stdout, stderr, and exit code."""
+        """Run a shell command in the workspace. Returns stdout, stderr, and exit code. Use background=true for long-running processes like dev servers."""
         result = handlers.execute_command(
-            command=command, cwd=cwd, timeoutMs=timeoutMs, env=env
+            command=command, cwd=cwd, timeoutMs=timeoutMs, env=env, background=background
         )
         import json
 
-        return json.dumps(
-            {
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "exitCode": result.exit_code,
-            }
-        )
+        output: dict = {
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "exitCode": result.exit_code,
+        }
+        if result.pid is not None:
+            output["pid"] = result.pid
+        return json.dumps(output)
 
     return [execute_command]
 

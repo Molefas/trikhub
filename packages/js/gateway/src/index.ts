@@ -33,6 +33,13 @@ export {
   InMemoryStorageProvider,
 } from './storage-provider.js';
 
+// Registry provider (for trik management capability)
+export {
+  GatewayRegistryProvider,
+  type RegistryProviderConfig,
+  type RegistryProviderGateway,
+} from './registry-provider.js';
+
 // Python worker (for executing Python triks)
 export {
   PythonWorker,
@@ -106,6 +113,14 @@ export type {
   TrikConfigContext,
   StorageCapabilities,
   TrikStorageContext,
+  TrikRegistryContext,
+  TrikSearchResult,
+  TrikSearchResultItem,
+  InstalledTrikInfo,
+  TrikInstallResult,
+  TrikUninstallResult,
+  TrikUpgradeResult,
+  TrikDetailInfo,
   HandoffLogEntry,
   HandoffSession,
   ToolExecutionResult,

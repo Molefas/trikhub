@@ -12,6 +12,9 @@ export type {
   TrikLimits,
   SessionCapabilities,
   StorageCapabilities,
+  FilesystemCapabilities,
+  ShellCapabilities,
+  TrikManagementCapabilities,
   // Entry point
   TrikEntry,
   TrikRuntime,
@@ -21,11 +24,20 @@ export type {
   // Runtime communication
   TrikConfigContext,
   TrikStorageContext,
+  TrikRegistryContext,
   TrikContext,
   TrikAgent,
   TrikResponse,
   ToolCallRecord,
   ToolExecutionResult,
+  // Registry context return types
+  TrikSearchResult,
+  TrikSearchResultItem,
+  InstalledTrikInfo,
+  TrikInstallResult,
+  TrikUninstallResult,
+  TrikUpgradeResult,
+  TrikDetailInfo,
   // Gateway session
   HandoffLogType,
   HandoffLogEntry,

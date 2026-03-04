@@ -121,8 +121,48 @@ def _show_config_hint(package_name: str, runtime: str) -> None:
         pass  # Don't fail install if config check fails
 
 
+CAPABILITY_DESCRIPTIONS = {
+    "storage": "Can store persistent data",
+    "filesystem": "Can read and write files (runs in Docker container)",
+    "shell": "Can execute shell commands (runs in Docker container)",
+    "trikManagement": "Can search, install, uninstall, and upgrade triks",
+}
+
+
+def _prompt_capability_consent(
+    manifest_data: dict, github_repo: str, skip_prompt: bool,
+) -> bool:
+    """Display capability warnings and prompt for consent before installing."""
+    caps = manifest_data.get("capabilities") or {}
+    declared = []
+    for cap_name in ["storage", "filesystem", "shell", "trikManagement"]:
+        cap = caps.get(cap_name) or {}
+        if cap.get("enabled") is True:
+            declared.append(cap_name)
+
+    if not declared:
+        return True
+
+    click.echo()
+    click.echo(click.style("  ⚠️  This trik declares the following capabilities:", fg="yellow"))
+    click.echo()
+    for cap in declared:
+        desc = CAPABILITY_DESCRIPTIONS.get(cap, cap)
+        click.echo(click.style(f"     • {cap} — {desc}", fg="yellow"))
+    click.echo()
+    click.echo("  These capabilities are granted at install time.")
+    click.echo(f"  Review the trik source at: github.com/{github_repo}")
+    click.echo()
+
+    if skip_prompt:
+        return True
+
+    return click.confirm("  Continue?", default=False)
+
+
 async def _install_from_registry(
     registry: RegistryClient, package_name: str, version: str | None,
+    skip_prompt: bool = False,
 ) -> None:
     """Install a trik from the TrikHub registry."""
     trik = await registry.get_trik(package_name)
@@ -131,6 +171,18 @@ async def _install_from_registry(
 
     install_version = version or trik.latest_version
     runtime = trik.runtime
+
+    # Check capabilities and prompt for consent before installing
+    target_version = next(
+        (v for v in trik.versions if v.version == install_version), None,
+    )
+    if target_version and target_version.manifest:
+        consent = _prompt_capability_consent(
+            target_version.manifest, trik.github_repo, skip_prompt,
+        )
+        if not consent:
+            click.echo(click.style("  Installation cancelled.", fg="red"))
+            raise SystemExit(1)
 
     if runtime == "python":
         # Python triks: install via pip from git
@@ -160,14 +212,15 @@ async def _install_from_registry(
 @click.command("install")
 @click.argument("package")
 @click.option("-v", "--version", default=None, help="Specific version to install")
-def install_command(package: str, version: str | None) -> None:
+@click.option("-y", "--yes", is_flag=True, default=False, help="Skip capability consent prompt")
+def install_command(package: str, version: str | None, yes: bool) -> None:
     """Install a trik from the TrikHub registry."""
     package_name, parsed_version = _parse_package_spec(package)
     version = version or parsed_version
 
     async def _install():
         async with get_registry() as registry:
-            await _install_from_registry(registry, package_name, version)
+            await _install_from_registry(registry, package_name, version, skip_prompt=yes)
 
     asyncio.run(_install())
 

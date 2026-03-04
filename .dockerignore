@@ -18,8 +18,13 @@ node_modules
 **/tests
 **/__tests__
 
-# Build artifacts that shouldn't be copied (will be built in container)
-**/dist
+# Exclude dist except what worker-node.Dockerfile needs (sdk, manifest, worker)
+packages/js/cli/dist
+packages/js/gateway/dist
+packages/js/linter/dist
+packages/js/mcp/dist
+packages/js/server/dist
+examples/**/dist
 **/.tsbuildinfo
 
 # Environment files

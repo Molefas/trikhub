@@ -56,6 +56,8 @@ export interface ContainerOptions {
   memoryLimitMb?: number;
   /** CPU limit as fraction (e.g., 1.0 = 1 CPU, 0.5 = half CPU) */
   cpuLimit?: number;
+  /** Ports to expose from container to host (e.g., [3000, 8080]) */
+  exposePorts?: number[];
 }
 
 export interface ContainerManagerConfig {
@@ -146,6 +148,18 @@ export class ContainerWorkerHandle extends EventEmitter {
     // Network
     if (this.options.networkEnabled === false) {
       args.push('--network=none');
+    }
+
+    // Expose ports for dev servers, preview, etc.
+    if (this.options.exposePorts) {
+      for (const port of this.options.exposePorts) {
+        if (port < 1024) {
+          throw new Error(
+            `Privileged port ${port} cannot be exposed. Only ports 1024-65535 are allowed.`
+          );
+        }
+        args.push('-p', `${port}:${port}`);
+      }
     }
 
     // TrikHub label for container identification

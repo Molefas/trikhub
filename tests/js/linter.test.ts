@@ -280,6 +280,75 @@ describe('lintManifest TDPS rules', () => {
     expect(capResults).toHaveLength(0);
   });
 
+  it('emits info when conversational trik declares trikManagement', async () => {
+    const trikDir = await writeTrik('conv-trik-mgmt', {
+      schemaVersion: 2,
+      id: 'conv-trik-mgmt',
+      name: 'Conv Trik Mgmt',
+      description: 'A conversational trik with trikManagement',
+      version: '1.0.0',
+      agent: {
+        mode: 'conversational',
+        handoffDescription: 'Talk to this manager agent',
+        systemPrompt: 'You manage triks.',
+        domain: ['test'],
+      },
+      capabilities: {
+        trikManagement: { enabled: true },
+      },
+      entry: { module: 'src/index.js', export: 'default' },
+    });
+
+    const linter = new TrikLinter();
+    const results = await linter.lintManifestOnly(trikDir);
+
+    const mgmtInfo = results.find((r) => r.rule === 'capability-trik-management');
+    expect(mgmtInfo).toBeDefined();
+    expect(mgmtInfo!.severity).toBe('info');
+    expect(mgmtInfo!.message).toContain('trikManagement');
+
+    // Should NOT have tool-mode warning
+    const toolWarning = results.find((r) => r.rule === 'capability-tool-mode-trik-management');
+    expect(toolWarning).toBeUndefined();
+  });
+
+  it('warns when tool-mode trik declares trikManagement', async () => {
+    const trikDir = await writeTrik('tool-trik-mgmt', {
+      schemaVersion: 2,
+      id: 'tool-trik-mgmt',
+      name: 'Tool Trik Mgmt',
+      description: 'A tool-mode trik with trikManagement',
+      version: '1.0.0',
+      agent: { mode: 'tool', domain: ['test'] },
+      tools: {
+        myTool: {
+          description: 'Does stuff',
+          inputSchema: { type: 'object', properties: { q: { type: 'string' } }, required: ['q'] },
+          outputSchema: {
+            type: 'object',
+            properties: { status: { type: 'string', enum: ['ok'] } },
+          },
+          outputTemplate: 'Status: {{status}}',
+        },
+      },
+      capabilities: {
+        trikManagement: { enabled: true },
+      },
+      entry: { module: 'src/index.js', export: 'default' },
+    });
+
+    const linter = new TrikLinter();
+    const results = await linter.lintManifestOnly(trikDir);
+
+    const toolWarning = results.find((r) => r.rule === 'capability-tool-mode-trik-management');
+    expect(toolWarning).toBeDefined();
+    expect(toolWarning!.severity).toBe('warning');
+
+    // Should also have the info message
+    const mgmtInfo = results.find((r) => r.rule === 'capability-trik-management');
+    expect(mgmtInfo).toBeDefined();
+  });
+
 });
 
 // ============================================================================
@@ -369,6 +438,33 @@ describe('tier adjustment for manifest capabilities', () => {
 
     // Code is tier D, filesystem would only imply C — stays D
     expect(scan.tier).toBe('D');
+  });
+
+  it('upgrades tier to C when trikManagement capability declared on clean trik', async () => {
+    const trikDir = await writeTrik('tier-trik-mgmt', {
+      schemaVersion: 2,
+      id: 'tier-trik-mgmt',
+      name: 'Tier Trik Mgmt',
+      description: 'A conversational trik with trikManagement but clean code',
+      version: '1.0.0',
+      agent: {
+        mode: 'conversational',
+        handoffDescription: 'Manager agent',
+        systemPrompt: 'You manage triks.',
+        domain: ['test'],
+      },
+      capabilities: {
+        trikManagement: { enabled: true },
+      },
+      entry: { module: 'src/index.js', export: 'default' },
+    });
+
+    const linter = new TrikLinter();
+    const { scan } = await linter.lint(trikDir);
+
+    // Source code is clean (tier A), but trikManagement capability → at least C
+    expect(scan.tier).toBe('C');
+    expect(scan.tierLabel).toBe('System');
   });
 
   it('does not adjust tier when no filesystem/shell capabilities', async () => {

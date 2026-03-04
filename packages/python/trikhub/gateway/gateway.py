@@ -46,6 +46,7 @@ from trikhub.gateway.container_manager import (
 from trikhub.gateway.node_worker import NodeWorker, NodeWorkerConfig
 from trikhub.gateway.session_storage import InMemorySessionStorage, SessionStorage
 from trikhub.gateway.storage_provider import InMemoryStorageProvider, SqliteStorageProvider, StorageProvider
+from trikhub.gateway.registry_provider import GatewayRegistryProvider
 
 
 # ============================================================================
@@ -80,6 +81,7 @@ class TrikGatewayConfig:
     node_worker_config: NodeWorkerConfig | None = None
     max_turns_per_handoff: int = 20
     container_manager_config: ContainerManagerConfig | None = None
+    registry_base_url: str | None = None
 
 
 # ============================================================================
@@ -175,6 +177,22 @@ class _ActiveHandoff:
 # ============================================================================
 
 
+class _RegistryGatewayAdapter:
+    """Adapter bridging TrikGateway to the RegistryProviderGateway protocol."""
+
+    def __init__(self, gateway: "TrikGateway") -> None:
+        self._gw = gateway
+
+    def get_loaded_triks(self) -> dict[str, Any]:
+        return self._gw._triks  # type: ignore[return-value]
+
+    async def load_trik(self, path: str) -> Any:
+        return await self._gw.load_trik(path)
+
+    def unload_trik(self, trik_id: str) -> bool:
+        return self._gw.unload_trik(trik_id)
+
+
 class TrikGateway:
     """
     Central orchestration point for trik execution.
@@ -199,6 +217,18 @@ class TrikGateway:
         self._triks: dict[str, _LoadedTrik] = {}
         self._active_handoff: _ActiveHandoff | None = None
 
+        # Compute config dir for registry provider
+        if cfg.triks_directory:
+            config_dir = str(Path(cfg.triks_directory).expanduser().parent)
+        else:
+            config_dir = os.path.join(os.getcwd(), ".trikhub")
+
+        self._registry_provider = GatewayRegistryProvider(
+            config_dir=config_dir,
+            gateway=_RegistryGatewayAdapter(self),
+            registry_base_url=cfg.registry_base_url or "https://api.trikhub.com",
+        )
+
     # -- Initialization -------------------------------------------------------
 
     async def initialize(self) -> None:
@@ -217,6 +247,10 @@ class TrikGateway:
     @property
     def session_storage(self) -> SessionStorage:
         return self._session_storage
+
+    @property
+    def registry_provider(self) -> GatewayRegistryProvider:
+        return self._registry_provider
 
     # -- Message Routing ------------------------------------------------------
 
@@ -609,11 +643,21 @@ class TrikGateway:
         )
         ctx = TrikContext(sessionId=session_id, config=config_ctx, storage=storage_ctx)
 
-        # Include capabilities if the trik declares filesystem/shell
+        # Include capabilities if the trik declares filesystem/shell/trikManagement
         if loaded.manifest.capabilities:
             caps = loaded.manifest.capabilities
-            if (caps.filesystem and caps.filesystem.enabled) or (caps.shell and caps.shell.enabled):
+            trik_mgmt = caps.trikManagement
+            if (
+                (caps.filesystem and caps.filesystem.enabled)
+                or (caps.shell and caps.shell.enabled)
+                or (trik_mgmt and trik_mgmt.enabled)
+            ):
                 ctx.capabilities = caps
+
+        # Inject registry context if trikManagement declared
+        if loaded.manifest.capabilities and loaded.manifest.capabilities.trikManagement:
+            if loaded.manifest.capabilities.trikManagement.enabled:
+                ctx.registry = self._registry_provider
 
         return ctx
 

@@ -131,6 +131,9 @@ export interface TrikVersion {
 
   /** Runtime environment (node or python) - extracted from manifest.entry.runtime */
   runtime?: TrikRuntime;
+
+  /** Full manifest from registry (used for capability checks at install time) */
+  manifest?: Record<string, unknown>;
 }
 
 /**

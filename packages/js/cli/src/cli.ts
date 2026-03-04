@@ -47,6 +47,7 @@ program
   .alias('i')
   .description('Install a trik (e.g., trik install @acme/article-search)')
   .option('-v, --version <version>', 'Install a specific version')
+  .option('-y, --yes', 'Skip capability consent prompt')
   .action(installCommand);
 
 // Uninstall command

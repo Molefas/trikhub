@@ -41,6 +41,10 @@ from trikhub.gateway.storage_provider import (
     SqliteStorageProvider,
     StorageProvider,
 )
+from trikhub.gateway.registry_provider import (
+    GatewayRegistryProvider,
+    RegistryProviderGateway,
+)
 
 __all__ = [
     # Gateway
@@ -75,4 +79,7 @@ __all__ = [
     "StorageProvider",
     "InMemoryStorageProvider",
     "SqliteStorageProvider",
+    # Registry provider
+    "GatewayRegistryProvider",
+    "RegistryProviderGateway",
 ]

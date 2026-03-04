@@ -162,12 +162,13 @@ function createShellLangChainTools(
       },
       {
         name: 'execute_command',
-        description: 'Run a shell command in the workspace. Returns stdout, stderr, and exit code.',
+        description: 'Run a shell command in the workspace. Returns stdout, stderr, and exit code. Use background=true for long-running processes like dev servers.',
         schema: z.object({
           command: z.string().describe('Shell command to execute'),
           cwd: z.string().optional().describe('Working directory relative to /workspace (default: /workspace)'),
           timeoutMs: z.number().optional().describe('Timeout in milliseconds (default: 30000)'),
           env: z.record(z.string()).optional().describe('Additional environment variables'),
+          background: z.boolean().optional().describe('Run in background — returns immediately with PID. Use for dev servers and long-running processes.'),
         }),
       }
     ),

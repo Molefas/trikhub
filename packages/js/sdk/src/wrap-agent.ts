@@ -1,8 +1,9 @@
-import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { HumanMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { TrikAgent, TrikContext, TrikResponse } from '@trikhub/manifest';
 import { extractToolInfo } from './interceptor.js';
-import { getActiveWorkspaceToolNames, WORKSPACE_SYSTEM_PROMPT } from './workspace-tools.js';
+import { getActiveWorkspaceToolNames } from './workspace-tools.js';
+import { getActiveRegistryToolNames } from './registry-tools.js';
 
 /**
  * Any agent with a LangGraph-compatible invoke method.
@@ -69,8 +70,6 @@ export function wrapAgent(
 
   // Per-session message history
   const sessionMessages = new Map<string, BaseMessage[]>();
-  // Track which sessions have received the workspace system prompt
-  const sessionHasSystemPrompt = new Set<string>();
 
   return {
     async processMessage(
@@ -82,20 +81,15 @@ export function wrapAgent(
         resolvedAgent = await (agentOrFactory as AgentFactory)(context);
       }
 
-      // Determine which workspace tools are active (for output filtering)
+      // Determine which internal tools are active (for output filtering)
       const workspaceToolNames = getActiveWorkspaceToolNames(context.capabilities);
+      const registryToolNames = getActiveRegistryToolNames(context.capabilities);
 
       // Get or create session message history
       let messages = sessionMessages.get(context.sessionId);
       if (!messages) {
         messages = [];
         sessionMessages.set(context.sessionId, messages);
-      }
-
-      // Prepend workspace system prompt on first message of a session
-      if (workspaceToolNames.size > 0 && !sessionHasSystemPrompt.has(context.sessionId)) {
-        messages.push(new SystemMessage(WORKSPACE_SYSTEM_PROMPT));
-        sessionHasSystemPrompt.add(context.sessionId);
       }
 
       // Record where new messages start (for extracting this turn's tool calls)
@@ -116,9 +110,10 @@ export function wrapAgent(
         startIndex
       );
 
-      // Filter out workspace tool calls from the output (they're internal)
-      const filteredToolCalls = workspaceToolNames.size > 0
-        ? toolCalls.filter((tc) => !workspaceToolNames.has(tc.tool))
+      // Filter out internal tool calls from the output (workspace + registry)
+      const internalToolNames = new Set([...workspaceToolNames, ...registryToolNames]);
+      const filteredToolCalls = internalToolNames.size > 0
+        ? toolCalls.filter((tc) => !internalToolNames.has(tc.tool))
         : toolCalls;
 
       return {

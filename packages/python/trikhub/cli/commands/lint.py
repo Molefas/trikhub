@@ -66,10 +66,11 @@ def lint_command(path: str, warnings_as_errors: bool, skip: tuple[str, ...]) -> 
     click.echo(format_scan_result(scan_result))
     click.echo("")
 
-    # Check filesystem/shell capability rules
+    # Check filesystem/shell/trikManagement capability rules
     caps = manifest_data.get("capabilities") or {}
     fs_enabled = (caps.get("filesystem") or {}).get("enabled") is True
     shell_enabled = (caps.get("shell") or {}).get("enabled") is True
+    trik_mgmt_enabled = (caps.get("trikManagement") or {}).get("enabled") is True
     agent_mode = (manifest_data.get("agent") or {}).get("mode", "")
 
     if agent_mode == "tool":
@@ -79,12 +80,18 @@ def lint_command(path: str, warnings_as_errors: bool, skip: tuple[str, ...]) -> 
         if shell_enabled:
             warn("Tool-mode triks should not declare shell capabilities. "
                  "Filesystem and shell tools are designed for conversational triks.")
+        if trik_mgmt_enabled:
+            warn("Tool-mode triks with trikManagement capability must ensure all "
+                 "outputs use TDPS-safe types in their outputSchema.")
 
     if fs_enabled or shell_enabled:
         cap_list = " and ".join(
             c for c in ["filesystem", "shell"] if (c == "filesystem" and fs_enabled) or (c == "shell" and shell_enabled)
         )
         info(f"This trik declares {cap_list} capabilities and requires Docker for execution.")
+
+    if trik_mgmt_enabled:
+        info("This trik declares trikManagement capabilities and can search, install, uninstall, and upgrade triks.")
 
     # Check entry point exists
     manifest_dir = manifest_path.parent

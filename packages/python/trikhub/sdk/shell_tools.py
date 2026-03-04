@@ -35,6 +35,8 @@ class ExecuteCommandOutput:
     stdout: str
     stderr: str
     exit_code: int
+    pid: int | None = None
+    """PID of the background process (only when background=True)."""
 
 
 # ============================================================================
@@ -44,7 +46,7 @@ class ExecuteCommandOutput:
 SHELL_TOOL_SCHEMAS: list[dict] = [
     {
         "name": "execute_command",
-        "description": "Run a shell command in the workspace. Returns stdout, stderr, and exit code.",
+        "description": "Run a shell command in the workspace. Returns stdout, stderr, and exit code. Use background=true for long-running processes like dev servers.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -61,6 +63,10 @@ SHELL_TOOL_SCHEMAS: list[dict] = [
                     "type": "object",
                     "description": "Additional environment variables",
                     "additionalProperties": {"type": "string"},
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": "Run in background — returns immediately with PID. Use for dev servers and long-running processes.",
                 },
             },
             "required": ["command"],
@@ -88,6 +94,7 @@ class ShellHandlers:
         cwd: str | None = None,
         timeoutMs: int | None = None,
         env: dict[str, str] | None = None,
+        background: bool | None = None,
     ) -> ExecuteCommandOutput:
         """Execute a shell command within the workspace."""
         # Resolve cwd within workspace
@@ -99,11 +106,37 @@ class ShellHandlers:
             if not os.path.exists(exec_cwd):
                 raise FileNotFoundError(f"Working directory not found: {cwd}")
 
-        timeout_ms = timeoutMs or self._defaults.timeout_ms
-        timeout_sec = timeout_ms / 1000.0
-
         # Build environment
         exec_env = {**os.environ, **(env or {})}
+
+        # Background mode: spawn and return immediately with PID
+        if background:
+            proc = subprocess.Popen(
+                command,
+                shell=True,
+                cwd=exec_cwd,
+                env=exec_env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            if proc.pid is None:
+                return ExecuteCommandOutput(
+                    stdout="",
+                    stderr="Failed to start background process",
+                    exit_code=1,
+                )
+            return ExecuteCommandOutput(
+                stdout=f"Background process started with PID {proc.pid}",
+                stderr="",
+                exit_code=0,
+                pid=proc.pid,
+            )
+
+        # Foreground mode: run synchronously
+        timeout_ms = timeoutMs or self._defaults.timeout_ms
+        timeout_sec = timeout_ms / 1000.0
 
         try:
             result = subprocess.run(

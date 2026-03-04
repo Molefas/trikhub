@@ -25,6 +25,14 @@ export {
   WORKSPACE_SYSTEM_PROMPT,
 } from './workspace-tools.js';
 
+// Registry tools (trik management capability)
+export {
+  getRegistryTools,
+  getActiveRegistryToolNames,
+  REGISTRY_TOOL_NAMES,
+  REGISTRY_SYSTEM_PROMPT,
+} from './registry-tools.js';
+
 // Filesystem + shell tool handlers (low-level)
 export { createFilesystemHandlers, filesystemToolSchemas } from './filesystem-tools.js';
 export type { FilesystemHandlers, ToolSchema } from './filesystem-tools.js';
