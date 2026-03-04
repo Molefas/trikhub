@@ -498,6 +498,52 @@ describe('tier adjustment for manifest capabilities', () => {
 // logTemplate placeholder classification
 // ============================================================================
 
+describe('capability cross-check in lint()', () => {
+  it('produces errors for undeclared filesystem usage', async () => {
+    const trikDir = await writeTrik('lint-xcheck-fs', {
+      schemaVersion: 2,
+      id: 'xcheck-fs',
+      name: 'xcheck-fs',
+      description: 'A trik for testing cross-check',
+      version: '1.0.0',
+      agent: { mode: 'conversational', handoffDescription: 'Talk to the xcheck-fs agent for testing', systemPrompt: 'You are a test agent.', domain: ['test'] },
+      entry: { module: 'src/index.ts', export: 'default' },
+      capabilities: {},
+    });
+    // Write source that uses filesystem
+    const { writeFile: wf } = await import('node:fs/promises');
+    const { join: j } = await import('node:path');
+    await wf(j(trikDir, 'src', 'index.ts'), `import fs from 'node:fs';\nexport default {};`);
+
+    const linter = new TrikLinter();
+    const { results } = await linter.lint(trikDir);
+    const crossCheckErrors = results.filter(r => r.rule === 'capability-cross-check');
+    expect(crossCheckErrors.length).toBeGreaterThan(0);
+    expect(crossCheckErrors[0].severity).toBe('error');
+  });
+
+  it('no cross-check errors when capabilities are declared', async () => {
+    const trikDir = await writeTrik('lint-xcheck-fs-ok', {
+      schemaVersion: 2,
+      id: 'xcheck-fs-ok',
+      name: 'xcheck-fs-ok',
+      description: 'A trik for testing cross-check',
+      version: '1.0.0',
+      agent: { mode: 'conversational', handoffDescription: 'Talk to the xcheck-fs-ok agent for testing', systemPrompt: 'You are a test agent.', domain: ['test'] },
+      entry: { module: 'src/index.ts', export: 'default' },
+      capabilities: { filesystem: { enabled: true } },
+    });
+    const { writeFile: wf } = await import('node:fs/promises');
+    const { join: j } = await import('node:path');
+    await wf(j(trikDir, 'src', 'index.ts'), `import fs from 'node:fs';\nexport default {};`);
+
+    const linter = new TrikLinter();
+    const { results } = await linter.lint(trikDir);
+    const crossCheckErrors = results.filter(r => r.rule === 'capability-cross-check');
+    expect(crossCheckErrors).toHaveLength(0);
+  });
+});
+
 describe('logTemplate classification', () => {
   it('classifies logTemplate placeholder errors correctly', async () => {
     const trikDir = await writeTrik('bad-template', {
