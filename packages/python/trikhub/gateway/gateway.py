@@ -61,6 +61,7 @@ class _LoadedTrik:
     path: str
     runtime: TrikRuntime
     containerized: bool = False
+    scoped_name: str = ""
 
 
 @dataclass
@@ -309,7 +310,7 @@ class TrikGateway:
                 continue
             tools.append(
                 HandoffToolDefinition(
-                    name=f"talk_to_{trik_id}",
+                    name=f"talk_to_{self._to_tool_name(trik_id)}",
                     description=loaded.manifest.agent.handoffDescription or "",
                     input_schema={
                         "type": "object",
@@ -636,9 +637,9 @@ class TrikGateway:
     # -- Context Building -----------------------------------------------------
 
     def _build_trik_context(self, session_id: str, loaded: _LoadedTrik) -> TrikContext:
-        config_ctx = self._config_store.get_for_trik(loaded.manifest.id)
+        config_ctx = self._config_store.get_for_trik(loaded.scoped_name)
         storage_ctx = self._storage_provider.for_trik(
-            loaded.manifest.id,
+            loaded.scoped_name,
             loaded.manifest.capabilities.storage if loaded.manifest.capabilities else None,
         )
         ctx = TrikContext(sessionId=session_id, config=config_ctx, storage=storage_ctx)
@@ -674,7 +675,7 @@ class TrikGateway:
 
     # -- Trik Loading ---------------------------------------------------------
 
-    async def load_trik(self, trik_path: str) -> TrikManifest:
+    async def load_trik(self, trik_path: str, scoped_name: str | None = None) -> TrikManifest:
         manifest_path = os.path.join(trik_path, "manifest.json")
         with open(manifest_path) as f:
             manifest_data = json.load(f)
@@ -687,8 +688,14 @@ class TrikGateway:
 
         manifest = TrikManifest(**manifest_data)
 
-        if self._config.allowed_triks and manifest.id not in self._config.allowed_triks:
-            raise ValueError(f'Trik "{manifest.id}" is not in the allowlist')
+        # Determine scoped name for resource isolation
+        resolved_scoped_name = scoped_name or self._resolve_scoped_name(trik_path, manifest)
+
+        if self._config.allowed_triks and (
+            resolved_scoped_name not in self._config.allowed_triks
+            and manifest.id not in self._config.allowed_triks
+        ):
+            raise ValueError(f'Trik "{manifest.id}" ({resolved_scoped_name}) is not in the allowlist')
 
         # Validate required config
         if self._config.validate_config is not False:
@@ -697,10 +704,17 @@ class TrikGateway:
                 keys_str = ", ".join(missing_keys)
                 json_example = ", ".join(f'"{k}": "..."' for k in missing_keys)
                 print(
-                    f'[TrikGateway] Warning: trik "{manifest.id}" is missing required config: {keys_str}\n'
-                    f'  Add to .trikhub/secrets.json: {{ "{manifest.id}": {{ {json_example} }} }}',
+                    f'[TrikGateway] Warning: trik "{resolved_scoped_name}" is missing required config: {keys_str}\n'
+                    f'  Add to .trikhub/secrets.json: {{ "{resolved_scoped_name}": {{ {json_example} }} }}',
                     file=sys.stderr,
                 )
+
+        # Check for duplicate scoped names
+        if resolved_scoped_name in self._triks:
+            raise ValueError(
+                f'Duplicate trik identity "{resolved_scoped_name}": '
+                f'"{manifest.id}" at {trik_path} conflicts with already-loaded trik'
+            )
 
         runtime = manifest.entry.runtime or TrikRuntime.NODE
         is_tool_mode = manifest.agent.mode == "tool"
@@ -708,22 +722,23 @@ class TrikGateway:
 
         if containerized:
             # Containerized triks — always run inside Docker regardless of runtime
-            agent = self._create_container_agent_proxy(manifest, trik_path, runtime)
-            self._triks[manifest.id] = _LoadedTrik(
+            agent = self._create_container_agent_proxy(manifest, trik_path, runtime, resolved_scoped_name)
+            self._triks[resolved_scoped_name] = _LoadedTrik(
                 manifest=manifest, agent=agent, path=trik_path,
                 runtime=runtime if isinstance(runtime, TrikRuntime) else TrikRuntime(runtime),
-                containerized=True,
+                containerized=True, scoped_name=resolved_scoped_name,
             )
         elif runtime == TrikRuntime.PYTHON or runtime == "python":
             # Load Python triks in-process
             agent = self._trik_loader.load(trik_path)
-            self._triks[manifest.id] = _LoadedTrik(
-                manifest=manifest, agent=agent, path=trik_path, runtime=TrikRuntime.PYTHON
+            self._triks[resolved_scoped_name] = _LoadedTrik(
+                manifest=manifest, agent=agent, path=trik_path, runtime=TrikRuntime.PYTHON,
+                scoped_name=resolved_scoped_name,
             )
         else:
             # JS triks via NodeWorker proxy
             await self._ensure_node_worker()
-            agent = self._create_node_agent_proxy(manifest, trik_path)
+            agent = self._create_node_agent_proxy(manifest, trik_path, resolved_scoped_name)
 
             if is_tool_mode:
                 if not callable(getattr(agent, "execute_tool", None)):
@@ -746,14 +761,42 @@ class TrikGateway:
                         f'Trik "{manifest.id}" module does not export a valid TrikAgent'
                     )
 
-            self._triks[manifest.id] = _LoadedTrik(
-                manifest=manifest, agent=agent, path=trik_path, runtime=TrikRuntime.NODE
+            self._triks[resolved_scoped_name] = _LoadedTrik(
+                manifest=manifest, agent=agent, path=trik_path, runtime=TrikRuntime.NODE,
+                scoped_name=resolved_scoped_name,
             )
 
         return manifest
 
+    @staticmethod
+    def _resolve_scoped_name(trik_path: str, manifest: TrikManifest) -> str:
+        """
+        Resolve the scoped name for a trik. Checks for .trikhub-identity.json first,
+        falls back to local/<manifest.id> for dev triks.
+        """
+        identity_path = os.path.join(trik_path, ".trikhub-identity.json")
+        if os.path.isfile(identity_path):
+            try:
+                with open(identity_path) as f:
+                    identity = json.load(f)
+                if isinstance(identity.get("scopedName"), str):
+                    return identity["scopedName"]
+            except Exception:
+                pass
+        return f"local/{manifest.id}"
+
+    @staticmethod
+    def _to_tool_name(scoped_name: str) -> str:
+        """Convert a scoped name to a tool-safe identifier.
+
+        Examples:
+            @alice/weather -> alice__weather
+            local/weather -> local__weather
+        """
+        return scoped_name.lstrip("@").replace("/", "__")
+
     def _create_node_agent_proxy(
-        self, manifest: TrikManifest, trik_path: str
+        self, manifest: TrikManifest, trik_path: str, scoped_name: str | None = None
     ) -> Any:
         """Create a proxy TrikAgent for JS triks that delegates to NodeWorker."""
         gateway = self
@@ -774,7 +817,7 @@ class TrikGateway:
                         message=message,
                         session_id=context.sessionId,
                         config=_config_to_record(context.config),
-                        storage_namespace=manifest.id,
+                        storage_namespace=scoped_name or manifest.id,
                     )
                     return TrikResponse(
                         message=result.message,
@@ -804,7 +847,7 @@ class TrikGateway:
                         input=input,
                         session_id=context.sessionId,
                         config=_config_to_record(context.config),
-                        storage_namespace=manifest.id,
+                        storage_namespace=scoped_name or manifest.id,
                     )
                     return ToolExecutionResult(output=result.output)
                 finally:
@@ -815,7 +858,8 @@ class TrikGateway:
         return proxy
 
     def _create_container_agent_proxy(
-        self, manifest: TrikManifest, trik_path: str, runtime: TrikRuntime | str
+        self, manifest: TrikManifest, trik_path: str, runtime: TrikRuntime | str,
+        scoped_name: str | None = None,
     ) -> Any:
         """Create a proxy TrikAgent for containerized triks that delegates to Docker containers."""
         gateway = self
@@ -830,9 +874,10 @@ class TrikGateway:
 
             async def _process_message(message: str, context: TrikContext) -> TrikResponse:
                 manager = gateway._ensure_container_manager()
-                workspace_path = manager.get_workspace_path(manifest.id)
+                container_id = scoped_name or manifest.id
+                workspace_path = manager.get_workspace_path(container_id)
                 handle = await manager.launch(
-                    manifest.id,
+                    container_id,
                     ContainerOptions(
                         runtime=runtime_str,
                         workspace_path=workspace_path,
@@ -846,7 +891,7 @@ class TrikGateway:
                         message=message,
                         session_id=context.sessionId,
                         config=_config_to_record(context.config),
-                        storage_namespace=manifest.id,
+                        storage_namespace=scoped_name or manifest.id,
                     )
                     return TrikResponse(
                         message=result.message,
@@ -868,9 +913,10 @@ class TrikGateway:
                 tool_name: str, input: dict[str, Any], context: TrikContext
             ) -> ToolExecutionResult:
                 manager = gateway._ensure_container_manager()
-                workspace_path = manager.get_workspace_path(manifest.id)
+                container_id = scoped_name or manifest.id
+                workspace_path = manager.get_workspace_path(container_id)
                 handle = await manager.launch(
-                    manifest.id,
+                    container_id,
                     ContainerOptions(
                         runtime=runtime_str,
                         workspace_path=workspace_path,
@@ -885,7 +931,7 @@ class TrikGateway:
                         input=input,
                         session_id=context.sessionId,
                         config=_config_to_record(context.config),
-                        storage_namespace=manifest.id,
+                        storage_namespace=scoped_name or manifest.id,
                     )
                     return ToolExecutionResult(output=result.output)
                 finally:
@@ -1003,13 +1049,13 @@ class TrikGateway:
             try:
                 # 1. Check if it's a direct path
                 if os.path.isdir(trik_name):
-                    manifests.append(await self.load_trik(trik_name))
+                    manifests.append(await self.load_trik(trik_name, trik_name))
                     continue
 
                 # 2. Check in .trikhub/triks/ directory
                 triks_dir = os.path.join(base_dir, "triks", trik_name)
                 if os.path.isdir(triks_dir):
-                    manifests.append(await self.load_trik(triks_dir))
+                    manifests.append(await self.load_trik(triks_dir, trik_name))
                     continue
 
                 # 3. Try to import as Python package
@@ -1029,7 +1075,7 @@ class TrikGateway:
                         spec = importlib.util.find_spec(package_name)
                         if spec and spec.origin:
                             trik_path = os.path.dirname(spec.origin)
-                            manifests.append(await self.load_trik(trik_path))
+                            manifests.append(await self.load_trik(trik_path, trik_name))
                             found = True
                             break
                     except (ImportError, ModuleNotFoundError):
