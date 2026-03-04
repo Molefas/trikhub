@@ -518,10 +518,7 @@ export class TrikGateway {
       const handoffSessionId = handoff.sessionId;
       const trikId = handoff.trikId;
 
-      // Stop container if containerized
-      await this.stopContainerIfNeeded(trikId);
-
-      // Clear active handoff
+      // Clear active handoff (container stays warm with idle TTL)
       this.activeHandoff = null;
 
       return {
@@ -565,10 +562,7 @@ export class TrikGateway {
       sessionId: handoff.sessionId,
     };
 
-    // Stop container if containerized
-    await this.stopContainerIfNeeded(handoff.trikId);
-
-    // Clear active handoff
+    // Clear active handoff (container stays warm with idle TTL)
     this.activeHandoff = null;
 
     return result;
@@ -608,10 +602,7 @@ export class TrikGateway {
       sessionId: handoff.sessionId,
     };
 
-    // Stop container if containerized
-    await this.stopContainerIfNeeded(handoff.trikId);
-
-    // Clear active handoff
+    // Clear active handoff (container stays warm with idle TTL)
     this.activeHandoff = null;
 
     return result;
@@ -1026,16 +1017,6 @@ export class TrikGateway {
     }
 
     return agent;
-  }
-
-  /**
-   * Stop a trik's container if it is containerized and running.
-   */
-  private async stopContainerIfNeeded(trikId: string): Promise<void> {
-    const loaded = this.triks.get(trikId);
-    if (loaded?.containerized && this.containerManager) {
-      await this.containerManager.stop(trikId);
-    }
   }
 
   /**
