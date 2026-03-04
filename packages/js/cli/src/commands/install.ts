@@ -12,7 +12,7 @@
  * 4. Update .trikhub/config.json with the trik
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -342,6 +342,14 @@ async function downloadToTriksDirectory(
 
   // Remove .git directory to save space
   await runCommand('rm', ['-rf', join(trikDir, '.git')], baseDir, { silent: true });
+
+  // Write identity file for trusted scoped name
+  const identityPath = join(trikDir, '.trikhub-identity.json');
+  const identity = {
+    scopedName: packageName,
+    installedAt: new Date().toISOString(),
+  };
+  writeFileSync(identityPath, JSON.stringify(identity, null, 2));
 
   return { success: true, trikPath: trikDir };
 }
