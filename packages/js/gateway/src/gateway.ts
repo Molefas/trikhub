@@ -10,6 +10,7 @@ import {
   type TrikAgent,
   type TrikContext,
   type TrikConfigContext,
+  type TrikStorageContext,
   type TrikResponse,
   type TrikCapabilities,
   type ToolCallRecord,
@@ -757,10 +758,10 @@ export class TrikGateway {
    */
   private buildTrikContext(sessionId: string, loaded: LoadedTrik): TrikContext {
     const configContext = this.configStore.getForTrik(loaded.manifest.id);
-    const storageContext = this.storageProvider.forTrik(
-      loaded.manifest.id,
-      loaded.manifest.capabilities?.storage
-    );
+    const storageEnabled = !!loaded.manifest.capabilities?.storage?.enabled;
+    const storageContext = storageEnabled
+      ? this.storageProvider.forTrik(loaded.manifest.id, loaded.manifest.capabilities?.storage)
+      : this.createNoopStorage();
 
     const ctx: TrikContext = {
       sessionId,
@@ -782,6 +783,22 @@ export class TrikGateway {
     }
 
     return ctx;
+  }
+
+  /**
+   * Create a noop storage context that throws on any operation.
+   * Used when a trik hasn't declared capabilities.storage.enabled.
+   */
+  private createNoopStorage(): TrikStorageContext {
+    const msg = 'Storage not declared in manifest. Add capabilities.storage.enabled: true to use storage.';
+    return {
+      get: async () => { throw new Error(msg); },
+      set: async () => { throw new Error(msg); },
+      delete: async () => { throw new Error(msg); },
+      list: async () => { throw new Error(msg); },
+      getMany: async () => { throw new Error(msg); },
+      setMany: async () => { throw new Error(msg); },
+    };
   }
 
   /**
