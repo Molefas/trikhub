@@ -286,7 +286,7 @@ async def _invoke_main_agent(
     handoff_call = _find_handoff_tool_call(new_messages, len(messages) - 1)
 
     if handoff_call is not None:
-        trik_id = handoff_call["tool_name"][len(HANDOFF_TOOL_PREFIX):]
+        trik_id = handoff_call["tool_name"][len(HANDOFF_TOOL_PREFIX):].replace("__", "/", 1)
         context = handoff_call["context"]
 
         debug(

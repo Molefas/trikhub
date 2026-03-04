@@ -69,7 +69,7 @@ class MockAgentWithHandoff:
                     content="",
                     tool_calls=[
                         {
-                            "name": f"talk_to_{self._trik_id}",
+                            "name": f"talk_to_local__{self._trik_id}",
                             "args": {"context": self._context},
                             "id": "call_handoff_1",
                         }
@@ -220,7 +220,7 @@ class TestRoutingWithTriks:
                 agent, EnhanceOptions(gateway_instance=gateway)
             )
             response = await app.process_message("help me")
-            assert response.source == "helper-trik"
+            assert response.source == "local/helper-trik"
             assert response.message == "I can help!"
 
     async def test_active_handoff_routes_to_trik(self):
@@ -240,11 +240,11 @@ class TestRoutingWithTriks:
 
             # First message triggers handoff
             r1 = await app.process_message("start")
-            assert r1.source == "chat-trik"
+            assert r1.source == "local/chat-trik"
 
             # Second message goes to trik (active handoff)
             r2 = await app.process_message("continue")
-            assert r2.source == "chat-trik"
+            assert r2.source == "local/chat-trik"
             assert r2.message == "Still chatting!"
 
     async def test_transfer_back_returns_to_main(self):
@@ -269,7 +269,7 @@ class TestRoutingWithTriks:
 
             # Handoff triggers but trik immediately transfers back
             response = await app.process_message("do something")
-            assert response.source == "done-trik"
+            assert response.source == "local/done-trik"
             assert response.message == "All done!"
 
     async def test_force_back_via_slash_back(self):
@@ -346,7 +346,7 @@ class TestHandoffTools:
 
             tools = get_handoff_tools_for_agent(gateway)
             assert len(tools) == 1
-            assert tools[0].name == "talk_to_my-trik"
+            assert tools[0].name == "talk_to_local__my-trik"
             assert "Talk to my-trik" in tools[0].description
 
     async def test_no_handoff_tools_for_tool_mode_triks(self):
@@ -566,4 +566,4 @@ class TestTriksDirectory:
                     triks_directory=tmpdir,
                 ),
             )
-            assert "auto-trik" in app.get_loaded_triks()
+            assert "local/auto-trik" in app.get_loaded_triks()
