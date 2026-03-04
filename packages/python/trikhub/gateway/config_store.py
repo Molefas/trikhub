@@ -66,7 +66,9 @@ class FileConfigStore:
     """
     File-based ConfigStore.
     Loads secrets from global (~/.trikhub/secrets.json) and local
-    (.trikhub/secrets.json) files. Local secrets override global.
+    (.trikhub/secrets.json) files, keyed by scoped trik name
+    (e.g., {"@alice/weather": {"API_KEY": "..."}}).
+    Local secrets override global.
     """
 
     def __init__(
