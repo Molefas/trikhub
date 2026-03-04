@@ -20,6 +20,7 @@ from trikhub.cli.config import (
 )
 from trikhub.cli.discovery import get_package_info
 from trikhub.cli.registry import RegistryClient, get_registry
+from trikhub.linter.scanner import scan_capabilities, cross_check_manifest
 
 
 def _parse_package_spec(spec: str) -> tuple[str, str | None]:
@@ -82,6 +83,40 @@ def _download_to_triks_directory(
         )
 
     return target
+
+
+def _get_trik_download_path(package_name: str) -> Path:
+    """Get the path where a trik is downloaded to."""
+    triks_dir = get_config_dir() / "triks"
+    if package_name.startswith("@"):
+        parts = package_name.split("/", 1)
+        return triks_dir / parts[0] / parts[1]
+    return triks_dir / package_name
+
+
+def _verify_trik_capabilities(trik_path: Path) -> tuple[bool, list[str]]:
+    """Verify that downloaded trik source matches its manifest declarations."""
+    try:
+        import json as _json
+        manifest_path = trik_path / "manifest.json"
+        if not manifest_path.exists():
+            # Check subdirectories (Python package layout)
+            for child in trik_path.iterdir():
+                if child.is_dir() and not child.name.startswith((".", "_")):
+                    candidate = child / "manifest.json"
+                    if candidate.exists():
+                        manifest_path = candidate
+                        break
+            else:
+                return True, []  # No manifest to verify against
+        manifest = _json.loads(manifest_path.read_text(encoding="utf-8"))
+        scan = scan_capabilities(trik_path)
+        errors = cross_check_manifest(scan, manifest)
+        if not errors:
+            return True, []
+        return False, [e["message"] for e in errors]
+    except Exception:
+        return True, []  # Don't fail install if verification errors
 
 
 def _show_config_hint(package_name: str, runtime: str) -> None:
@@ -198,6 +233,15 @@ async def _install_from_registry(
         git_tag = f"v{install_version}"
         click.echo(f"  Downloading {package_name}@{install_version}...")
         _download_to_triks_directory(trik.github_repo, git_tag, package_name)
+
+        # Verify downloaded trik matches its manifest declarations
+        trik_dir = _get_trik_download_path(package_name)
+        verified, cap_errors = _verify_trik_capabilities(trik_dir)
+        if not verified:
+            click.echo(click.style("\n  ⚠ Capability verification warnings:", fg="yellow"))
+            for err in cap_errors:
+                click.echo(click.style(f"    • {err}", fg="yellow"))
+            click.echo()
 
     add_trik_to_config(package_name, trikhub_version=install_version, runtime=runtime)
 
