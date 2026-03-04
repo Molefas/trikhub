@@ -38,6 +38,26 @@ export interface EnhanceOptions {
   debug?: boolean;
   /** Enable verbose logging — dumps full message history on each agent invocation */
   verbose?: boolean;
+  /**
+   * Factory to create the main agent with trik tools included.
+   * Called on startup and whenever triks are loaded/unloaded at runtime.
+   * Receives the current trik tools (handoff + exposed) as DynamicStructuredTools.
+   *
+   * When provided, enhance() owns agent lifecycle — the agent passed as first arg is ignored.
+   *
+   * @example
+   * ```typescript
+   * const app = await enhance(null, {
+   *   gatewayInstance: gateway,
+   *   createAgent: (trikTools) => createReactAgent({
+   *     llm: model,
+   *     tools: [...myTools, ...trikTools],
+   *     messageModifier: systemPrompt,
+   *   }),
+   * });
+   * ```
+   */
+  createAgent?: (trikTools: DynamicStructuredTool[]) => InvokableAgent;
 }
 
 /**
@@ -123,23 +143,32 @@ const HANDOFF_TOOL_PREFIX = 'talk_to_';
  * 2. Generates handoff tools (one per loaded trik) and adds them to the agent
  * 3. Returns an EnhancedAgent that handles the full routing lifecycle
  *
+ * **Recommended usage** — pass `createAgent` to get dynamic tool refresh when triks
+ * are installed/uninstalled at runtime:
+ *
  * @example
  * ```typescript
  * import { createReactAgent } from '@langchain/langgraph/prebuilt';
  * import { enhance } from '@trikhub/gateway/langchain';
  *
- * const myAgent = createReactAgent({ model, tools: myTools });
- * const app = await enhance(myAgent, {
- *   gateway: { triksDirectory: '~/.trikhub/triks' },
+ * const gateway = new TrikGateway();
+ * await gateway.initialize();
+ * await gateway.loadTriksFromConfig();
+ *
+ * const app = await enhance(null, {
+ *   gatewayInstance: gateway,
+ *   createAgent: (trikTools) => createReactAgent({
+ *     llm: model,
+ *     tools: [...myTools, ...trikTools],
+ *     messageModifier: systemPrompt,
+ *   }),
  * });
  *
  * const response = await app.processMessage("find me AI articles");
- * // response.message - what to show the user
- * // response.source  - "main" or trik ID
  * ```
  */
 export async function enhance(
-  agent: InvokableAgent,
+  agent: InvokableAgent | null,
   options: EnhanceOptions = {}
 ): Promise<EnhancedAgent> {
   const debug = createDebugLogger(options.debug ?? options.verbose ?? false);
@@ -152,6 +181,33 @@ export async function enhance(
   // Load triks from config (skip if a pre-built gateway was provided — caller already loaded triks)
   if (!options.gatewayInstance) {
     await gateway.loadTriksFromConfig(options.config);
+  }
+
+  // Mutable agent reference — updated when triks change (if createAgent is provided)
+  let currentAgent: InvokableAgent;
+
+  if (options.createAgent) {
+    // Factory mode: enhance() owns agent lifecycle
+    const rebuildAgent = () => {
+      const trikTools = [
+        ...buildHandoffTools(gateway.getHandoffTools()),
+        ...buildExposedTools(gateway),
+      ];
+      currentAgent = options.createAgent!(trikTools);
+      debug(`Agent rebuilt with ${trikTools.length} trik tool(s)`);
+    };
+
+    // Build initial agent with current tools
+    rebuildAgent();
+
+    // Rebuild automatically when triks change
+    gateway.on('trik:loaded', () => rebuildAgent());
+    gateway.on('trik:unloaded', () => rebuildAgent());
+  } else if (agent) {
+    // Legacy mode: caller manages agent, no dynamic refresh
+    currentAgent = agent;
+  } else {
+    throw new Error('enhance() requires either a createAgent factory or a pre-built agent');
   }
 
   // Per-session message history for the main agent
@@ -210,7 +266,7 @@ export async function enhance(
         case 'main': {
           debug('Routing to main agent');
           return await invokeMainAgent(
-            agent,
+            currentAgent,
             gateway,
             mainMessages,
             sessionId,

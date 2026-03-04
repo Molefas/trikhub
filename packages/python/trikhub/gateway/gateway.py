@@ -272,13 +272,15 @@ class TrikGateway:
     async def start_handoff(
         self, trik_id: str, context: str, session_id: str
     ) -> RouteToTrik | RouteTransferBack:
-        loaded = self._triks.get(trik_id)
+        # trik_id may be a tool-safe name (e.g. "molefas__trikster") — resolve to scoped name
+        resolved_id = trik_id if trik_id in self._triks else self._from_tool_name(trik_id)
+        loaded = self._triks.get(resolved_id)
         if loaded is None:
             raise ValueError(f'Trik "{trik_id}" is not loaded')
 
-        handoff_session = self._session_storage.create_session(trik_id)
+        handoff_session = self._session_storage.create_session(resolved_id)
         self._active_handoff = _ActiveHandoff(
-            trik_id=trik_id,
+            trik_id=resolved_id,
             session_id=handoff_session.sessionId,
             turn_count=0,
         )
@@ -833,6 +835,23 @@ class TrikGateway:
             local/weather -> local__weather
         """
         return scoped_name.lstrip("@").replace("/", "__")
+
+    @staticmethod
+    def _from_tool_name(tool_name: str) -> str:
+        """Convert a tool-safe identifier back to a scoped name.
+
+        Examples:
+            alice__weather -> @alice/weather
+            local__weather -> local/weather
+        """
+        idx = tool_name.find("__")
+        if idx == -1:
+            return tool_name
+        scope = tool_name[:idx]
+        name = tool_name[idx + 2:]
+        if scope == "local":
+            return f"local/{name}"
+        return f"@{scope}/{name}"
 
     def _create_node_agent_proxy(
         self, manifest: TrikManifest, trik_path: str, scoped_name: str | None = None

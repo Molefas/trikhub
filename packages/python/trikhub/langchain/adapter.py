@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Callable, Protocol, runtime_checkable
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.tools import StructuredTool
@@ -57,6 +57,7 @@ class EnhanceOptions:
     gateway_instance: TrikGateway | None = None
     debug: bool = False
     verbose: bool = False
+    create_agent: Callable[[list[StructuredTool]], InvokableAgent] | None = None
 
 
 @dataclass
@@ -147,7 +148,7 @@ HANDOFF_TOOL_PREFIX = "talk_to_"
 
 
 async def enhance(
-    agent: InvokableAgent,
+    agent: InvokableAgent | None,
     options: EnhanceOptions | None = None,
 ) -> EnhancedAgent:
     """
@@ -158,16 +159,17 @@ async def enhance(
     2. Generates handoff tools (one per loaded trik) and adds them to the agent
     3. Returns an EnhancedAgent that handles the full routing lifecycle
 
-    Example::
+    Recommended usage — pass create_agent to get dynamic tool refresh::
 
         from langgraph.prebuilt import create_react_agent
-        from trikhub.langchain import enhance
+        from trikhub.langchain import enhance, EnhanceOptions
 
-        agent = create_react_agent(model=model, tools=my_tools)
-        app = await enhance(agent)
+        app = await enhance(None, EnhanceOptions(
+            create_agent=lambda trik_tools: create_react_agent(
+                model=model, tools=[*my_tools, *trik_tools],
+            ),
+        ))
         response = await app.process_message("find me AI articles")
-        # response.message - what to show the user
-        # response.source  - "main" or trik ID
     """
     opts = options or EnhanceOptions()
     debug = _create_debug_logger(opts.debug or opts.verbose)
@@ -183,6 +185,32 @@ async def enhance(
             await gateway.load_triks_from_config(opts.config)
         elif opts.triks_directory:
             await gateway.load_triks_from_directory(opts.triks_directory)
+
+    # Mutable agent reference — updated when triks change (if create_agent is provided)
+    current_agent: list[InvokableAgent] = []  # Use list for nonlocal mutability
+
+    if opts.create_agent:
+        # Factory mode: enhance() owns agent lifecycle
+        def rebuild_agent():
+            trik_tools = [
+                *_build_handoff_tools(gateway.get_handoff_tools()),
+                *_build_exposed_tools(gateway),
+            ]
+            current_agent.clear()
+            current_agent.append(opts.create_agent(trik_tools))
+            debug(f"Agent rebuilt with {len(trik_tools)} trik tool(s)")
+
+        # Build initial agent with current tools
+        rebuild_agent()
+
+        # Rebuild automatically when triks change
+        gateway.on("trik:loaded", lambda _: rebuild_agent())
+        gateway.on("trik:unloaded", lambda _: rebuild_agent())
+    elif agent is not None:
+        # Legacy mode: caller manages agent, no dynamic refresh
+        current_agent.append(agent)
+    else:
+        raise ValueError("enhance() requires either a create_agent factory or a pre-built agent")
 
     # Per-session message history for the main agent
     main_messages: dict[str, list[BaseMessage]] = {}
@@ -230,7 +258,7 @@ async def enhance(
         # target == "main"
         debug("Routing to main agent")
         return await _invoke_main_agent(
-            agent,
+            current_agent[0],
             gateway,
             main_messages,
             session_id,

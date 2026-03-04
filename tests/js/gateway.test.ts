@@ -341,7 +341,7 @@ describe('loadTrik config validation warning', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const configStore = new InMemoryConfigStore({
-      'test-config-present': { API_KEY: 'key123', API_SECRET: 'secret456' },
+      'local/test-config-present': { API_KEY: 'key123', API_SECRET: 'secret456' },
     });
     const gw = new TrikGateway({
       configStore,
@@ -391,7 +391,7 @@ describe('loadTrik config validation warning', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const configStore = new InMemoryConfigStore({
-      'test-partial': { API_KEY: 'key123' },
+      'local/test-partial': { API_KEY: 'key123' },
     });
     const gw = new TrikGateway({
       configStore,

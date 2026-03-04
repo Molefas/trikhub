@@ -4,6 +4,7 @@ import { join, resolve, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
+import { EventEmitter } from 'node:events';
 import {
   type TrikManifest,
   type TrikRuntime,
@@ -191,7 +192,7 @@ interface ActiveHandoff {
 // Gateway
 // ============================================================================
 
-export class TrikGateway {
+export class TrikGateway extends EventEmitter {
   private config: TrikGatewayConfig;
   private configStore: ConfigStore;
   private storageProvider: StorageProvider;
@@ -209,6 +210,7 @@ export class TrikGateway {
   private activeHandoff: ActiveHandoff | null = null;
 
   constructor(config: TrikGatewayConfig = {}) {
+    super();
     this.config = config;
     this.configStore = config.configStore ?? new FileConfigStore();
     this.storageProvider = config.storageProvider ?? new SqliteStorageProvider();
@@ -304,17 +306,19 @@ export class TrikGateway {
    * @param sessionId - Session ID for the conversation
    */
   async startHandoff(trikId: string, context: string, sessionId: string): Promise<RouteToTrik | RouteTransferBack> {
-    const loaded = this.triks.get(trikId);
+    // trikId may be a tool-safe name (e.g. "molefas__trikster") — resolve to scoped name
+    const resolvedId = this.triks.has(trikId) ? trikId : this.fromToolName(trikId);
+    const loaded = this.triks.get(resolvedId);
     if (!loaded) {
       throw new Error(`Trik "${trikId}" is not loaded`);
     }
 
     // Create a handoff session
-    const handoffSession = this.sessionStorage.createSession(trikId);
+    const handoffSession = this.sessionStorage.createSession(resolvedId);
 
     // Set active handoff state
     this.activeHandoff = {
-      trikId,
+      trikId: resolvedId,
       sessionId: handoffSession.sessionId,
       turnCount: 0,
     };
@@ -829,7 +833,7 @@ export class TrikGateway {
 
     // Validate required config
     if (this.config.validateConfig !== false) {
-      const missingKeys = this.configStore.validateConfig(manifest);
+      const missingKeys = this.configStore.validateConfig(manifest, resolvedScopedName);
       if (missingKeys.length > 0) {
         console.warn(
           `[TrikGateway] Warning: trik "${resolvedScopedName}" is missing required config: ${missingKeys.join(', ')}\n` +
@@ -904,6 +908,7 @@ export class TrikGateway {
       this.triks.set(resolvedScopedName, { manifest, agent: agent as TrikAgent, path: trikPath, runtime, containerized, scopedName: resolvedScopedName });
     }
 
+    this.emit('trik:loaded', { trikId: resolvedScopedName, manifest });
     return manifest;
   }
 
@@ -933,6 +938,22 @@ export class TrikGateway {
    */
   private toToolName(scopedName: string): string {
     return scopedName.replace(/^@/, '').replace(/\//g, '__');
+  }
+
+  /**
+   * Convert a tool-safe identifier back to a scoped name.
+   * @example "alice__weather" -> "@alice/weather"
+   * @example "local__weather" -> "local/weather"
+   */
+  private fromToolName(toolName: string): string {
+    // Split on first __ to get scope and name
+    const idx = toolName.indexOf('__');
+    if (idx === -1) return toolName;
+    const scope = toolName.slice(0, idx);
+    const name = toolName.slice(idx + 2);
+    // "local" scope doesn't get @ prefix
+    if (scope === 'local') return `local/${name}`;
+    return `@${scope}/${name}`;
   }
 
   /**
@@ -1363,6 +1384,10 @@ export class TrikGateway {
    * Unload a trik from memory.
    */
   unloadTrik(trikId: string): boolean {
-    return this.triks.delete(trikId);
+    const deleted = this.triks.delete(trikId);
+    if (deleted) {
+      this.emit('trik:unloaded', { trikId });
+    }
+    return deleted;
   }
 }
