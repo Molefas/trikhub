@@ -401,6 +401,10 @@ If your tool returns user-provided content (titles, free text), use conversation
 
 Integer, number, and boolean fields are always safe.
 
+## Capability Enforcement
+
+Capabilities declared in the manifest are verified against source code at publish and install time. The scanner detects filesystem, shell/process, storage, and trikManagement usage in your code. If your code uses a capability that isn't declared, publishing will be blocked. Dynamic code execution patterns (dynamic import with variables, \`__import__\`) are always blocked.
+
 ## Examples
 
 ### Conversational Mode
