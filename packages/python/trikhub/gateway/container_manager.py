@@ -69,6 +69,7 @@ class ContainerManagerConfig:
     workspace_base_dir: str | None = None
     startup_timeout_ms: int = 30000
     invoke_timeout_ms: int = 120000
+    idle_timeout_ms: int = 300000  # 5 minutes
     debug: bool = False
 
 
@@ -140,6 +141,9 @@ class ContainerWorkerHandle:
         self._storage_context: TrikStorageContext | None = None
         self._event_handlers: dict[str, list[Callable[..., Any]]] = {}
         self._stderr_buffer: list[str] = []
+        self._idle_timer: asyncio.TimerHandle | None = None
+        self._on_idle_callback: Callable[[], None] | None = None
+        self._idle_timeout_s: float = config.idle_timeout_ms / 1000
 
     @property
     def ready(self) -> bool:
@@ -246,6 +250,7 @@ class ContainerWorkerHandle:
 
     async def shutdown(self, grace_period_ms: int = 5000) -> None:
         """Gracefully shutdown the container."""
+        self._clear_idle_timer()
         if not self._process:
             return
         try:
@@ -260,6 +265,7 @@ class ContainerWorkerHandle:
 
     def kill(self) -> None:
         """Force kill the container."""
+        self._clear_idle_timer()
         if self._process:
             try:
                 self._process.kill()
@@ -296,6 +302,34 @@ class ContainerWorkerHandle:
         """Set the storage context for subsequent calls."""
         self._storage_context = ctx
 
+    def set_on_idle(self, callback: Callable[[], None]) -> None:
+        """Set callback invoked when the container has been idle too long."""
+        self._on_idle_callback = callback
+        self._reset_idle_timer()
+
+    def _reset_idle_timer(self) -> None:
+        """Reset the idle timer. Called on every interaction."""
+        self._clear_idle_timer()
+        try:
+            loop = asyncio.get_running_loop()
+            self._idle_timer = loop.call_later(
+                self._idle_timeout_s,
+                self._on_idle_expired,
+            )
+        except RuntimeError:
+            pass  # No running loop (e.g., during shutdown)
+
+    def _on_idle_expired(self) -> None:
+        """Called when idle timer fires."""
+        asyncio.ensure_future(self.shutdown())
+        if self._on_idle_callback:
+            self._on_idle_callback()
+
+    def _clear_idle_timer(self) -> None:
+        if self._idle_timer:
+            self._idle_timer.cancel()
+            self._idle_timer = None
+
     # -- Public API -----------------------------------------------------------
 
     async def process_message(
@@ -310,6 +344,8 @@ class ContainerWorkerHandle:
         """Send a processMessage request to the worker inside the container."""
         if not self._process:
             raise RuntimeError(f"Container not running for trik {self._trik_id}")
+
+        self._reset_idle_timer()
 
         # Override trikPath to the container-internal path
         req = create_request("processMessage", {
@@ -355,6 +391,8 @@ class ContainerWorkerHandle:
         """Send an executeTool request to the worker inside the container."""
         if not self._process:
             raise RuntimeError(f"Container not running for trik {self._trik_id}")
+
+        self._reset_idle_timer()
 
         # Override trikPath to the container-internal path
         req = create_request("executeTool", {
@@ -602,9 +640,11 @@ class DockerContainerManager:
             workspace_base_dir=cfg.workspace_base_dir or default_base,
             startup_timeout_ms=cfg.startup_timeout_ms,
             invoke_timeout_ms=cfg.invoke_timeout_ms,
+            idle_timeout_ms=cfg.idle_timeout_ms,
             debug=cfg.debug,
         )
         self._containers: dict[str, ContainerWorkerHandle] = {}
+        self._docker_available_verified = False
 
         # Register process exit handler to force-kill all containers.
         # This ensures containers don't leak when the process is killed or
@@ -654,6 +694,7 @@ class DockerContainerManager:
 
         try:
             await handle.start()
+            handle.set_on_idle(lambda: self._containers.pop(trik_id, None))
             return handle
         except Exception:
             self._containers.pop(trik_id, None)
@@ -690,6 +731,8 @@ class DockerContainerManager:
 
     async def _ensure_docker_available(self) -> None:
         """Check that Docker is installed and the daemon is running."""
+        if self._docker_available_verified:
+            return
         try:
             proc = await asyncio.create_subprocess_exec(
                 "docker", "info",
@@ -697,6 +740,7 @@ class DockerContainerManager:
                 stderr=asyncio.subprocess.DEVNULL,
             )
             await asyncio.wait_for(proc.wait(), timeout=5)
+            self._docker_available_verified = True
         except (FileNotFoundError, asyncio.TimeoutError, Exception):
             raise RuntimeError(
                 "Docker is not available. Please install Docker and ensure "

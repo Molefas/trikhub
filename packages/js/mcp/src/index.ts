@@ -653,6 +653,7 @@ The \`capabilities\` field contains the trik's declared capabilities from the ma
 ### Config Access
 
 Configuration values are set by the user in \`~/.trikhub/secrets.json\` or \`.trikhub/secrets.json\`,
+keyed by the trik's scoped name (e.g., \`{ "@alice/weather": { "API_KEY": "..." } }\`),
 declared in the manifest's \`config.required\` / \`config.optional\` blocks, and injected by the gateway.
 
 - \`context.config.get('KEY')\` → \`string | undefined\`
@@ -675,7 +676,7 @@ All methods are async.
 ### Storage Details
 
 - **Location:** \`~/.trikhub/storage/storage.db\` (SQLite, WAL mode)
-- **Isolation:** Per-trik isolation by \`trik_id\` — triks cannot read each other's data
+- **Isolation:** Per-trik isolation by scoped name (\`@scope/trik-name\`) — triks cannot read each other's data
 - **Default quota:** 100MB (\`maxSizeBytes\` in manifest capabilities)
 - **Key length limit:** 256 characters
 - **Value size limit:** 10MB per value

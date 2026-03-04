@@ -105,7 +105,17 @@ Triks can declare required API keys, tokens, and other secrets:
 }
 ```
 
-Users configure these in `~/.trikhub/secrets.json` (global) or `.trikhub/secrets.json` (project-local). See [Configuration documentation](https://trikhub.com/docs/concepts/configuration) for details.
+Users configure these in `~/.trikhub/secrets.json` (global) or `.trikhub/secrets.json` (project-local), keyed by scoped trik name:
+
+```json
+{
+  "@publisher/trik-name": {
+    "API_KEY": "your-key-here"
+  }
+}
+```
+
+See [Configuration documentation](https://trikhub.com/docs/concepts/configuration) for details.
 
 ## Packages
 

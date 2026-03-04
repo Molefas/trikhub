@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import re
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -71,6 +73,14 @@ def _download_to_triks_directory(
     git_dir = target / ".git"
     if git_dir.exists():
         shutil.rmtree(git_dir)
+
+    # Write identity file for trusted scoped name
+    identity_path = target / ".trikhub-identity.json"
+    identity = {
+        "scopedName": package_name,
+        "installedAt": datetime.now(timezone.utc).isoformat(),
+    }
+    identity_path.write_text(_json.dumps(identity, indent=2))
 
     # Auto-install npm deps for Node triks
     package_json = target / "package.json"

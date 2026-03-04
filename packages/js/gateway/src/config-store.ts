@@ -8,7 +8,7 @@ import type { TrikConfigContext, TrikManifest } from '@trikhub/manifest';
  * Structure of the secrets file (~/.trikhub/secrets.json or .trikhub/secrets.json)
  */
 export interface SecretsFile {
-  /** Config values keyed by trik ID */
+  /** Config values keyed by scoped trik name (e.g., "@alice/weather") */
   [trikId: string]: Record<string, string>;
 }
 

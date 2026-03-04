@@ -11,12 +11,15 @@
  * allowing the gateway to treat containerized triks identically to regular ones.
  */
 
-import { spawn, execSync, type ChildProcess } from 'node:child_process';
+import { spawn, execSync, execFile as execFileCb, type ChildProcess } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createInterface, type Interface } from 'node:readline';
 import { existsSync, mkdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import { EventEmitter } from 'node:events';
+
+const execFileAsync = promisify(execFileCb);
 import type { TrikStorageContext } from '@trikhub/manifest';
 import {
   createHealthRequest,
@@ -67,6 +70,8 @@ export interface ContainerManagerConfig {
   startupTimeoutMs?: number;
   /** Timeout for invoke requests in ms (default: 120000) */
   invokeTimeoutMs?: number;
+  /** Idle timeout before stopping warm containers in ms (default: 300000 = 5 min) */
+  idleTimeoutMs?: number;
   /** Whether to enable debug logging */
   debug?: boolean;
 }
@@ -102,6 +107,9 @@ export class ContainerWorkerHandle extends EventEmitter {
   private containerId: string | null = null;
   private readonly containerName: string;
 
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private onIdleCallback: (() => void) | null = null;
+
   constructor(
     private readonly trikId: string,
     private readonly options: ContainerOptions,
@@ -122,7 +130,7 @@ export class ContainerWorkerHandle extends EventEmitter {
 
     // Remove any stale container with the same name (e.g. from a previous crash)
     try {
-      execSync(`docker rm -f ${this.containerName} 2>/dev/null`, { stdio: 'ignore' });
+      await execFileAsync('docker', ['rm', '-f', this.containerName]);
     } catch {
       // No stale container — expected
     }
@@ -292,6 +300,7 @@ export class ContainerWorkerHandle extends EventEmitter {
    * Gracefully shutdown the container.
    */
   async shutdown(gracePeriodMs = 5000): Promise<void> {
+    this.clearIdleTimer();
     if (!this.process) return;
 
     try {
@@ -308,6 +317,7 @@ export class ContainerWorkerHandle extends EventEmitter {
    * Force kill the container.
    */
   kill(): void {
+    this.clearIdleTimer();
     if (this.process) {
       this.process.kill('SIGKILL');
       this.process = null;
@@ -338,12 +348,42 @@ export class ContainerWorkerHandle extends EventEmitter {
   }
 
   /**
+   * Set a callback to be invoked when the container has been idle for too long.
+   * The manager uses this to remove the handle from its map.
+   */
+  setOnIdle(callback: () => void, timeoutMs: number): void {
+    this.onIdleCallback = callback;
+    this.resetIdleTimer(timeoutMs);
+  }
+
+  /** Reset the idle timer. Called on every interaction. */
+  private resetIdleTimer(timeoutMs: number): void {
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+    }
+    this.idleTimer = setTimeout(() => {
+      this.shutdown().catch(() => {});
+      this.onIdleCallback?.();
+    }, timeoutMs);
+  }
+
+  /** Clear the idle timer (called during shutdown/kill). */
+  private clearIdleTimer(): void {
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+  }
+
+  /**
    * Send a processMessage request to the worker inside the container.
    */
   async processMessage(input: ProcessMessageInput): Promise<ProcessMessageResult> {
     if (!this.process) {
       throw new Error(`Container not running for trik ${this.trikId}`);
     }
+
+    this.resetIdleTimer(this.config.idleTimeoutMs);
 
     // Override trikPath to the container-internal path
     const containerInput: ProcessMessageInput = {
@@ -368,6 +408,8 @@ export class ContainerWorkerHandle extends EventEmitter {
     if (!this.process) {
       throw new Error(`Container not running for trik ${this.trikId}`);
     }
+
+    this.resetIdleTimer(this.config.idleTimeoutMs);
 
     // Override trikPath to the container-internal path
     const containerInput: ExecuteToolInput = {
@@ -562,6 +604,7 @@ export class DockerContainerManager {
   private containers = new Map<string, ContainerWorkerHandle>();
   private readonly config: Required<ContainerManagerConfig>;
   private readonly _exitHandler: () => void;
+  private dockerAvailableVerified = false;
 
   constructor(config: ContainerManagerConfig = {}) {
     const defaultWorkspaceBase = join(homedir(), '.trikhub', 'workspace');
@@ -569,6 +612,7 @@ export class DockerContainerManager {
       workspaceBaseDir: config.workspaceBaseDir ?? defaultWorkspaceBase,
       startupTimeoutMs: config.startupTimeoutMs ?? 30000,
       invokeTimeoutMs: config.invokeTimeoutMs ?? 120000,
+      idleTimeoutMs: config.idleTimeoutMs ?? 300000,
       debug: config.debug ?? false,
     };
 
@@ -617,6 +661,9 @@ export class DockerContainerManager {
 
     try {
       await handle.start();
+      handle.setOnIdle(() => {
+        this.containers.delete(trikId);
+      }, this.config.idleTimeoutMs);
       return handle;
     } catch (error) {
       this.containers.delete(trikId);
@@ -675,8 +722,10 @@ export class DockerContainerManager {
    * Check that Docker is installed and the daemon is running.
    */
   private async ensureDockerAvailable(): Promise<void> {
+    if (this.dockerAvailableVerified) return;
     try {
-      execSync('docker info', { stdio: 'ignore', timeout: 5000 });
+      await execFileAsync('docker', ['info'], { timeout: 5000 });
+      this.dockerAvailableVerified = true;
     } catch {
       throw new Error(
         'Docker is not available. Please install Docker and ensure the Docker daemon is running to use triks with filesystem/shell capabilities.'
@@ -689,14 +738,14 @@ export class DockerContainerManager {
    */
   private async ensureImageAvailable(image: string): Promise<void> {
     try {
-      execSync(`docker image inspect ${image}`, { stdio: 'ignore', timeout: 5000 });
+      await execFileAsync('docker', ['image', 'inspect', image], { timeout: 5000 });
     } catch {
       // Image not found locally, try to pull
       if (this.config.debug) {
         console.log(`[ContainerManager] Pulling image ${image}...`);
       }
       try {
-        execSync(`docker pull ${image}`, { stdio: 'ignore', timeout: 300000 }); // 5 min timeout for pull
+        await execFileAsync('docker', ['pull', image], { timeout: 300000 }); // 5 min timeout for pull
       } catch {
         throw new Error(
           `Docker image ${image} not found. Build it locally with: ./docker/build-images.sh`
