@@ -14,7 +14,10 @@ export type CapabilityCategory =
   | 'environment'
   | 'crypto'
   | 'dns'
-  | 'workers';
+  | 'workers'
+  | 'storage'
+  | 'trik_management'
+  | 'dynamic_code';
 
 export interface CapabilityMatch {
   category: CapabilityCategory;
@@ -119,6 +122,30 @@ const CAPABILITY_PATTERNS: Record<CapabilityCategory, RegExp[]> = {
     /\bimport\s+(?:threading|multiprocessing)\b/,
     /\bfrom\s+(?:threading|multiprocessing)\s+import\b/,
   ],
+
+  storage: [
+    // context.storage.get/set/delete/list/getMany/setMany
+    /\bcontext\.storage\b/,
+    /\bself\.context\.storage\b/,
+    /\bctx\.storage\b/,
+  ],
+
+  trik_management: [
+    // context.registry.search/install/uninstall/upgrade/list/getInfo
+    /\bcontext\.registry\b/,
+    /\bself\.context\.registry\b/,
+    /\bctx\.registry\b/,
+  ],
+
+  dynamic_code: [
+    // Dynamic import with variable (not string literal)
+    // Matches: import(variable) but NOT import('./literal') or import("literal")
+    /\bimport\s*\(\s*(?!['"`])/,
+    // Python __import__
+    /\b__import__\s*\(/,
+    // globalThis or window property access for dynamic require
+    /\bglobalThis\s*\[\s*['"]require['"]\s*\]/,
+  ],
 };
 
 // ---------------------------------------------------------------------------
@@ -143,15 +170,22 @@ const TIER_LABELS: Record<SecurityTier, string> = {
  *   A (Sandboxed)     — no capabilities detected
  *   B (Network)       — only network and/or crypto detected
  *   C (System)        — filesystem, environment, or dns detected
- *   D (Unrestricted)  — process or workers detected
+ *   D (Unrestricted)  — process, workers, or dynamic_code detected
+ *
+ * Note: storage and trik_management are gated at runtime and do not affect
+ * the security tier independently.
  */
 function resolveTier(categories: Set<CapabilityCategory>): SecurityTier {
   if (categories.size === 0) {
     return 'A';
   }
 
-  // D: process or workers present
-  if (categories.has('process') || categories.has('workers')) {
+  // D: process, workers, or dynamic_code present
+  if (
+    categories.has('process') ||
+    categories.has('workers') ||
+    categories.has('dynamic_code')
+  ) {
     return 'D';
   }
 
@@ -164,8 +198,16 @@ function resolveTier(categories: Set<CapabilityCategory>): SecurityTier {
     return 'C';
   }
 
+  // Remaining non-tier-affecting categories (storage, trik_management)
+  // should not bump tier above what other categories determine
+  const tierAffecting = new Set(
+    [...categories].filter((c) => c !== 'storage' && c !== 'trik_management'),
+  );
+
+  if (tierAffecting.size === 0) return 'A';
+
   // If only network and/or crypto remain, tier is B
-  for (const cat of categories) {
+  for (const cat of tierAffecting) {
     if (cat !== 'network' && cat !== 'crypto') {
       return 'C'; // safety fallback — should not be reached
     }

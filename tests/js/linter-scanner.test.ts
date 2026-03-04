@@ -417,6 +417,97 @@ describe('location tracking', () => {
   });
 });
 
+// ── SDK context detection ──────────────────────────────────────────────
+
+describe('SDK context detection', () => {
+  it('detects context.storage usage in JS', async () => {
+    const dir = await makeTrik('ctx-storage-js', {
+      'src/index.ts': `
+        export default {
+          async processMessage(message, context) {
+            const val = await context.storage.get('key');
+            return { message: val, transferBack: false };
+          }
+        };
+      `,
+    });
+    const result = await scanCapabilities(dir);
+    const cap = result.capabilities.find((c) => c.category === 'storage');
+    expect(cap).toBeDefined();
+  });
+
+  it('detects context.storage usage in Python', async () => {
+    const dir = await makeTrik('ctx-storage-py', {
+      'agent.py': `
+async def process_message(self, message, context):
+    val = await context.storage.get("key")
+    return {"message": str(val), "transferBack": False}
+      `,
+    });
+    const result = await scanCapabilities(dir);
+    const cap = result.capabilities.find((c) => c.category === 'storage');
+    expect(cap).toBeDefined();
+  });
+
+  it('detects context.registry usage in JS', async () => {
+    const dir = await makeTrik('ctx-registry-js', {
+      'src/index.ts': `
+        export default {
+          async processMessage(message, context) {
+            const results = await context.registry.search('test');
+            return { message: 'done', transferBack: false };
+          }
+        };
+      `,
+    });
+    const result = await scanCapabilities(dir);
+    const cap = result.capabilities.find((c) => c.category === 'trik_management');
+    expect(cap).toBeDefined();
+  });
+
+  it('detects context.registry usage in Python', async () => {
+    const dir = await makeTrik('ctx-registry-py', {
+      'agent.py': `
+async def process_message(self, message, context):
+    results = await context.registry.search("test")
+    return {"message": "done", "transferBack": False}
+      `,
+    });
+    const result = await scanCapabilities(dir);
+    const cap = result.capabilities.find((c) => c.category === 'trik_management');
+    expect(cap).toBeDefined();
+  });
+});
+
+describe('suspicious pattern detection', () => {
+  it('detects dynamic import()', async () => {
+    const dir = await makeTrik('dynamic-import', {
+      'src/index.ts': `const mod = await import(someVar);`,
+    });
+    const result = await scanCapabilities(dir);
+    const cap = result.capabilities.find((c) => c.category === 'dynamic_code');
+    expect(cap).toBeDefined();
+  });
+
+  it('detects __import__ in Python', async () => {
+    const dir = await makeTrik('dunder-import', {
+      'agent.py': `mod = __import__("os")`,
+    });
+    const result = await scanCapabilities(dir);
+    const cap = result.capabilities.find((c) => c.category === 'dynamic_code');
+    expect(cap).toBeDefined();
+  });
+
+  it('does not flag static import() with string literal', async () => {
+    const dir = await makeTrik('static-import', {
+      'src/index.ts': `const mod = await import('./local-module');`,
+    });
+    const result = await scanCapabilities(dir);
+    const cap = result.capabilities.find((c) => c.category === 'dynamic_code');
+    expect(cap).toBeUndefined();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // formatScanResult
 // ---------------------------------------------------------------------------
