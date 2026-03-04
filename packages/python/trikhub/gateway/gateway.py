@@ -27,6 +27,7 @@ from trikhub.manifest import (
     TrikAgent,
     TrikConfigContext,
     TrikContext,
+    TrikStorageContext,
     TrikManifest,
     TrikResponse,
     TrikRuntime,
@@ -635,9 +636,18 @@ class TrikGateway:
 
     def _build_trik_context(self, session_id: str, loaded: _LoadedTrik) -> TrikContext:
         config_ctx = self._config_store.get_for_trik(loaded.scoped_name)
-        storage_ctx = self._storage_provider.for_trik(
-            loaded.scoped_name,
-            loaded.manifest.capabilities.storage if loaded.manifest.capabilities else None,
+        storage_enabled = (
+            loaded.manifest.capabilities
+            and loaded.manifest.capabilities.storage
+            and loaded.manifest.capabilities.storage.enabled
+        )
+        storage_ctx = (
+            self._storage_provider.for_trik(
+                loaded.scoped_name,
+                loaded.manifest.capabilities.storage if loaded.manifest.capabilities else None,
+            )
+            if storage_enabled
+            else self._create_noop_storage()
         )
         ctx = TrikContext(sessionId=session_id, config=config_ctx, storage=storage_ctx)
 
@@ -658,6 +668,36 @@ class TrikGateway:
                 ctx.registry = self._registry_provider
 
         return ctx
+
+    @staticmethod
+    def _create_noop_storage() -> TrikStorageContext:
+        """Create a noop storage context that raises on any operation.
+
+        Used when a trik hasn't declared capabilities.storage.enabled.
+        """
+
+        class _NoopStorage:
+            _msg = "Storage not declared in manifest. Add capabilities.storage.enabled: true to use storage."
+
+            async def get(self, key: str) -> Any:
+                raise RuntimeError(self._msg)
+
+            async def set(self, key: str, value: Any, ttl: int | None = None) -> None:
+                raise RuntimeError(self._msg)
+
+            async def delete(self, key: str) -> bool:
+                raise RuntimeError(self._msg)
+
+            async def list(self, prefix: str | None = None) -> list[str]:
+                raise RuntimeError(self._msg)
+
+            async def get_many(self, keys: list[str]) -> dict[str, Any]:
+                raise RuntimeError(self._msg)
+
+            async def set_many(self, entries: dict[str, Any]) -> None:
+                raise RuntimeError(self._msg)
+
+        return _NoopStorage()
 
     @staticmethod
     def _needs_containerization(manifest: TrikManifest) -> bool:

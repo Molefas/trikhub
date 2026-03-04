@@ -14,6 +14,7 @@ import click
 from trikhub.cli.config import is_auth_expired, read_global_config
 from trikhub.cli.output import ok, fail, info, warn
 from trikhub.cli.registry import get_registry
+from trikhub.linter.scanner import scan_capabilities, cross_check_manifest
 from trikhub.manifest import validate_manifest
 
 
@@ -165,6 +166,20 @@ def publish_command(directory: str, tag: str | None) -> None:
             info(warning)
     else:
         ok("Validation passed")
+
+    # Cross-check: scanner results vs manifest declarations
+    manifest_dir = manifest_path.parent
+    scan_result = scan_capabilities(manifest_dir)
+    cross_check_errors = cross_check_manifest(scan_result, manifest_data)
+    if cross_check_errors:
+        fail("Capability cross-check failed")
+        for err in cross_check_errors:
+            location_str = ""
+            if err["locations"]:
+                loc = err["locations"][0]
+                location_str = f" ({loc['file']}:{loc['line']})"
+            info(f"  {err['message']}{location_str}")
+        sys.exit(1)
 
     # Step 3: Determine version and git tag
     version = manifest_data.get("version", "0.1.0")

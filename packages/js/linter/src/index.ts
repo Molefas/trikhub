@@ -8,9 +8,11 @@ export {
 } from './linter.js';
 export {
   scanCapabilities,
+  crossCheckManifest,
   formatScanResult,
   type ScanResult,
   type SecurityTier,
   type CapabilityCategory,
   type CapabilityMatch,
+  type CrossCheckResult,
 } from './scanner.js';

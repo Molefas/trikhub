@@ -9,7 +9,7 @@ from pathlib import Path
 import click
 
 from trikhub.cli.output import ok, fail, warn, info
-from trikhub.linter.scanner import scan_capabilities, format_scan_result, adjust_tier_for_manifest
+from trikhub.linter.scanner import scan_capabilities, format_scan_result, adjust_tier_for_manifest, cross_check_manifest
 from trikhub.manifest import validate_manifest
 
 
@@ -59,12 +59,24 @@ def lint_command(path: str, warnings_as_errors: bool, skip: tuple[str, ...]) -> 
 
     manifest_path, manifest_data = result
     ok("manifest.json found")
+    has_errors = False
 
     # Capability scan — adjusted for manifest-declared capabilities
     scan_result = scan_capabilities(trik_dir)
     scan_result = adjust_tier_for_manifest(scan_result, manifest_data)
     click.echo(format_scan_result(scan_result))
     click.echo("")
+
+    # Cross-check: scanner results vs manifest declarations
+    cross_check_errors = cross_check_manifest(scan_result, manifest_data)
+    if cross_check_errors:
+        for err in cross_check_errors:
+            location_str = ""
+            if err["locations"]:
+                loc = err["locations"][0]
+                location_str = f" ({loc['file']}:{loc['line']})"
+            fail(f"{err['message']}{location_str}")
+        has_errors = True
 
     # Check filesystem/shell/trikManagement capability rules
     caps = manifest_data.get("capabilities") or {}
@@ -108,7 +120,6 @@ def lint_command(path: str, warnings_as_errors: bool, skip: tuple[str, ...]) -> 
     # Run validation
     validation = validate_manifest(manifest_data)
 
-    has_errors = False
     if not validation.valid:
         fail("Validation failed")
         if validation.errors:

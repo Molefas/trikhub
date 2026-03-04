@@ -6,7 +6,7 @@ import {
   type ValidationResult,
   validateManifest,
 } from '@trikhub/manifest';
-import { type ScanResult, type SecurityTier, scanCapabilities } from './scanner.js';
+import { type ScanResult, type SecurityTier, scanCapabilities, crossCheckManifest } from './scanner.js';
 
 /**
  * Lint result severity
@@ -331,6 +331,19 @@ export class TrikLinter {
     // A trik declaring filesystem/shell in the manifest gets those capabilities
     // auto-injected at runtime, even if its source code doesn't import fs/child_process.
     const adjustedScan = this.adjustTierForManifestCapabilities(scan, manifest);
+
+    // 7. Cross-check scan results against manifest capabilities
+    const crossCheckErrors = crossCheckManifest(adjustedScan, manifest as unknown as Record<string, unknown>);
+    for (const error of crossCheckErrors) {
+      const locationStr = error.locations.length > 0
+        ? ` (${error.locations[0].file}:${error.locations[0].line})`
+        : '';
+      results.push({
+        rule: 'capability-cross-check',
+        severity: error.type === 'error' ? 'error' : 'warning',
+        message: error.message + locationStr,
+      });
+    }
 
     // Apply warningsAsErrors if configured
     if (this.config.warningsAsErrors) {

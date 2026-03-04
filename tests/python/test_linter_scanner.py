@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
-from trikhub.linter.scanner import scan_capabilities, format_scan_result, adjust_tier_for_manifest
+from trikhub.linter.scanner import scan_capabilities, format_scan_result, adjust_tier_for_manifest, cross_check_manifest
 
 
 def _write(path: Path, content: str) -> None:
@@ -160,3 +161,114 @@ def test_adjust_tier_no_caps(tmp_path: Path) -> None:
     scan = scan_capabilities(tmp_path)
     adjusted = adjust_tier_for_manifest(scan, {"capabilities": {"session": {"enabled": True}}})
     assert adjusted["tier"] == "A"
+
+
+# ── SDK context detection ─────────────────────────────────────────────────
+
+def test_detects_storage_context_usage(tmp_path: Path) -> None:
+    _write(tmp_path / "agent.py", "val = await context.storage.get('key')\n")
+    result = scan_capabilities(tmp_path)
+    categories = [c["category"] for c in result["capabilities"]]
+    assert "storage" in categories
+
+
+def test_detects_registry_context_usage(tmp_path: Path) -> None:
+    _write(tmp_path / "agent.py", "results = await context.registry.search('test')\n")
+    result = scan_capabilities(tmp_path)
+    categories = [c["category"] for c in result["capabilities"]]
+    assert "trik_management" in categories
+
+
+def test_detects_dynamic_import(tmp_path: Path) -> None:
+    _write(tmp_path / "agent.py", "mod = __import__('os')\n")
+    result = scan_capabilities(tmp_path)
+    categories = [c["category"] for c in result["capabilities"]]
+    assert "dynamic_code" in categories
+
+
+def test_detects_dynamic_js_import(tmp_path: Path) -> None:
+    _write(tmp_path / "index.js", "const mod = await import(someVar);\n")
+    result = scan_capabilities(tmp_path)
+    categories = [c["category"] for c in result["capabilities"]]
+    assert "dynamic_code" in categories
+
+
+def test_static_import_not_flagged_as_dynamic(tmp_path: Path) -> None:
+    _write(tmp_path / "index.js", "const mod = await import('./local');\n")
+    result = scan_capabilities(tmp_path)
+    categories = [c["category"] for c in result["capabilities"]]
+    assert "dynamic_code" not in categories
+
+
+# ── Cross-check: scanner vs manifest ──────────────────────────────────────
+
+def test_xcheck_filesystem_undeclared(tmp_path: Path) -> None:
+    _write(tmp_path / "index.js", "import fs from 'node:fs';\n")
+    scan = scan_capabilities(tmp_path)
+    manifest = {"capabilities": {}}
+    errors = cross_check_manifest(scan, manifest)
+    assert any(e["capability"] == "filesystem" for e in errors)
+
+
+def test_xcheck_filesystem_declared(tmp_path: Path) -> None:
+    _write(tmp_path / "index.js", "import fs from 'node:fs';\n")
+    scan = scan_capabilities(tmp_path)
+    manifest = {"capabilities": {"filesystem": {"enabled": True}}}
+    errors = cross_check_manifest(scan, manifest)
+    assert errors == []
+
+
+def test_xcheck_shell_undeclared(tmp_path: Path) -> None:
+    _write(tmp_path / "run.py", "import subprocess\n")
+    scan = scan_capabilities(tmp_path)
+    manifest = {"capabilities": {}}
+    errors = cross_check_manifest(scan, manifest)
+    assert any(e["capability"] == "shell" for e in errors)
+
+
+def test_xcheck_storage_undeclared(tmp_path: Path) -> None:
+    _write(tmp_path / "agent.py", "val = await context.storage.get('key')\n")
+    scan = scan_capabilities(tmp_path)
+    manifest = {"capabilities": {}}
+    errors = cross_check_manifest(scan, manifest)
+    assert any(e["capability"] == "storage" for e in errors)
+
+
+def test_xcheck_registry_undeclared(tmp_path: Path) -> None:
+    _write(tmp_path / "agent.py", "r = await context.registry.search('q')\n")
+    scan = scan_capabilities(tmp_path)
+    manifest = {"capabilities": {}}
+    errors = cross_check_manifest(scan, manifest)
+    assert any(e["capability"] == "trikManagement" for e in errors)
+
+
+def test_xcheck_dynamic_code_flagged(tmp_path: Path) -> None:
+    _write(tmp_path / "agent.py", "mod = __import__('os')\n")
+    scan = scan_capabilities(tmp_path)
+    manifest = {"capabilities": {}}
+    errors = cross_check_manifest(scan, manifest)
+    assert any(e["category"] == "dynamic_code" for e in errors)
+
+
+# ── Integration: scan + cross-check via lint pipeline ─────────────────────
+
+
+def test_lint_cross_check_fails_on_undeclared_subprocess(tmp_path: Path) -> None:
+    """Integration: scan + cross-check detects undeclared process usage."""
+    manifest = {
+        "schemaVersion": 2,
+        "id": "xcheck-test",
+        "name": "xcheck-test",
+        "description": "test",
+        "version": "1.0.0",
+        "agent": {"mode": "conversational", "handoffDescription": "test test test", "systemPrompt": "test", "domain": ["t"]},
+        "entry": {"module": "agent.py", "export": "default"},
+        "capabilities": {},
+    }
+    _write(tmp_path / "manifest.json", json.dumps(manifest))
+    _write(tmp_path / "agent.py", "import subprocess\n")
+
+    scan = scan_capabilities(tmp_path)
+    errors = cross_check_manifest(scan, manifest)
+    assert len(errors) > 0
+    assert any(e["capability"] == "shell" for e in errors)

@@ -121,6 +121,24 @@ CAPABILITY_PATTERNS: dict[str, list[re.Pattern[str]]] = {
         re.compile(r"""\bimport\s+(?:threading|multiprocessing)\b"""),
         re.compile(r"""\bfrom\s+(?:threading|multiprocessing)\s+import\b"""),
     ],
+    "storage": [
+        re.compile(r"""\bcontext\.storage\b"""),
+        re.compile(r"""\bself\.context\.storage\b"""),
+        re.compile(r"""\bctx\.storage\b"""),
+    ],
+    "trik_management": [
+        re.compile(r"""\bcontext\.registry\b"""),
+        re.compile(r"""\bself\.context\.registry\b"""),
+        re.compile(r"""\bctx\.registry\b"""),
+    ],
+    "dynamic_code": [
+        # Dynamic import() with variable (not string literal)
+        re.compile(r"""\bimport\s*\(\s*(?!['"`])"""),
+        # Python __import__
+        re.compile(r"""\b__import__\s*\("""),
+        # globalThis require
+        re.compile(r"""\bglobalThis\s*\[\s*['"]require['"]\s*\]"""),
+    ],
 }
 
 # ---------------------------------------------------------------------------
@@ -143,24 +161,29 @@ def _resolve_tier(categories: set[str]) -> str:
     """Determine the security tier from the set of detected capability categories.
 
     Tier logic:
-      A (Sandboxed)     — no capabilities detected
+      A (Sandboxed)     — no capabilities detected (storage/trik_management don't affect tier)
       B (Network)       — only network and/or crypto detected
       C (System)        — filesystem, environment, or dns detected
-      D (Unrestricted)  — process or workers detected
+      D (Unrestricted)  — process, workers, or dynamic_code detected
     """
     if not categories:
         return "A"
 
-    # D: process or workers present
-    if "process" in categories or "workers" in categories:
+    # D: process, workers, or dynamic_code present
+    if "process" in categories or "workers" in categories or "dynamic_code" in categories:
         return "D"
 
     # C: filesystem, environment, or dns present
     if "filesystem" in categories or "environment" in categories or "dns" in categories:
         return "C"
 
+    # storage and trik_management don't affect tier — exclude them
+    tier_affecting = {c for c in categories if c not in ("storage", "trik_management")}
+    if not tier_affecting:
+        return "A"
+
     # If only network and/or crypto remain, tier is B
-    for cat in categories:
+    for cat in tier_affecting:
         if cat not in ("network", "crypto"):
             return "C"  # safety fallback — should not be reached
 
@@ -286,6 +309,83 @@ def adjust_tier_for_manifest(scan: ScanResult, manifest: dict) -> ScanResult:
         "tier": implied_tier,
         "tier_label": TIER_LABELS[implied_tier],
     }
+
+
+# ---------------------------------------------------------------------------
+# Cross-check: scanner results vs manifest declarations
+# ---------------------------------------------------------------------------
+
+
+class CrossCheckResult(TypedDict):
+    type: str  # "error" | "warning"
+    capability: str  # manifest field name, empty for dynamic_code
+    category: str  # scanner category
+    message: str
+    locations: list[Location]
+
+
+# Maps scanner categories to manifest capability fields
+# category: (manifest_field, path to .enabled)
+_CATEGORY_TO_MANIFEST: dict[str, tuple[str, list[str]]] = {
+    "filesystem": ("filesystem", ["capabilities", "filesystem", "enabled"]),
+    "process": ("shell", ["capabilities", "shell", "enabled"]),
+    "storage": ("storage", ["capabilities", "storage", "enabled"]),
+    "trik_management": ("trikManagement", ["capabilities", "trikManagement", "enabled"]),
+}
+
+
+def _get_nested(d: dict, keys: list[str]) -> bool:
+    """Safely traverse nested dict keys, return True if final value is True."""
+    current = d
+    for key in keys:
+        if not isinstance(current, dict):
+            return False
+        current = current.get(key)  # type: ignore[assignment]
+        if current is None:
+            return False
+    return current is True
+
+
+def cross_check_manifest(scan: ScanResult, manifest: dict) -> list[CrossCheckResult]:
+    """Cross-check scanner results against manifest declarations.
+
+    Returns errors for undeclared capabilities and for suspicious patterns.
+    An empty list means the manifest accurately declares all detected capabilities.
+    """
+    results: list[CrossCheckResult] = []
+
+    for cap in scan["capabilities"]:
+        category = cap["category"]
+        mapping = _CATEGORY_TO_MANIFEST.get(category)
+
+        if mapping:
+            field, path = mapping
+            if not _get_nested(manifest, path):
+                results.append({
+                    "type": "error",
+                    "capability": field,
+                    "category": category,
+                    "message": (
+                        f"Source code uses {category} capabilities but manifest does not "
+                        f"declare capabilities.{field}.enabled. "
+                        f'Add "capabilities": {{ "{field}": {{ "enabled": true }} }} to your manifest.json.'
+                    ),
+                    "locations": cap["locations"],
+                })
+        elif category == "dynamic_code":
+            results.append({
+                "type": "error",
+                "capability": "",
+                "category": "dynamic_code",
+                "message": (
+                    "Source code uses dynamic code execution patterns (dynamic import, "
+                    "__import__, etc.) that bypass static analysis. "
+                    "These patterns are not allowed in published triks."
+                ),
+                "locations": cap["locations"],
+            })
+
+    return results
 
 
 # ---------------------------------------------------------------------------

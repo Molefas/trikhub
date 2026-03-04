@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 // Dynamic import against built output
-const { scanCapabilities, formatScanResult } = await import(
+const { scanCapabilities, formatScanResult, crossCheckManifest } = await import(
   '../../packages/js/linter/dist/scanner.js'
 ) as typeof import('../../packages/js/linter/src/scanner.js');
 
@@ -414,6 +414,187 @@ describe('location tracking', () => {
     const files = fsCap!.locations.map((l) => l.file).sort();
     expect(files).toContain('src/a.ts');
     expect(files).toContain('src/b.ts');
+  });
+});
+
+// ── SDK context detection ──────────────────────────────────────────────
+
+describe('SDK context detection', () => {
+  it('detects context.storage usage in JS', async () => {
+    const dir = await makeTrik('ctx-storage-js', {
+      'src/index.ts': `
+        export default {
+          async processMessage(message, context) {
+            const val = await context.storage.get('key');
+            return { message: val, transferBack: false };
+          }
+        };
+      `,
+    });
+    const result = await scanCapabilities(dir);
+    const cap = result.capabilities.find((c) => c.category === 'storage');
+    expect(cap).toBeDefined();
+  });
+
+  it('detects context.storage usage in Python', async () => {
+    const dir = await makeTrik('ctx-storage-py', {
+      'agent.py': `
+async def process_message(self, message, context):
+    val = await context.storage.get("key")
+    return {"message": str(val), "transferBack": False}
+      `,
+    });
+    const result = await scanCapabilities(dir);
+    const cap = result.capabilities.find((c) => c.category === 'storage');
+    expect(cap).toBeDefined();
+  });
+
+  it('detects context.registry usage in JS', async () => {
+    const dir = await makeTrik('ctx-registry-js', {
+      'src/index.ts': `
+        export default {
+          async processMessage(message, context) {
+            const results = await context.registry.search('test');
+            return { message: 'done', transferBack: false };
+          }
+        };
+      `,
+    });
+    const result = await scanCapabilities(dir);
+    const cap = result.capabilities.find((c) => c.category === 'trik_management');
+    expect(cap).toBeDefined();
+  });
+
+  it('detects context.registry usage in Python', async () => {
+    const dir = await makeTrik('ctx-registry-py', {
+      'agent.py': `
+async def process_message(self, message, context):
+    results = await context.registry.search("test")
+    return {"message": "done", "transferBack": False}
+      `,
+    });
+    const result = await scanCapabilities(dir);
+    const cap = result.capabilities.find((c) => c.category === 'trik_management');
+    expect(cap).toBeDefined();
+  });
+});
+
+describe('suspicious pattern detection', () => {
+  it('detects dynamic import()', async () => {
+    const dir = await makeTrik('dynamic-import', {
+      'src/index.ts': `const mod = await import(someVar);`,
+    });
+    const result = await scanCapabilities(dir);
+    const cap = result.capabilities.find((c) => c.category === 'dynamic_code');
+    expect(cap).toBeDefined();
+  });
+
+  it('detects __import__ in Python', async () => {
+    const dir = await makeTrik('dunder-import', {
+      'agent.py': `mod = __import__("os")`,
+    });
+    const result = await scanCapabilities(dir);
+    const cap = result.capabilities.find((c) => c.category === 'dynamic_code');
+    expect(cap).toBeDefined();
+  });
+
+  it('does not flag static import() with string literal', async () => {
+    const dir = await makeTrik('static-import', {
+      'src/index.ts': `const mod = await import('./local-module');`,
+    });
+    const result = await scanCapabilities(dir);
+    const cap = result.capabilities.find((c) => c.category === 'dynamic_code');
+    expect(cap).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// crossCheckManifest
+// ---------------------------------------------------------------------------
+describe('crossCheckManifest', () => {
+  it('returns error when filesystem detected but not declared', async () => {
+    const dir = await makeTrik('xcheck-fs-undeclared', {
+      'src/index.ts': `import fs from 'node:fs';`,
+    });
+    const scan = await scanCapabilities(dir);
+    const manifest = { capabilities: {} };
+    const errors = crossCheckManifest(scan, manifest);
+    expect(errors).toContainEqual(
+      expect.objectContaining({
+        type: 'error',
+        capability: 'filesystem',
+      })
+    );
+  });
+
+  it('returns no errors when filesystem detected and declared', async () => {
+    const dir = await makeTrik('xcheck-fs-declared', {
+      'src/index.ts': `import fs from 'node:fs';`,
+    });
+    const scan = await scanCapabilities(dir);
+    const manifest = { capabilities: { filesystem: { enabled: true } } };
+    const errors = crossCheckManifest(scan, manifest);
+    expect(errors).toEqual([]);
+  });
+
+  it('returns error when process detected but shell not declared', async () => {
+    const dir = await makeTrik('xcheck-shell-undeclared', {
+      'src/index.ts': `import { exec } from 'node:child_process';`,
+    });
+    const scan = await scanCapabilities(dir);
+    const manifest = { capabilities: {} };
+    const errors = crossCheckManifest(scan, manifest);
+    expect(errors).toContainEqual(
+      expect.objectContaining({
+        type: 'error',
+        capability: 'shell',
+      })
+    );
+  });
+
+  it('returns error when storage usage detected but not declared', async () => {
+    const dir = await makeTrik('xcheck-storage-undeclared', {
+      'src/index.ts': `const val = await context.storage.get('key');`,
+    });
+    const scan = await scanCapabilities(dir);
+    const manifest = { capabilities: {} };
+    const errors = crossCheckManifest(scan, manifest);
+    expect(errors).toContainEqual(
+      expect.objectContaining({
+        type: 'error',
+        capability: 'storage',
+      })
+    );
+  });
+
+  it('returns error when registry usage detected but trikManagement not declared', async () => {
+    const dir = await makeTrik('xcheck-registry-undeclared', {
+      'src/index.ts': `const r = await context.registry.search('q');`,
+    });
+    const scan = await scanCapabilities(dir);
+    const manifest = { capabilities: {} };
+    const errors = crossCheckManifest(scan, manifest);
+    expect(errors).toContainEqual(
+      expect.objectContaining({
+        type: 'error',
+        capability: 'trikManagement',
+      })
+    );
+  });
+
+  it('returns error for dynamic_code patterns', async () => {
+    const dir = await makeTrik('xcheck-dynamic', {
+      'src/index.ts': `const mod = await import(someVar);`,
+    });
+    const scan = await scanCapabilities(dir);
+    const manifest = { capabilities: {} };
+    const errors = crossCheckManifest(scan, manifest);
+    expect(errors).toContainEqual(
+      expect.objectContaining({
+        type: 'error',
+        category: 'dynamic_code',
+      })
+    );
   });
 });
 
