@@ -160,3 +160,40 @@ def test_adjust_tier_no_caps(tmp_path: Path) -> None:
     scan = scan_capabilities(tmp_path)
     adjusted = adjust_tier_for_manifest(scan, {"capabilities": {"session": {"enabled": True}}})
     assert adjusted["tier"] == "A"
+
+
+# ── SDK context detection ─────────────────────────────────────────────────
+
+def test_detects_storage_context_usage(tmp_path: Path) -> None:
+    _write(tmp_path / "agent.py", "val = await context.storage.get('key')\n")
+    result = scan_capabilities(tmp_path)
+    categories = [c["category"] for c in result["capabilities"]]
+    assert "storage" in categories
+
+
+def test_detects_registry_context_usage(tmp_path: Path) -> None:
+    _write(tmp_path / "agent.py", "results = await context.registry.search('test')\n")
+    result = scan_capabilities(tmp_path)
+    categories = [c["category"] for c in result["capabilities"]]
+    assert "trik_management" in categories
+
+
+def test_detects_dynamic_import(tmp_path: Path) -> None:
+    _write(tmp_path / "agent.py", "mod = __import__('os')\n")
+    result = scan_capabilities(tmp_path)
+    categories = [c["category"] for c in result["capabilities"]]
+    assert "dynamic_code" in categories
+
+
+def test_detects_dynamic_js_import(tmp_path: Path) -> None:
+    _write(tmp_path / "index.js", "const mod = await import(someVar);\n")
+    result = scan_capabilities(tmp_path)
+    categories = [c["category"] for c in result["capabilities"]]
+    assert "dynamic_code" in categories
+
+
+def test_static_import_not_flagged_as_dynamic(tmp_path: Path) -> None:
+    _write(tmp_path / "index.js", "const mod = await import('./local');\n")
+    result = scan_capabilities(tmp_path)
+    categories = [c["category"] for c in result["capabilities"]]
+    assert "dynamic_code" not in categories

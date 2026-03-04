@@ -121,6 +121,24 @@ CAPABILITY_PATTERNS: dict[str, list[re.Pattern[str]]] = {
         re.compile(r"""\bimport\s+(?:threading|multiprocessing)\b"""),
         re.compile(r"""\bfrom\s+(?:threading|multiprocessing)\s+import\b"""),
     ],
+    "storage": [
+        re.compile(r"""\bcontext\.storage\b"""),
+        re.compile(r"""\bself\.context\.storage\b"""),
+        re.compile(r"""\bctx\.storage\b"""),
+    ],
+    "trik_management": [
+        re.compile(r"""\bcontext\.registry\b"""),
+        re.compile(r"""\bself\.context\.registry\b"""),
+        re.compile(r"""\bctx\.registry\b"""),
+    ],
+    "dynamic_code": [
+        # Dynamic import() with variable (not string literal)
+        re.compile(r"""\bimport\s*\(\s*(?!['"`])"""),
+        # Python __import__
+        re.compile(r"""\b__import__\s*\("""),
+        # globalThis require
+        re.compile(r"""\bglobalThis\s*\[\s*['"]require['"]\s*\]"""),
+    ],
 }
 
 # ---------------------------------------------------------------------------
@@ -143,24 +161,29 @@ def _resolve_tier(categories: set[str]) -> str:
     """Determine the security tier from the set of detected capability categories.
 
     Tier logic:
-      A (Sandboxed)     — no capabilities detected
+      A (Sandboxed)     — no capabilities detected (storage/trik_management don't affect tier)
       B (Network)       — only network and/or crypto detected
       C (System)        — filesystem, environment, or dns detected
-      D (Unrestricted)  — process or workers detected
+      D (Unrestricted)  — process, workers, or dynamic_code detected
     """
     if not categories:
         return "A"
 
-    # D: process or workers present
-    if "process" in categories or "workers" in categories:
+    # D: process, workers, or dynamic_code present
+    if "process" in categories or "workers" in categories or "dynamic_code" in categories:
         return "D"
 
     # C: filesystem, environment, or dns present
     if "filesystem" in categories or "environment" in categories or "dns" in categories:
         return "C"
 
+    # storage and trik_management don't affect tier — exclude them
+    tier_affecting = {c for c in categories if c not in ("storage", "trik_management")}
+    if not tier_affecting:
+        return "A"
+
     # If only network and/or crypto remain, tier is B
-    for cat in categories:
+    for cat in tier_affecting:
         if cat not in ("network", "crypto"):
             return "C"  # safety fallback — should not be reached
 
