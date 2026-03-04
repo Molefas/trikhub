@@ -120,6 +120,13 @@ export class ContainerWorkerHandle extends EventEmitter {
       throw new Error(`Container already started for trik ${this.trikId}`);
     }
 
+    // Remove any stale container with the same name (e.g. from a previous crash)
+    try {
+      execSync(`docker rm -f ${this.containerName} 2>/dev/null`, { stdio: 'ignore' });
+    } catch {
+      // No stale container — expected
+    }
+
     // Ensure workspace directory exists on host
     if (!existsSync(this.options.workspacePath)) {
       mkdirSync(this.options.workspacePath, { recursive: true });
@@ -554,6 +561,7 @@ export class ContainerWorkerHandle extends EventEmitter {
 export class DockerContainerManager {
   private containers = new Map<string, ContainerWorkerHandle>();
   private readonly config: Required<ContainerManagerConfig>;
+  private readonly _exitHandler: () => void;
 
   constructor(config: ContainerManagerConfig = {}) {
     const defaultWorkspaceBase = join(homedir(), '.trikhub', 'workspace');
@@ -563,6 +571,14 @@ export class DockerContainerManager {
       invokeTimeoutMs: config.invokeTimeoutMs ?? 120000,
       debug: config.debug ?? false,
     };
+
+    // Register process exit handler to force-kill all containers.
+    // This ensures containers don't leak when the process is killed (SIGINT/SIGTERM)
+    // or exits without calling shutdown().
+    this._exitHandler = () => {
+      this.killAll();
+    };
+    process.on('exit', this._exitHandler);
   }
 
   /**
@@ -628,11 +644,23 @@ export class DockerContainerManager {
   }
 
   /**
-   * Stop all managed containers.
+   * Stop all managed containers gracefully.
    */
   async stopAll(): Promise<void> {
+    process.removeListener('exit', this._exitHandler);
     const stopPromises = Array.from(this.containers.keys()).map((id) => this.stop(id));
     await Promise.allSettled(stopPromises);
+    this.containers.clear();
+  }
+
+  /**
+   * Synchronously force-kill all containers. Used as process exit handler
+   * to ensure containers don't outlive the host process.
+   */
+  private killAll(): void {
+    for (const handle of this.containers.values()) {
+      handle.kill();
+    }
     this.containers.clear();
   }
 
