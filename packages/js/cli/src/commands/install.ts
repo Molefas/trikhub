@@ -726,9 +726,7 @@ async function verifyTrikCapabilities(trikPath: string): Promise<{ verified: boo
       errors: errors.map(e => e.message),
     };
   } catch {
-    // If verification fails (no manifest, parse error, etc.), skip silently
-    // The manifest was already validated earlier in the install flow
-    return { verified: true, errors: [] };
+    return { verified: false, errors: ['Failed to verify trik capabilities'] };
   }
 }
 

@@ -116,7 +116,7 @@ def _verify_trik_capabilities(trik_path: Path) -> tuple[bool, list[str]]:
             return True, []
         return False, [e["message"] for e in errors]
     except Exception:
-        return True, []  # Don't fail install if verification errors
+        return False, ["Failed to verify trik capabilities"]
 
 
 def _show_config_hint(package_name: str, runtime: str) -> None:
