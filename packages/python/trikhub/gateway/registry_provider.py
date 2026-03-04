@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -183,6 +184,14 @@ class GatewayRegistryProvider:
             git_dir = trik_dir / ".git"
             if git_dir.exists():
                 shutil.rmtree(git_dir)
+
+            # Write identity file for trusted scoped name
+            identity_path = trik_dir / ".trikhub-identity.json"
+            identity = {
+                "scopedName": trik_id,
+                "installedAt": datetime.now(timezone.utc).isoformat(),
+            }
+            identity_path.write_text(json.dumps(identity, indent=2))
 
             self._add_to_config(trik_id)
             await self._gateway.load_trik(str(trik_dir))
