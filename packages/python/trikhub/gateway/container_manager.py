@@ -15,6 +15,7 @@ Mirrors packages/js/gateway/src/container-manager.ts.
 
 from __future__ import annotations
 
+import atexit
 import asyncio
 import json
 import os
@@ -150,6 +151,16 @@ class ContainerWorkerHandle:
         """Start the container and wait for the worker to be ready."""
         if self._process is not None:
             raise RuntimeError(f"Container already started for trik {self._trik_id}")
+
+        # Remove any stale container with the same name (e.g. from a previous crash)
+        try:
+            subprocess.run(
+                ["docker", "rm", "-f", self._container_name],
+                capture_output=True,
+                timeout=5,
+            )
+        except Exception:
+            pass  # No stale container — expected
 
         # Ensure workspace directory exists on host
         os.makedirs(self._options.workspace_path, exist_ok=True)
@@ -595,6 +606,11 @@ class DockerContainerManager:
         )
         self._containers: dict[str, ContainerWorkerHandle] = {}
 
+        # Register process exit handler to force-kill all containers.
+        # This ensures containers don't leak when the process is killed or
+        # exits without calling shutdown().
+        atexit.register(self._kill_all)
+
     async def launch(
         self, trik_id: str, options: ContainerOptions
     ) -> ContainerWorkerHandle:
@@ -655,10 +671,17 @@ class DockerContainerManager:
         return handle.ready if handle else False
 
     async def stop_all(self) -> None:
-        """Stop all managed containers."""
+        """Stop all managed containers gracefully."""
+        atexit.unregister(self._kill_all)
         tasks = [self.stop(trik_id) for trik_id in list(self._containers.keys())]
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        self._containers.clear()
+
+    def _kill_all(self) -> None:
+        """Synchronously force-kill all containers. Used as process exit handler."""
+        for handle in self._containers.values():
+            handle.kill()
         self._containers.clear()
 
     def get_workspace_path(self, trik_id: str) -> str:
