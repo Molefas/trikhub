@@ -65,6 +65,13 @@ describe('DockerContainerManager', () => {
     expect(manager.isRunning('nonexistent')).toBe(false);
   });
 
+  it('creates with custom idleTimeoutMs', () => {
+    const manager = new DockerContainerManager({
+      idleTimeoutMs: 60000,
+    });
+    expect(manager).toBeDefined();
+  });
+
   it('stopAll completes when no containers running', async () => {
     const manager = new DockerContainerManager();
     await manager.stopAll(); // Should not throw
@@ -85,6 +92,7 @@ describe('ContainerWorkerHandle', () => {
     workspaceBaseDir: '/tmp/test-workspace',
     startupTimeoutMs: 5000,
     invokeTimeoutMs: 30000,
+    idleTimeoutMs: 300000,
     debug: false,
   };
 
@@ -174,6 +182,50 @@ describe('ContainerWorkerHandle', () => {
 
     handle.kill(); // Should not throw
   });
+
+  it('setOnIdle sets callback without error', () => {
+    const handle = new ContainerWorkerHandle(
+      'test-trik',
+      makeContainerOptions(),
+      defaultConfig,
+    );
+    const callback = vi.fn();
+    // Should not throw even when not started
+    handle.setOnIdle(callback, 1000);
+    // Clean up timer
+    handle.kill();
+  });
+
+  it('idle timer fires and invokes callback', async () => {
+    const handle = new ContainerWorkerHandle(
+      'test-trik',
+      makeContainerOptions(),
+      { ...defaultConfig, idleTimeoutMs: 50 },
+    );
+    const callback = vi.fn();
+    handle.setOnIdle(callback, 50);
+
+    // Wait for timer to fire
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(callback).toHaveBeenCalledOnce();
+  });
+
+  it('kill clears idle timer', async () => {
+    const handle = new ContainerWorkerHandle(
+      'test-trik',
+      makeContainerOptions(),
+      { ...defaultConfig, idleTimeoutMs: 50 },
+    );
+    const callback = vi.fn();
+    handle.setOnIdle(callback, 50);
+
+    // Kill before timer fires
+    handle.kill();
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(callback).not.toHaveBeenCalled();
+  });
 });
 
 // ============================================================================
@@ -191,6 +243,7 @@ describe('ContainerOptions', () => {
         workspaceBaseDir: '/tmp/test',
         startupTimeoutMs: 5000,
         invokeTimeoutMs: 30000,
+        idleTimeoutMs: 300000,
         debug: false,
       },
     );
@@ -205,6 +258,7 @@ describe('ContainerOptions', () => {
         workspaceBaseDir: '/tmp/test',
         startupTimeoutMs: 5000,
         invokeTimeoutMs: 30000,
+        idleTimeoutMs: 300000,
         debug: false,
       },
     );
