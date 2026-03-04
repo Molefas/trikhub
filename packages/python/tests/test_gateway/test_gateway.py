@@ -864,7 +864,7 @@ async def test_load_trik_no_warn_when_config_present(capfd):
         })
 
         config_store = InMemoryConfigStore()
-        config_store.set_for_trik("has-config", {"API_KEY": "my-key"})
+        config_store.set_for_trik("local/has-config", {"API_KEY": "my-key"})
 
         gw = TrikGateway(TrikGatewayConfig(
             config_store=config_store,
@@ -929,7 +929,7 @@ async def test_load_trik_warns_only_missing_keys(capfd):
         })
 
         config_store = InMemoryConfigStore()
-        config_store.set_for_trik("partial-config", {"API_KEY": "my-key"})
+        config_store.set_for_trik("local/partial-config", {"API_KEY": "my-key"})
 
         gw = TrikGateway(TrikGatewayConfig(
             config_store=config_store,

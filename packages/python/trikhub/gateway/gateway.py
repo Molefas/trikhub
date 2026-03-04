@@ -737,7 +737,7 @@ class TrikGateway:
 
         # Validate required config
         if self._config.validate_config is not False:
-            missing_keys = self._config_store.validate_config(manifest)
+            missing_keys = self._config_store.validate_config(manifest, resolved_scoped_name)
             if missing_keys:
                 keys_str = ", ".join(missing_keys)
                 json_example = ", ".join(f'"{k}": "..."' for k in missing_keys)

@@ -25,7 +25,7 @@ class ConfigStore(Protocol):
     async def load(self) -> None: ...
     async def reload(self) -> None: ...
     def get_for_trik(self, trik_id: str) -> TrikConfigContext: ...
-    def validate_config(self, manifest: TrikManifest) -> list[str]: ...
+    def validate_config(self, manifest: TrikManifest, trik_id: str | None = None) -> list[str]: ...
     def get_configured_triks(self) -> list[str]: ...
 
 
@@ -117,11 +117,11 @@ class FileConfigStore:
             return _EMPTY_CONFIG
         return _ConfigContext(merged)
 
-    def validate_config(self, manifest: TrikManifest) -> list[str]:
+    def validate_config(self, manifest: TrikManifest, trik_id: str | None = None) -> list[str]:
         missing: list[str] = []
         if not manifest.config or not manifest.config.required:
             return missing
-        ctx = self.get_for_trik(manifest.id)
+        ctx = self.get_for_trik(trik_id or manifest.id)
         for req in manifest.config.required:
             if not ctx.has(req.key):
                 missing.append(req.key)
@@ -172,11 +172,11 @@ class InMemoryConfigStore:
             return _EMPTY_CONFIG
         return _ConfigContext(cfg, defaults)
 
-    def validate_config(self, manifest: TrikManifest) -> list[str]:
+    def validate_config(self, manifest: TrikManifest, trik_id: str | None = None) -> list[str]:
         missing: list[str] = []
         if not manifest.config or not manifest.config.required:
             return missing
-        ctx = self.get_for_trik(manifest.id)
+        ctx = self.get_for_trik(trik_id or manifest.id)
         for req in manifest.config.required:
             if not ctx.has(req.key):
                 missing.append(req.key)

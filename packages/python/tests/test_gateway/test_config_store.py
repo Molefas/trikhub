@@ -136,6 +136,23 @@ def test_inmemory_set_defaults_no_optional():
     assert ctx.get("anything") is None
 
 
+def test_inmemory_validate_config_with_scoped_trik_id():
+    """validate_config should look up config by trik_id when provided."""
+    store = InMemoryConfigStore({
+        "@alice/test-trik": {"API_KEY": "key123"},
+    })
+
+    manifest = _make_manifest(required_config=["API_KEY"])
+
+    # Without trik_id: should report missing (looks up "test-trik")
+    missing = store.validate_config(manifest)
+    assert "API_KEY" in missing
+
+    # With trik_id: should find it (looks up "@alice/test-trik")
+    missing = store.validate_config(manifest, trik_id="@alice/test-trik")
+    assert len(missing) == 0
+
+
 # ============================================================================
 # FileConfigStore
 # ============================================================================
