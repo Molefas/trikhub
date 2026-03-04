@@ -312,6 +312,83 @@ def adjust_tier_for_manifest(scan: ScanResult, manifest: dict) -> ScanResult:
 
 
 # ---------------------------------------------------------------------------
+# Cross-check: scanner results vs manifest declarations
+# ---------------------------------------------------------------------------
+
+
+class CrossCheckResult(TypedDict):
+    type: str  # "error" | "warning"
+    capability: str  # manifest field name, empty for dynamic_code
+    category: str  # scanner category
+    message: str
+    locations: list[Location]
+
+
+# Maps scanner categories to manifest capability fields
+# category: (manifest_field, path to .enabled)
+_CATEGORY_TO_MANIFEST: dict[str, tuple[str, list[str]]] = {
+    "filesystem": ("filesystem", ["capabilities", "filesystem", "enabled"]),
+    "process": ("shell", ["capabilities", "shell", "enabled"]),
+    "storage": ("storage", ["capabilities", "storage", "enabled"]),
+    "trik_management": ("trikManagement", ["capabilities", "trikManagement", "enabled"]),
+}
+
+
+def _get_nested(d: dict, keys: list[str]) -> bool:
+    """Safely traverse nested dict keys, return True if final value is True."""
+    current = d
+    for key in keys:
+        if not isinstance(current, dict):
+            return False
+        current = current.get(key)  # type: ignore[assignment]
+        if current is None:
+            return False
+    return current is True
+
+
+def cross_check_manifest(scan: ScanResult, manifest: dict) -> list[CrossCheckResult]:
+    """Cross-check scanner results against manifest declarations.
+
+    Returns errors for undeclared capabilities and for suspicious patterns.
+    An empty list means the manifest accurately declares all detected capabilities.
+    """
+    results: list[CrossCheckResult] = []
+
+    for cap in scan["capabilities"]:
+        category = cap["category"]
+        mapping = _CATEGORY_TO_MANIFEST.get(category)
+
+        if mapping:
+            field, path = mapping
+            if not _get_nested(manifest, path):
+                results.append({
+                    "type": "error",
+                    "capability": field,
+                    "category": category,
+                    "message": (
+                        f"Source code uses {category} capabilities but manifest does not "
+                        f"declare capabilities.{field}.enabled. "
+                        f'Add "capabilities": {{ "{field}": {{ "enabled": true }} }} to your manifest.json.'
+                    ),
+                    "locations": cap["locations"],
+                })
+        elif category == "dynamic_code":
+            results.append({
+                "type": "error",
+                "capability": "",
+                "category": "dynamic_code",
+                "message": (
+                    "Source code uses dynamic code execution patterns (dynamic import, "
+                    "__import__, etc.) that bypass static analysis. "
+                    "These patterns are not allowed in published triks."
+                ),
+                "locations": cap["locations"],
+            })
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Formatting
 # ---------------------------------------------------------------------------
 
