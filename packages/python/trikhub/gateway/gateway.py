@@ -218,6 +218,7 @@ class TrikGateway:
         self._trik_loader = TrikLoader()
         self._triks: dict[str, _LoadedTrik] = {}
         self._active_handoff: _ActiveHandoff | None = None
+        self._event_listeners: dict[str, list] = {}
 
         # Compute config dir for registry provider
         if cfg.triks_directory:
@@ -803,6 +804,7 @@ class TrikGateway:
                 scoped_name=resolved_scoped_name,
             )
 
+        self._emit("trik:loaded", {"trik_id": resolved_scoped_name, "manifest": manifest})
         return manifest
 
     @staticmethod
@@ -1136,8 +1138,26 @@ class TrikGateway:
     def is_loaded(self, trik_id: str) -> bool:
         return trik_id in self._triks
 
+    def on(self, event: str, callback) -> None:
+        """Register a callback for a lifecycle event."""
+        self._event_listeners.setdefault(event, []).append(callback)
+
+    def off(self, event: str, callback) -> None:
+        """Remove a callback for a lifecycle event."""
+        listeners = self._event_listeners.get(event, [])
+        if callback in listeners:
+            listeners.remove(callback)
+
+    def _emit(self, event: str, payload: dict) -> None:
+        """Emit a lifecycle event to all registered callbacks."""
+        for cb in self._event_listeners.get(event, []):
+            cb(payload)
+
     def unload_trik(self, trik_id: str) -> bool:
-        return self._triks.pop(trik_id, None) is not None
+        removed = self._triks.pop(trik_id, None) is not None
+        if removed:
+            self._emit("trik:unloaded", {"trik_id": trik_id})
+        return removed
 
 
 # ============================================================================
