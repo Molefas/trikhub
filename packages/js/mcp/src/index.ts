@@ -338,6 +338,7 @@ Enables shell command execution inside the container. The SDK auto-injects an \`
 | enabled | boolean | Whether shell command execution is enabled |
 | timeoutMs | number | Max time per command in ms (default: 30000) |
 | maxConcurrent | number | Max concurrent processes (default: 3) |
+| exposePorts | number[] | Ports to expose from container to host (e.g., [3000, 8080]). Only ports 1024-65535 allowed. |
 
 **Rule:** If \`shell\` is enabled, \`filesystem\` must also be enabled. Shell access without filesystem doesn't make practical sense — commands need a workspace to operate in.
 
@@ -456,7 +457,7 @@ Integer, number, and boolean fields are always safe.
   "capabilities": {
     "session": { "enabled": true },
     "filesystem": { "enabled": true, "maxSizeBytes": 524288000 },
-    "shell": { "enabled": true, "timeoutMs": 60000, "maxConcurrent": 3 }
+    "shell": { "enabled": true, "timeoutMs": 60000, "maxConcurrent": 3, "exposePorts": [3000] }
   },
   "limits": { "maxTurnTimeMs": 60000 },
   "entry": { "module": "./dist/index.js", "export": "default" }

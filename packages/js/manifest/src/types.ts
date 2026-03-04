@@ -151,6 +151,8 @@ export interface ShellCapabilities {
   timeoutMs?: number;
   /** Max concurrent processes (default: 3) */
   maxConcurrent?: number;
+  /** Ports to expose from container to host (e.g., [3000] for dev servers) */
+  exposePorts?: number[];
 }
 
 /**

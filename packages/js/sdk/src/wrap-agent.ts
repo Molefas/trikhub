@@ -1,9 +1,9 @@
-import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { HumanMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { TrikAgent, TrikContext, TrikResponse } from '@trikhub/manifest';
 import { extractToolInfo } from './interceptor.js';
-import { getActiveWorkspaceToolNames, WORKSPACE_SYSTEM_PROMPT } from './workspace-tools.js';
-import { getActiveRegistryToolNames, REGISTRY_SYSTEM_PROMPT } from './registry-tools.js';
+import { getActiveWorkspaceToolNames } from './workspace-tools.js';
+import { getActiveRegistryToolNames } from './registry-tools.js';
 
 /**
  * Any agent with a LangGraph-compatible invoke method.
@@ -70,8 +70,6 @@ export function wrapAgent(
 
   // Per-session message history
   const sessionMessages = new Map<string, BaseMessage[]>();
-  // Track which sessions have received the workspace system prompt
-  const sessionHasSystemPrompt = new Set<string>();
 
   return {
     async processMessage(
@@ -92,19 +90,6 @@ export function wrapAgent(
       if (!messages) {
         messages = [];
         sessionMessages.set(context.sessionId, messages);
-      }
-
-      // Prepend system prompts on first message of a session
-      if (!sessionHasSystemPrompt.has(context.sessionId)) {
-        if (workspaceToolNames.size > 0) {
-          messages.push(new SystemMessage(WORKSPACE_SYSTEM_PROMPT));
-        }
-        if (registryToolNames.size > 0) {
-          messages.push(new SystemMessage(REGISTRY_SYSTEM_PROMPT));
-        }
-        if (workspaceToolNames.size > 0 || registryToolNames.size > 0) {
-          sessionHasSystemPrompt.add(context.sessionId);
-        }
       }
 
       // Record where new messages start (for extracting this turn's tool calls)

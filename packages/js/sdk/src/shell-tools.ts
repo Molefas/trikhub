@@ -8,7 +8,7 @@
  * Mirrors packages/python/trikhub/sdk/shell_tools.py
  */
 
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 
@@ -32,12 +32,16 @@ export interface ExecuteCommandInput {
   timeoutMs?: number;
   /** Additional environment variables */
   env?: Record<string, string>;
+  /** Run in background — returns immediately with PID instead of waiting */
+  background?: boolean;
 }
 
 export interface ExecuteCommandOutput {
   stdout: string;
   stderr: string;
   exitCode: number;
+  /** PID of the background process (only when background=true) */
+  pid?: number;
 }
 
 // ============================================================================
@@ -54,7 +58,7 @@ export const shellToolSchemas: ToolSchema[] = [
   {
     name: 'execute_command',
     description:
-      'Run a shell command in the workspace. Returns stdout, stderr, and exit code.',
+      'Run a shell command in the workspace. Returns stdout, stderr, and exit code. Use background=true for long-running processes like dev servers.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -71,6 +75,10 @@ export const shellToolSchemas: ToolSchema[] = [
           type: 'object',
           description: 'Additional environment variables',
           additionalProperties: { type: 'string' },
+        },
+        background: {
+          type: 'boolean',
+          description: 'Run in background — returns immediately with PID. Use for dev servers and long-running processes.',
         },
       },
       required: ['command'],
@@ -97,7 +105,7 @@ export function createShellHandlers(
   const defaultTimeout = defaults.timeoutMs ?? 30_000;
 
   return {
-    execute_command({ command, cwd, timeoutMs, env }) {
+    execute_command({ command, cwd, timeoutMs, env, background }) {
       // Resolve cwd within workspace
       let execCwd = root;
       if (cwd) {
@@ -111,6 +119,43 @@ export function createShellHandlers(
         }
       }
 
+      // Background mode: spawn and return immediately with PID
+      if (background) {
+        const child = spawn(command, {
+          cwd: execCwd,
+          env: { ...process.env, ...env },
+          stdio: ['ignore', 'pipe', 'pipe'],
+          shell: true,
+        });
+
+        // Allow the worker process to exit even if this child is still running
+        child.unref();
+
+        // Drain stdout/stderr so the process doesn't block on full buffers
+        child.stdout?.resume();
+        child.stderr?.resume();
+
+        // Don't let the child crash the worker
+        child.on('error', () => {});
+
+        // Check spawn actually succeeded
+        if (!child.pid) {
+          return {
+            stdout: '',
+            stderr: 'Failed to start background process',
+            exitCode: 1,
+          };
+        }
+
+        return {
+          stdout: `Background process started with PID ${child.pid}`,
+          stderr: '',
+          exitCode: 0,
+          pid: child.pid,
+        };
+      }
+
+      // Foreground mode: run synchronously
       const timeout = timeoutMs ?? defaultTimeout;
 
       const result = spawnSync(command, {

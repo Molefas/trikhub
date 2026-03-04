@@ -19,7 +19,6 @@ import {
   getRegistryTools,
   getActiveRegistryToolNames,
   REGISTRY_TOOL_NAMES,
-  REGISTRY_SYSTEM_PROMPT,
 } from '../../packages/js/sdk/dist/registry-tools.js';
 
 // ============================================================================
@@ -89,11 +88,6 @@ function getMessageType(msg: unknown): string {
   const m = msg as { _getType?: () => string };
   if (typeof m._getType === 'function') return m._getType();
   return 'unknown';
-}
-
-function getMessageContent(msg: unknown): string {
-  const m = msg as { content: unknown };
-  return typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
 }
 
 function createCapturingMockAgent(responseContent: string = 'OK') {
@@ -206,11 +200,11 @@ describe('getActiveRegistryToolNames', () => {
 });
 
 // ============================================================================
-// Tests: wrapAgent registry system prompt injection
+// Tests: wrapAgent does NOT inject registry system prompt
 // ============================================================================
 
-describe('wrapAgent registry system prompt', () => {
-  it('prepends registry system prompt on first message when trikManagement enabled', async () => {
+describe('wrapAgent does NOT inject registry system prompt', () => {
+  it('does not inject system prompt when trikManagement enabled', async () => {
     const { agent, capturedMessages } = createCapturingMockAgent();
     const wrapped = wrapAgent(agent);
     const registry = createMockRegistry();
@@ -219,13 +213,11 @@ describe('wrapAgent registry system prompt', () => {
     await wrapped.processMessage!('Hello', ctx);
 
     const messages = capturedMessages[0];
-    expect(messages.length).toBe(2); // SystemMessage + HumanMessage
-    expect(getMessageType(messages[0])).toBe('system');
-    expect(getMessageContent(messages[0])).toBe(REGISTRY_SYSTEM_PROMPT);
-    expect(getMessageType(messages[1])).toBe('human');
+    expect(messages.length).toBe(1); // Only HumanMessage
+    expect(getMessageType(messages[0])).toBe('human');
   });
 
-  it('prepends both workspace and registry prompts when both capabilities enabled', async () => {
+  it('does not inject system prompts even when both capabilities enabled', async () => {
     const { agent, capturedMessages } = createCapturingMockAgent();
     const wrapped = wrapAgent(agent);
     const registry = createMockRegistry();
@@ -237,19 +229,11 @@ describe('wrapAgent registry system prompt', () => {
     await wrapped.processMessage!('Hello', ctx);
 
     const messages = capturedMessages[0];
-    expect(messages.length).toBe(3); // WorkspaceSystemMessage + RegistrySystemMessage + HumanMessage
-    expect(getMessageType(messages[0])).toBe('system');
-    expect(getMessageType(messages[1])).toBe('system');
-    expect(getMessageType(messages[2])).toBe('human');
-
-    // Workspace prompt first, then registry prompt
-    const systemContents = messages
-      .filter((m: unknown) => getMessageType(m) === 'system')
-      .map((m: unknown) => getMessageContent(m));
-    expect(systemContents).toContain(REGISTRY_SYSTEM_PROMPT);
+    expect(messages.length).toBe(1); // Only HumanMessage
+    expect(getMessageType(messages[0])).toBe('human');
   });
 
-  it('does not prepend registry prompt when trikManagement not enabled', async () => {
+  it('does not inject system prompt when no capabilities', async () => {
     const { agent, capturedMessages } = createCapturingMockAgent();
     const wrapped = wrapAgent(agent);
     const ctx = makeContext('sess-1');

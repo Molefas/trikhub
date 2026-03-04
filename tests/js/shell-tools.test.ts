@@ -80,6 +80,37 @@ describe('execute_command', () => {
 });
 
 // ============================================================================
+// Background mode
+// ============================================================================
+
+describe('background mode', () => {
+  it('returns pid and exitCode 0 for background process', () => {
+    const result = handlers.execute_command({ command: 'sleep 1', background: true });
+    expect(result.exitCode).toBe(0);
+    expect(result.pid).toBeDefined();
+    expect(typeof result.pid).toBe('number');
+    expect(result.stdout).toContain('Background process started with PID');
+  });
+
+  it('rejects cwd traversal in background mode', () => {
+    expect(() =>
+      handlers.execute_command({ command: 'echo hi', cwd: '../../..', background: true })
+    ).toThrow('traversal');
+  });
+
+  it('returns immediately without waiting for process', () => {
+    const start = Date.now();
+    const result = handlers.execute_command({ command: 'sleep 30', background: true });
+    const elapsed = Date.now() - start;
+
+    expect(result.exitCode).toBe(0);
+    expect(result.pid).toBeDefined();
+    // Should return almost immediately (well under 1s), not wait for sleep 30
+    expect(elapsed).toBeLessThan(5000);
+  });
+});
+
+// ============================================================================
 // Default timeout
 // ============================================================================
 

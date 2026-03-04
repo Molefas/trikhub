@@ -134,6 +134,10 @@ MANIFEST_SCHEMA: dict[str, Any] = {
                         "enabled": {"type": "boolean"},
                         "timeoutMs": {"type": "number", "minimum": 0},
                         "maxConcurrent": {"type": "integer", "minimum": 1},
+                        "exposePorts": {
+                            "type": "array",
+                            "items": {"type": "integer", "minimum": 1, "maximum": 65535},
+                        },
                     },
                     "required": ["enabled"],
                     "additionalProperties": False,
@@ -401,6 +405,16 @@ def _validate_semantics(manifest: dict[str, Any]) -> list[_SemanticIssue]:
                 type="error",
                 message="capabilities: shell requires filesystem to be enabled",
             ))
+
+        # Warn about privileged ports in exposePorts
+        expose_ports = capabilities.get("shell", {}).get("exposePorts")
+        if expose_ports:
+            privileged = [p for p in expose_ports if p < 1024]
+            if privileged:
+                issues.append(_SemanticIssue(
+                    type="warning",
+                    message=f"capabilities.shell.exposePorts: ports below 1024 are privileged and will be blocked at runtime ({', '.join(str(p) for p in privileged)})",
+                ))
 
     # --- Generic domain tags ---
 

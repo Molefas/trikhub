@@ -903,6 +903,7 @@ export class TrikGateway {
             sessionId: context.sessionId,
             config: this.configToRecord(context.config),
             storageNamespace: manifest.id,
+            capabilities: context.capabilities,
           });
 
           return {
@@ -933,6 +934,7 @@ export class TrikGateway {
             sessionId: context.sessionId,
             config: this.configToRecord(context.config),
             storageNamespace: manifest.id,
+            capabilities: context.capabilities,
           });
 
           return { output: result.output };
@@ -964,6 +966,7 @@ export class TrikGateway {
           runtime,
           workspacePath,
           trikPath: resolve(trikPath),
+          exposePorts: manifest.capabilities?.shell?.exposePorts,
         });
 
         handle.setStorageContext(context.storage);
@@ -974,6 +977,7 @@ export class TrikGateway {
             sessionId: context.sessionId,
             config: this.configToRecord(context.config),
             storageNamespace: manifest.id,
+            capabilities: context.capabilities,
           });
 
           return {
@@ -999,6 +1003,7 @@ export class TrikGateway {
           runtime,
           workspacePath,
           trikPath: resolve(trikPath),
+          exposePorts: manifest.capabilities?.shell?.exposePorts,
         });
 
         handle.setStorageContext(context.storage);
@@ -1010,6 +1015,7 @@ export class TrikGateway {
             sessionId: context.sessionId,
             config: this.configToRecord(context.config),
             storageNamespace: manifest.id,
+            capabilities: context.capabilities,
           });
 
           return { output: result.output };

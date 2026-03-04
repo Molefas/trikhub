@@ -152,6 +152,8 @@ class ShellCapabilities(BaseModel):
     """Max time per command in ms (default: 30000)."""
     maxConcurrent: int | None = None
     """Max concurrent processes (default: 3)."""
+    exposePorts: list[int] | None = None
+    """Ports to expose from the container to the host (e.g., [3000, 8080])."""
 
 
 class TrikManagementCapabilities(BaseModel):

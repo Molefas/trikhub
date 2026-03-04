@@ -122,6 +122,10 @@ const manifestSchema = {
             enabled: { type: 'boolean' },
             timeoutMs: { type: 'number', minimum: 0 },
             maxConcurrent: { type: 'integer', minimum: 1 },
+            exposePorts: {
+              type: 'array',
+              items: { type: 'integer', minimum: 1, maximum: 65535 },
+            },
           },
           required: ['enabled'],
           additionalProperties: false,
@@ -442,6 +446,18 @@ function validateSemantics(manifest: Record<string, unknown>): SemanticIssue[] {
         type: 'error',
         message: 'capabilities: shell requires filesystem to be enabled',
       });
+    }
+
+    // Warn about privileged ports in exposePorts
+    const exposePorts = capabilities.shell?.exposePorts as number[] | undefined;
+    if (exposePorts) {
+      const privileged = exposePorts.filter((p: number) => p < 1024);
+      if (privileged.length > 0) {
+        issues.push({
+          type: 'warning',
+          message: `capabilities.shell.exposePorts: ports below 1024 are privileged and will be blocked at runtime (${privileged.join(', ')})`,
+        });
+      }
     }
   }
 

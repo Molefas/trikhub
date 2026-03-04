@@ -39,8 +39,14 @@ COPY packages/js/manifest/dist packages/js/manifest/dist/
 COPY packages/js/sdk/dist packages/js/sdk/dist/
 COPY packages/js/worker/dist packages/js/worker/dist/
 
+# Copy ESM resolve hooks for @trikhub/* package resolution
+# Mounted triks may have broken file: references for @trikhub packages;
+# this hook redirects those imports to the container's installed copies
+COPY docker/register-hooks.mjs docker/resolve-trikhub.mjs /trikhub/
+
 # Set working directory to workspace for trik execution
 WORKDIR /workspace
 
 # Worker communicates via stdin/stdout (JSON-RPC 2.0)
-ENTRYPOINT ["node", "/trikhub/packages/js/worker/dist/worker.js"]
+# --import registers the custom ESM resolve hook before any trik code loads
+ENTRYPOINT ["node", "--import", "/trikhub/register-hooks.mjs", "/trikhub/packages/js/worker/dist/worker.js"]

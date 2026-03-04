@@ -10,13 +10,13 @@ from __future__ import annotations
 
 from typing import Any, Protocol, Union, runtime_checkable
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 
 from trikhub.manifest import TrikContext, TrikResponse
 
 from .interceptor import extract_tool_info
-from .workspace_tools import WORKSPACE_SYSTEM_PROMPT, get_active_workspace_tool_names
-from .registry_tools import REGISTRY_SYSTEM_PROMPT, get_active_registry_tool_names
+from .workspace_tools import get_active_workspace_tool_names
+from .registry_tools import get_active_registry_tool_names
 
 
 @runtime_checkable
@@ -47,7 +47,6 @@ class _WrappedAgent:
         self._agent_or_factory = agent_or_factory
         self._resolved_agent: InvokableAgent | None = None
         self._session_messages: dict[str, list[BaseMessage]] = {}
-        self._session_has_system_prompt: set[str] = set()
 
         # If it's already an invokable agent (has ainvoke), use it directly
         if hasattr(agent_or_factory, "ainvoke"):
@@ -79,15 +78,6 @@ class _WrappedAgent:
         # Get or create session history
         session_id = context.sessionId
         messages = self._session_messages.get(session_id, [])
-
-        # Prepend system prompts on first message of a session
-        if session_id not in self._session_has_system_prompt:
-            if workspace_tool_names:
-                messages.append(SystemMessage(content=WORKSPACE_SYSTEM_PROMPT))
-            if registry_tool_names:
-                messages.append(SystemMessage(content=REGISTRY_SYSTEM_PROMPT))
-            if workspace_tool_names or registry_tool_names:
-                self._session_has_system_prompt.add(session_id)
 
         # Mark start of this turn for interceptor
         start_index = len(messages)
