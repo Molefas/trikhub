@@ -320,6 +320,84 @@ export async function scanCapabilities(trikPath: string): Promise<ScanResult> {
 }
 
 // ---------------------------------------------------------------------------
+// Cross-check
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps scanner capability categories to manifest capability fields.
+ */
+const CATEGORY_TO_MANIFEST: Record<string, { field: string; path: (caps: Record<string, unknown>) => boolean }> = {
+  filesystem: {
+    field: 'filesystem',
+    path: (caps) => !!(caps.filesystem as Record<string, unknown>)?.enabled,
+  },
+  process: {
+    field: 'shell',
+    path: (caps) => !!(caps.shell as Record<string, unknown>)?.enabled,
+  },
+  storage: {
+    field: 'storage',
+    path: (caps) => !!(caps.storage as Record<string, unknown>)?.enabled,
+  },
+  trik_management: {
+    field: 'trikManagement',
+    path: (caps) => !!(caps.trikManagement as Record<string, unknown>)?.enabled,
+  },
+};
+
+export interface CrossCheckResult {
+  type: 'error' | 'warning';
+  /** The manifest capability field name (e.g., 'filesystem', 'shell') */
+  capability?: string;
+  /** The scanner category that triggered this (e.g., 'filesystem', 'process') */
+  category: string;
+  message: string;
+  locations: { file: string; line: number }[];
+}
+
+/**
+ * Cross-check scanner results against manifest declarations.
+ *
+ * Returns errors for undeclared capabilities and warnings for suspicious patterns.
+ * An empty array means the manifest accurately declares all detected capabilities.
+ */
+export function crossCheckManifest(
+  scan: ScanResult,
+  manifest: Record<string, unknown>,
+): CrossCheckResult[] {
+  const results: CrossCheckResult[] = [];
+  const caps = (manifest.capabilities ?? {}) as Record<string, unknown>;
+
+  for (const cap of scan.capabilities) {
+    const mapping = CATEGORY_TO_MANIFEST[cap.category];
+    if (mapping) {
+      if (!mapping.path(caps)) {
+        results.push({
+          type: 'error',
+          capability: mapping.field,
+          category: cap.category,
+          message:
+            `Source code uses ${cap.category} capabilities but manifest does not declare capabilities.${mapping.field}.enabled. ` +
+            `Add "capabilities": { "${mapping.field}": { "enabled": true } } to your manifest.json.`,
+          locations: cap.locations,
+        });
+      }
+    } else if (cap.category === 'dynamic_code') {
+      results.push({
+        type: 'error',
+        category: 'dynamic_code',
+        message:
+          `Source code uses dynamic code execution patterns (dynamic import, __import__, etc.) ` +
+          `that bypass static analysis. These patterns are not allowed in published triks.`,
+        locations: cap.locations,
+      });
+    }
+  }
+
+  return results;
+}
+
+// ---------------------------------------------------------------------------
 // Formatting
 // ---------------------------------------------------------------------------
 
