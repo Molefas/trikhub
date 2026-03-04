@@ -182,7 +182,7 @@ export async function publishCommand(options: PublishOptions): Promise<void> {
       checkCompiledEntry: true, // Verify compiled entry point exists
       skipRules: ['manifest-completeness'], // Skip optional field warnings for publish
     });
-    const results = await linter.lintManifestOnly(repoDir);
+    const { results } = await linter.lint(repoDir);
     const hasErrors = linter.hasErrors(results);
     const warnings = results.filter((r) => r.severity === 'warning');
 
