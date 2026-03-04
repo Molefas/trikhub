@@ -444,7 +444,6 @@ class TrikGateway:
                 ),
             )
             summary = self._build_session_summary(handoff.session_id, loaded.manifest)
-            await self._stop_container_if_needed(handoff.trik_id)
             result = RouteTransferBack(
                 trik_id=handoff.trik_id,
                 message=response.message,
@@ -474,7 +473,6 @@ class TrikGateway:
             ),
         )
         summary = self._build_session_summary(handoff.session_id, loaded.manifest)
-        await self._stop_container_if_needed(handoff.trik_id)
         result = RouteForceBack(
             trik_id=handoff.trik_id,
             message="",
@@ -512,7 +510,6 @@ class TrikGateway:
             ),
         )
         summary = self._build_session_summary(handoff.session_id, loaded.manifest)
-        await self._stop_container_if_needed(handoff.trik_id)
         result = RouteTransferBack(
             trik_id=handoff.trik_id,
             message=reason,
@@ -902,12 +899,6 @@ class TrikGateway:
                 self._config.container_manager_config
             )
         return self._container_manager
-
-    async def _stop_container_if_needed(self, trik_id: str) -> None:
-        """Stop a trik's container if it is containerized and running."""
-        loaded = self._triks.get(trik_id)
-        if loaded and loaded.containerized and self._container_manager:
-            await self._container_manager.stop(trik_id)
 
     async def _ensure_node_worker(self) -> NodeWorker:
         if self._node_worker is None:
