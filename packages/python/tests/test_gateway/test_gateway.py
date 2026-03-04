@@ -210,7 +210,7 @@ async def test_load_python_trik():
 
         manifest = await gw.load_trik(trik_dir)
         assert manifest.id == "test-trik"
-        assert gw.is_loaded("test-trik")
+        assert gw.is_loaded("local/test-trik")
 
 
 @pytest.mark.asyncio
@@ -239,7 +239,7 @@ async def test_loaded_triks_query():
         await gw.load_trik(os.path.join(tmpdir, "trik-a"))
         await gw.load_trik(os.path.join(tmpdir, "trik-b"))
 
-        assert sorted(gw.get_loaded_triks()) == ["trik-a", "trik-b"]
+        assert sorted(gw.get_loaded_triks()) == ["local/trik-a", "local/trik-b"]
 
 
 @pytest.mark.asyncio
@@ -250,9 +250,9 @@ async def test_unload_trik():
         await gw.initialize()
         await gw.load_trik(trik_dir)
 
-        assert gw.unload_trik("test-trik") is True
-        assert gw.is_loaded("test-trik") is False
-        assert gw.unload_trik("test-trik") is False
+        assert gw.unload_trik("local/test-trik") is True
+        assert gw.is_loaded("local/test-trik") is False
+        assert gw.unload_trik("local/test-trik") is False
 
 
 # ============================================================================
@@ -290,7 +290,7 @@ async def test_handoff_tools():
 
         handoff_tools = gw.get_handoff_tools()
         assert len(handoff_tools) == 1
-        assert handoff_tools[0].name == "talk_to_trik-a"
+        assert handoff_tools[0].name == "talk_to_local__trik-a"
 
         exposed_tools = gw.get_exposed_tools()
         assert len(exposed_tools) == 1
@@ -310,9 +310,9 @@ async def test_start_handoff():
         await gw.initialize()
         await gw.load_trik(os.path.join(tmpdir, "echo-trik"))
 
-        result = await gw.start_handoff("echo-trik", "Hello!", "session-1")
+        result = await gw.start_handoff("local/echo-trik", "Hello!", "session-1")
         assert isinstance(result, RouteToTrik)
-        assert result.trik_id == "echo-trik"
+        assert result.trik_id == "local/echo-trik"
         assert "Echo: Hello!" in result.response.message
 
         # Now route_message should go to trik
@@ -329,7 +329,7 @@ async def test_transfer_back():
         await gw.initialize()
         await gw.load_trik(trik_dir)
 
-        result = await gw.start_handoff("done-trik", "Do it", "session-1")
+        result = await gw.start_handoff("local/done-trik", "Do it", "session-1")
         assert isinstance(result, RouteTransferBack)
         assert result.target == "transfer_back"
         assert "Done!" in result.message
@@ -347,7 +347,7 @@ async def test_force_back():
         await gw.initialize()
         await gw.load_trik(os.path.join(tmpdir, "echo-trik"))
 
-        await gw.start_handoff("echo-trik", "Hello", "session-1")
+        await gw.start_handoff("local/echo-trik", "Hello", "session-1")
 
         result = await gw.route_message("/back", "session-1")
         assert isinstance(result, RouteForceBack)
@@ -372,7 +372,7 @@ async def test_max_turns():
         await gw.load_trik(os.path.join(tmpdir, "echo-trik"))
 
         # Start handoff (turn 1)
-        await gw.start_handoff("echo-trik", "Hello", "session-1")
+        await gw.start_handoff("local/echo-trik", "Hello", "session-1")
         # Turn 2
         await gw.route_message("msg2", "session-1")
         # Turn 3 — should auto-transfer-back
@@ -389,7 +389,7 @@ async def test_error_auto_transfer_back():
         await gw.initialize()
         await gw.load_trik(trik_dir)
 
-        result = await gw.start_handoff("error-trik", "trigger error", "session-1")
+        result = await gw.start_handoff("local/error-trik", "trigger error", "session-1")
         assert isinstance(result, RouteTransferBack)
         assert "error" in result.message.lower()
 
@@ -403,11 +403,11 @@ async def test_active_handoff_state():
         await gw.load_trik(os.path.join(tmpdir, "echo-trik"))
 
         assert gw.get_active_handoff() is None
-        await gw.start_handoff("echo-trik", "Hello", "session-1")
+        await gw.start_handoff("local/echo-trik", "Hello", "session-1")
 
         state = gw.get_active_handoff()
         assert state is not None
-        assert state["trikId"] == "echo-trik"
+        assert state["trikId"] == "local/echo-trik"
         assert state["turnCount"] == 1
 
 
@@ -431,7 +431,7 @@ async def test_execute_exposed_tool():
         await gw.initialize()
         await gw.load_trik(trik_dir)
 
-        output = await gw.execute_exposed_tool("tool-trik", "search", {"q": "test"})
+        output = await gw.execute_exposed_tool("local/tool-trik", "search", {"q": "test"})
         assert "Found: Executed search" in output
 
 
@@ -575,7 +575,7 @@ async def test_get_manifest():
         await gw.initialize()
         await gw.load_trik(os.path.join(tmpdir, "test-trik"))
 
-        m = gw.get_manifest("test-trik")
+        m = gw.get_manifest("local/test-trik")
         assert m is not None
         assert m.id == "test-trik"
 
@@ -792,7 +792,7 @@ class TestErrorAutoTransferBackSanitization:
             await gw.initialize()
             await gw.load_trik(trik_dir)
 
-            result = await gw.start_handoff("error-trik", "trigger error", "s1")
+            result = await gw.start_handoff("local/error-trik", "trigger error", "s1")
             assert isinstance(result, RouteTransferBack)
             # The summary (injected into main agent context) should NOT contain
             # the raw error message "Intentional test error"
@@ -807,7 +807,7 @@ class TestErrorAutoTransferBackSanitization:
             await gw.initialize()
             await gw.load_trik(trik_dir)
 
-            result = await gw.start_handoff("error-trik", "trigger error", "s1")
+            result = await gw.start_handoff("local/error-trik", "trigger error", "s1")
             assert isinstance(result, RouteTransferBack)
             # User-facing message should contain the error info
             assert "error" in result.message.lower()
@@ -1043,7 +1043,7 @@ async def test_injects_registry_context_when_trik_management_enabled():
         await gw.initialize()
         await gw.load_trik(trik_dir)
 
-        loaded = gw._triks["mgmt-trik"]
+        loaded = gw._triks["local/mgmt-trik"]
         ctx = gw._build_trik_context("test-session", loaded)
 
         assert ctx.registry is not None
@@ -1070,7 +1070,7 @@ async def test_does_not_inject_registry_when_no_trik_management():
         await gw.initialize()
         await gw.load_trik(trik_dir)
 
-        loaded = gw._triks["no-mgmt-trik"]
+        loaded = gw._triks["local/no-mgmt-trik"]
         ctx = gw._build_trik_context("test-session", loaded)
 
         assert ctx.registry is None

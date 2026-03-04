@@ -330,7 +330,7 @@ describe('loadTrik config validation warning', () => {
     await gw.loadTrik(trikDir);
 
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('trik "test-config-warn" is missing required config: API_KEY, API_SECRET'),
+      expect.stringContaining('trik "local/test-config-warn" is missing required config: API_KEY, API_SECRET'),
     );
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('.trikhub/secrets.json'),
@@ -520,7 +520,7 @@ describe('registry injection into TrikContext', () => {
     await gw.loadTrik(trikDir);
 
     // Access private buildTrikContext to verify injection
-    const loaded = (gw as any).triks.get('test-mgmt-trik');
+    const loaded = (gw as any).triks.get('local/test-mgmt-trik');
     expect(loaded).toBeDefined();
 
     const ctx = (gw as any).buildTrikContext('test-session', loaded);
@@ -545,7 +545,7 @@ describe('registry injection into TrikContext', () => {
 
     await gw.loadTrik(trikDir);
 
-    const loaded = (gw as any).triks.get('test-no-mgmt-trik');
+    const loaded = (gw as any).triks.get('local/test-no-mgmt-trik');
     const ctx = (gw as any).buildTrikContext('test-session', loaded);
     expect(ctx.registry).toBeUndefined();
   });

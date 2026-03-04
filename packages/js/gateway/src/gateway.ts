@@ -1,5 +1,5 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
@@ -42,6 +42,8 @@ interface LoadedTrik {
   runtime: TrikRuntime;
   /** Whether this trik requires containerized execution (has filesystem/shell capabilities) */
   containerized: boolean;
+  /** Trusted scoped name used for resource isolation (e.g., "@alice/weather" or "local/my-trik") */
+  scopedName: string;
 }
 
 export interface TrikGatewayConfig {
@@ -350,7 +352,7 @@ export class TrikGateway {
       if (loaded.manifest.agent.mode !== 'conversational') continue;
 
       tools.push({
-        name: `talk_to_${trikId}`,
+        name: `talk_to_${this.toToolName(trikId)}`,
         description: loaded.manifest.agent.handoffDescription!,
         inputSchema: {
           type: 'object',
@@ -747,9 +749,9 @@ export class TrikGateway {
    * Build the TrikContext passed to a trik agent on each message.
    */
   private buildTrikContext(sessionId: string, loaded: LoadedTrik): TrikContext {
-    const configContext = this.configStore.getForTrik(loaded.manifest.id);
+    const configContext = this.configStore.getForTrik(loaded.scopedName);
     const storageContext = this.storageProvider.forTrik(
-      loaded.manifest.id,
+      loaded.scopedName,
       loaded.manifest.capabilities?.storage
     );
 
@@ -787,7 +789,7 @@ export class TrikGateway {
   // Trik Loading
   // ==========================================================================
 
-  async loadTrik(trikPath: string): Promise<TrikManifest> {
+  async loadTrik(trikPath: string, scopedName?: string): Promise<TrikManifest> {
     const manifestPath = join(trikPath, 'manifest.json');
     const manifestContent = await readFile(manifestPath, 'utf-8');
     const manifestData = JSON.parse(manifestContent);
@@ -799,8 +801,13 @@ export class TrikGateway {
 
     const manifest = manifestData as TrikManifest;
 
-    if (this.config.allowedTriks && !this.config.allowedTriks.includes(manifest.id)) {
-      throw new Error(`Trik "${manifest.id}" is not in the allowlist`);
+    // Determine scoped name for resource isolation
+    const resolvedScopedName = scopedName ?? this.resolveScopedName(trikPath, manifest);
+
+    if (this.config.allowedTriks &&
+        !this.config.allowedTriks.includes(resolvedScopedName) &&
+        !this.config.allowedTriks.includes(manifest.id)) {
+      throw new Error(`Trik "${manifest.id}" (${resolvedScopedName}) is not in the allowlist`);
     }
 
     // Validate required config
@@ -808,10 +815,18 @@ export class TrikGateway {
       const missingKeys = this.configStore.validateConfig(manifest);
       if (missingKeys.length > 0) {
         console.warn(
-          `[TrikGateway] Warning: trik "${manifest.id}" is missing required config: ${missingKeys.join(', ')}\n` +
-          `  Add to .trikhub/secrets.json: { "${manifest.id}": { ${missingKeys.map(k => `"${k}": "..."`).join(', ')} } }`
+          `[TrikGateway] Warning: trik "${resolvedScopedName}" is missing required config: ${missingKeys.join(', ')}\n` +
+          `  Add to .trikhub/secrets.json: { "${resolvedScopedName}": { ${missingKeys.map(k => `"${k}": "..."`).join(', ')} } }`
         );
       }
+    }
+
+    // Check for duplicate scoped names
+    if (this.triks.has(resolvedScopedName)) {
+      throw new Error(
+        `Duplicate trik identity "${resolvedScopedName}": ` +
+        `"${manifest.id}" at ${trikPath} conflicts with already-loaded trik`
+      );
     }
 
     const runtime: TrikRuntime = manifest.entry.runtime ?? 'node';
@@ -821,13 +836,13 @@ export class TrikGateway {
 
     if (containerized) {
       // Containerized triks — always run inside Docker regardless of runtime
-      const agent = this.createContainerAgentProxy(manifest, trikPath, runtime);
-      this.triks.set(manifest.id, { manifest, agent, path: trikPath, runtime, containerized });
+      const agent = this.createContainerAgentProxy(manifest, trikPath, runtime, resolvedScopedName);
+      this.triks.set(resolvedScopedName, { manifest, agent, path: trikPath, runtime, containerized, scopedName: resolvedScopedName });
     } else if (runtime === 'python') {
       // Python triks use the worker protocol — create a proxy TrikAgent
       await this.ensurePythonWorker();
-      const agent = this.createPythonAgentProxy(manifest, trikPath);
-      this.triks.set(manifest.id, { manifest, agent, path: trikPath, runtime, containerized });
+      const agent = this.createPythonAgentProxy(manifest, trikPath, resolvedScopedName);
+      this.triks.set(resolvedScopedName, { manifest, agent, path: trikPath, runtime, containerized, scopedName: resolvedScopedName });
     } else {
       // Node triks — dynamic import and extract TrikAgent
       const modulePath = join(trikPath, manifest.entry.module);
@@ -869,16 +884,44 @@ export class TrikGateway {
         }
       }
 
-      this.triks.set(manifest.id, { manifest, agent: agent as TrikAgent, path: trikPath, runtime, containerized });
+      this.triks.set(resolvedScopedName, { manifest, agent: agent as TrikAgent, path: trikPath, runtime, containerized, scopedName: resolvedScopedName });
     }
 
     return manifest;
   }
 
   /**
+   * Resolve the scoped name for a trik. Checks for .trikhub-identity.json first,
+   * falls back to local/<manifest.id> for dev triks.
+   */
+  private resolveScopedName(trikPath: string, manifest: TrikManifest): string {
+    const identityPath = join(trikPath, '.trikhub-identity.json');
+    if (existsSync(identityPath)) {
+      try {
+        const identity = JSON.parse(readFileSync(identityPath, 'utf-8'));
+        if (typeof identity.scopedName === 'string') {
+          return identity.scopedName;
+        }
+      } catch {
+        // Fall through to default
+      }
+    }
+    return `local/${manifest.id}`;
+  }
+
+  /**
+   * Convert a scoped name to a tool-safe identifier for handoff tools.
+   * @example "@alice/weather" -> "alice__weather"
+   * @example "local/weather" -> "local__weather"
+   */
+  private toToolName(scopedName: string): string {
+    return scopedName.replace(/^@/, '').replace(/\//g, '__');
+  }
+
+  /**
    * Create a proxy TrikAgent for Python triks that delegates to the worker protocol.
    */
-  private createPythonAgentProxy(manifest: TrikManifest, trikPath: string): TrikAgent {
+  private createPythonAgentProxy(manifest: TrikManifest, trikPath: string, scopedName?: string): TrikAgent {
     const agent: TrikAgent = {};
 
     if (manifest.agent.mode === 'conversational') {
@@ -893,7 +936,7 @@ export class TrikGateway {
             message,
             sessionId: context.sessionId,
             config: this.configToRecord(context.config),
-            storageNamespace: manifest.id,
+            storageNamespace: scopedName ?? manifest.id,
             capabilities: context.capabilities,
           });
 
@@ -924,7 +967,7 @@ export class TrikGateway {
             input,
             sessionId: context.sessionId,
             config: this.configToRecord(context.config),
-            storageNamespace: manifest.id,
+            storageNamespace: scopedName ?? manifest.id,
             capabilities: context.capabilities,
           });
 
@@ -945,15 +988,17 @@ export class TrikGateway {
   private createContainerAgentProxy(
     manifest: TrikManifest,
     trikPath: string,
-    runtime: TrikRuntime
+    runtime: TrikRuntime,
+    scopedName?: string,
   ): TrikAgent {
     const agent: TrikAgent = {};
 
     if (manifest.agent.mode === 'conversational') {
       agent.processMessage = async (message: string, context: TrikContext): Promise<TrikResponse> => {
         const manager = this.ensureContainerManager();
-        const workspacePath = manager.getWorkspacePath(manifest.id);
-        const handle = await manager.launch(manifest.id, {
+        const containerId = scopedName ?? manifest.id;
+        const workspacePath = manager.getWorkspacePath(containerId);
+        const handle = await manager.launch(containerId, {
           runtime,
           workspacePath,
           trikPath: resolve(trikPath),
@@ -967,7 +1012,7 @@ export class TrikGateway {
             message,
             sessionId: context.sessionId,
             config: this.configToRecord(context.config),
-            storageNamespace: manifest.id,
+            storageNamespace: scopedName ?? manifest.id,
             capabilities: context.capabilities,
           });
 
@@ -989,8 +1034,9 @@ export class TrikGateway {
         context: TrikContext
       ): Promise<ToolExecutionResult> => {
         const manager = this.ensureContainerManager();
-        const workspacePath = manager.getWorkspacePath(manifest.id);
-        const handle = await manager.launch(manifest.id, {
+        const containerId = scopedName ?? manifest.id;
+        const workspacePath = manager.getWorkspacePath(containerId);
+        const handle = await manager.launch(containerId, {
           runtime,
           workspacePath,
           trikPath: resolve(trikPath),
@@ -1005,7 +1051,7 @@ export class TrikGateway {
             input,
             sessionId: context.sessionId,
             config: this.configToRecord(context.config),
-            storageNamespace: manifest.id,
+            storageNamespace: scopedName ?? manifest.id,
             capabilities: context.capabilities,
           });
 
@@ -1256,7 +1302,7 @@ export class TrikGateway {
           }
         }
 
-        const manifest = await this.loadTrik(trikPath);
+        const manifest = await this.loadTrik(trikPath, trikName);
         manifests.push(manifest);
       } catch (error) {
         errors.push({

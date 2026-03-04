@@ -152,6 +152,14 @@ export class GatewayRegistryProvider implements TrikRegistryContext {
         rmSync(gitDir, { recursive: true, force: true });
       }
 
+      // Write identity file for trusted scoped name
+      const identityPath = join(trikDir, '.trikhub-identity.json');
+      const identity = {
+        scopedName: trikId,
+        installedAt: new Date().toISOString(),
+      };
+      writeFileSync(identityPath, JSON.stringify(identity, null, 2));
+
       this.addToConfig(trikId);
       await this.gateway.loadTrik(trikDir);
 

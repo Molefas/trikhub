@@ -118,10 +118,10 @@ describe('Gateway containerized trik detection', () => {
     const manifest = await gateway.loadTrik(trikPath);
 
     expect(manifest.id).toBe('fs-trik');
-    expect(gateway.isLoaded('fs-trik')).toBe(true);
+    expect(gateway.isLoaded('local/fs-trik')).toBe(true);
 
     // Access internal state to verify containerized flag
-    const loadedTrik = (gateway as any).triks.get('fs-trik');
+    const loadedTrik = (gateway as any).triks.get('local/fs-trik');
     expect(loadedTrik.containerized).toBe(true);
   });
 
@@ -140,7 +140,7 @@ describe('Gateway containerized trik detection', () => {
     const manifest = await gateway.loadTrik(trikPath);
     expect(manifest.id).toBe('builder-trik');
 
-    const loadedTrik = (gateway as any).triks.get('builder-trik');
+    const loadedTrik = (gateway as any).triks.get('local/builder-trik');
     expect(loadedTrik.containerized).toBe(true);
   });
 
@@ -154,7 +154,7 @@ describe('Gateway containerized trik detection', () => {
     const manifest = await gateway.loadTrik(trikPath);
     expect(manifest.id).toBe('normal-trik');
 
-    const loadedTrik = (gateway as any).triks.get('normal-trik');
+    const loadedTrik = (gateway as any).triks.get('local/normal-trik');
     expect(loadedTrik.containerized).toBe(false);
   });
 
@@ -171,7 +171,7 @@ describe('Gateway containerized trik detection', () => {
     await gateway.initialize();
 
     const manifest = await gateway.loadTrik(trikPath);
-    const loadedTrik = (gateway as any).triks.get('session-trik');
+    const loadedTrik = (gateway as any).triks.get('local/session-trik');
     expect(loadedTrik.containerized).toBe(false);
   });
 
@@ -187,7 +187,7 @@ describe('Gateway containerized trik detection', () => {
     await gateway.initialize();
 
     const manifest = await gateway.loadTrik(trikPath);
-    const loadedTrik = (gateway as any).triks.get('disabled-fs-trik');
+    const loadedTrik = (gateway as any).triks.get('local/disabled-fs-trik');
     expect(loadedTrik.containerized).toBe(false);
   });
 
@@ -205,7 +205,7 @@ describe('Gateway containerized trik detection', () => {
     await gateway.initialize();
 
     const manifest = await gateway.loadTrik(trikPath);
-    const loadedTrik = (gateway as any).triks.get('py-builder');
+    const loadedTrik = (gateway as any).triks.get('local/py-builder');
     expect(loadedTrik.containerized).toBe(true);
     // Python containerized triks should NOT trigger NodeWorker
     expect((gateway as any).pythonWorker).toBeNull();
@@ -226,7 +226,7 @@ describe('Gateway buildTrikContext with capabilities', () => {
     await gateway.initialize();
     await gateway.loadTrik(trikPath);
 
-    const loadedTrik = (gateway as any).triks.get('ctx-trik');
+    const loadedTrik = (gateway as any).triks.get('local/ctx-trik');
     const context = (gateway as any).buildTrikContext('test-session', loadedTrik);
 
     expect(context.capabilities).toBeDefined();
@@ -242,7 +242,7 @@ describe('Gateway buildTrikContext with capabilities', () => {
     await gateway.initialize();
     await gateway.loadTrik(trikPath);
 
-    const loadedTrik = (gateway as any).triks.get('plain-trik');
+    const loadedTrik = (gateway as any).triks.get('local/plain-trik');
     const context = (gateway as any).buildTrikContext('test-session', loadedTrik);
 
     expect(context.capabilities).toBeUndefined();

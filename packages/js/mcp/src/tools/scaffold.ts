@@ -859,7 +859,7 @@ export function scaffoldTrik(input: ScaffoldInput): ScaffoldResult {
     }
   }
 
-  // Config secrets template
+  // Config secrets template (scoped by trik identity, e.g. "@yourname/my-trik")
   if (input.capabilities?.config && input.capabilities.config.length > 0) {
     const secrets: Record<string, string> = {};
     const secretsExample: Record<string, string> = {};
@@ -867,13 +867,14 @@ export function scaffoldTrik(input: ScaffoldInput): ScaffoldResult {
       secrets[cfg.key] = '';
       secretsExample[cfg.key] = `your-${cfg.key.toLowerCase().replace(/_/g, '-')}-here`;
     }
+    const scopedKey = `@yourname/${input.name}`;
     files.push({
       path: '.trikhub/secrets.json',
-      content: JSON.stringify(secrets, null, 2),
+      content: JSON.stringify({ [scopedKey]: secrets }, null, 2),
     });
     files.push({
       path: '.trikhub/secrets.json.example',
-      content: JSON.stringify(secretsExample, null, 2),
+      content: JSON.stringify({ [scopedKey]: secretsExample }, null, 2),
     });
     nextSteps.push(`- Copy .trikhub/secrets.json.example to .trikhub/secrets.json and add your API keys`);
   }

@@ -128,8 +128,8 @@ class TestGatewayContainerizedDetection:
             manifest = await gateway.load_trik(trik_path)
 
             assert manifest.id == "fs-trik"
-            assert gateway.is_loaded("fs-trik")
-            loaded = gateway._triks["fs-trik"]
+            assert gateway.is_loaded("local/fs-trik")
+            loaded = gateway._triks["local/fs-trik"]
             assert loaded.containerized is True
 
     @pytest.mark.asyncio
@@ -147,7 +147,7 @@ class TestGatewayContainerizedDetection:
             await gateway.initialize()
             manifest = await gateway.load_trik(trik_path)
 
-            loaded = gateway._triks["builder-trik"]
+            loaded = gateway._triks["local/builder-trik"]
             assert loaded.containerized is True
 
     @pytest.mark.asyncio
@@ -158,7 +158,7 @@ class TestGatewayContainerizedDetection:
             await gateway.initialize()
             await gateway.load_trik(trik_path)
 
-            loaded = gateway._triks["normal-trik"]
+            loaded = gateway._triks["local/normal-trik"]
             assert loaded.containerized is False
 
     @pytest.mark.asyncio
@@ -176,7 +176,7 @@ class TestGatewayContainerizedDetection:
             await gateway.initialize()
             await gateway.load_trik(trik_path)
 
-            loaded = gateway._triks["session-trik"]
+            loaded = gateway._triks["local/session-trik"]
             assert loaded.containerized is False
 
     @pytest.mark.asyncio
@@ -191,7 +191,7 @@ class TestGatewayContainerizedDetection:
             await gateway.initialize()
             await gateway.load_trik(trik_path)
 
-            loaded = gateway._triks["disabled-fs"]
+            loaded = gateway._triks["local/disabled-fs"]
             assert loaded.containerized is False
 
     @pytest.mark.asyncio
@@ -210,7 +210,7 @@ class TestGatewayContainerizedDetection:
             await gateway.initialize()
             await gateway.load_trik(trik_path)
 
-            loaded = gateway._triks["js-builder"]
+            loaded = gateway._triks["local/js-builder"]
             assert loaded.containerized is True
             # Should NOT have triggered node worker
             assert gateway._node_worker is None
@@ -237,7 +237,7 @@ class TestGatewayBuildTrikContextCapabilities:
             await gateway.initialize()
             await gateway.load_trik(trik_path)
 
-            loaded = gateway._triks["ctx-trik"]
+            loaded = gateway._triks["local/ctx-trik"]
             ctx = gateway._build_trik_context("test-session", loaded)
 
             assert ctx.capabilities is not None
@@ -254,7 +254,7 @@ class TestGatewayBuildTrikContextCapabilities:
             await gateway.initialize()
             await gateway.load_trik(trik_path)
 
-            loaded = gateway._triks["plain-trik"]
+            loaded = gateway._triks["local/plain-trik"]
             ctx = gateway._build_trik_context("test-session", loaded)
 
             assert ctx.capabilities is None
