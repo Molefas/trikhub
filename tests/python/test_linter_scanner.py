@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -247,3 +248,27 @@ def test_xcheck_dynamic_code_flagged(tmp_path: Path) -> None:
     manifest = {"capabilities": {}}
     errors = cross_check_manifest(scan, manifest)
     assert any(e["category"] == "dynamic_code" for e in errors)
+
+
+# ── Integration: scan + cross-check via lint pipeline ─────────────────────
+
+
+def test_lint_cross_check_fails_on_undeclared_subprocess(tmp_path: Path) -> None:
+    """Integration: scan + cross-check detects undeclared process usage."""
+    manifest = {
+        "schemaVersion": 2,
+        "id": "xcheck-test",
+        "name": "xcheck-test",
+        "description": "test",
+        "version": "1.0.0",
+        "agent": {"mode": "conversational", "handoffDescription": "test test test", "systemPrompt": "test", "domain": ["t"]},
+        "entry": {"module": "agent.py", "export": "default"},
+        "capabilities": {},
+    }
+    _write(tmp_path / "manifest.json", json.dumps(manifest))
+    _write(tmp_path / "agent.py", "import subprocess\n")
+
+    scan = scan_capabilities(tmp_path)
+    errors = cross_check_manifest(scan, manifest)
+    assert len(errors) > 0
+    assert any(e["capability"] == "shell" for e in errors)
