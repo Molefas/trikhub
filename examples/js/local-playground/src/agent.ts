@@ -1,6 +1,6 @@
 import { createReactAgent } from '@langchain/langgraph/prebuilt';
 import { TrikGateway } from '@trikhub/gateway';
-import { enhance, getHandoffToolsForAgent, getExposedToolsForAgent } from '@trikhub/gateway/langchain';
+import { enhance } from '@trikhub/gateway/langchain';
 import { builtInTools } from './tools.js';
 import { createLLM, getProviderInfo } from './llm.js';
 
@@ -18,23 +18,16 @@ export async function initializeAgent() {
   await gateway.initialize();
   await gateway.loadTriksFromConfig();
 
-  // Build handoff tools (conversational triks) and exposed tools (tool-mode triks)
-  const handoffTools = getHandoffToolsForAgent(gateway);
-  const exposedTools = getExposedToolsForAgent(gateway);
-
-  // Create main agent with built-in + handoff + exposed tools
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LangChain v0.3→v1 type mismatch (gateway typed against 0.3.x)
-  const allTools = [...builtInTools, ...handoffTools, ...exposedTools] as any;
-  const agent = createReactAgent({
-    llm: model,
-    tools: allTools,
-    messageModifier: SYSTEM_PROMPT,
-  });
-
-  // Enhance with handoff routing
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- same v0.3→v1 type mismatch
-  const app = await enhance(agent as any, {
+  // Enhance with handoff routing — createAgent rebuilds the agent when triks change
+  const app = await enhance(null, {
     gatewayInstance: gateway,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LangChain v0.3→v1 type mismatch (gateway typed against 0.3.x)
+    createAgent: (trikTools) =>
+      createReactAgent({
+        llm: model,
+        tools: [...builtInTools, ...trikTools] as any,
+        messageModifier: SYSTEM_PROMPT,
+      }),
     debug: !!process.env.TRIKHUB_DEBUG || !!process.env.TRIKHUB_VERBOSE,
     verbose: !!process.env.TRIKHUB_VERBOSE,
   });
@@ -42,8 +35,6 @@ export async function initializeAgent() {
   return {
     app,
     loadedTriks: app.getLoadedTriks(),
-    handoffTools: handoffTools.map((t) => t.name),
-    exposedTools: exposedTools.map((t) => t.name),
     provider: providerInfo,
   };
 }
