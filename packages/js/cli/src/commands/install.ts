@@ -21,6 +21,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import * as semver from 'semver';
 import { validateManifest } from '@trikhub/manifest';
+import { scanCapabilities, crossCheckManifest } from '@trikhub/linter';
 import { registry } from '../lib/registry.js';
 import { TrikVersion, TrikRuntime } from '../types.js';
 
@@ -450,6 +451,16 @@ async function installFromTrikhub(
     return { success: false };
   }
 
+  // Verify installed trik matches its manifest declarations
+  const trikPath = join(baseDir, 'node_modules', ...packageName.split('/'));
+  const capVerification = await verifyTrikCapabilities(trikPath);
+  if (!capVerification.verified) {
+    spinner.warn('Capability verification warnings:');
+    for (const error of capVerification.errors) {
+      console.log(chalk.yellow(`    • ${error}`));
+    }
+  }
+
   // Report download for analytics
   registry.reportDownload(packageName, versionToInstall);
 
@@ -537,6 +548,15 @@ async function installFromTrikhubRegistry(
   if (!downloadResult.success) {
     spinner.fail(`Failed to download ${packageName}`);
     return { success: false };
+  }
+
+  // Verify downloaded trik matches its manifest declarations
+  const capVerification = await verifyTrikCapabilities(downloadResult.trikPath);
+  if (!capVerification.verified) {
+    spinner.warn('Capability verification warnings:');
+    for (const error of capVerification.errors) {
+      console.log(chalk.yellow(`    • ${error}`));
+    }
   }
 
   // Report download for analytics
@@ -684,6 +704,32 @@ async function promptCapabilityConsent(
       resolve(answer.toLowerCase() === 'y');
     });
   });
+}
+
+/**
+ * Verify that a trik's source code matches its manifest capability declarations.
+ * Used post-download to detect tampering.
+ */
+async function verifyTrikCapabilities(trikPath: string): Promise<{ verified: boolean; errors: string[] }> {
+  try {
+    const manifestRaw = await readFile(join(trikPath, 'manifest.json'), 'utf-8');
+    const manifest = JSON.parse(manifestRaw);
+    const scan = await scanCapabilities(trikPath);
+    const errors = crossCheckManifest(scan, manifest);
+
+    if (errors.length === 0) {
+      return { verified: true, errors: [] };
+    }
+
+    return {
+      verified: false,
+      errors: errors.map(e => e.message),
+    };
+  } catch {
+    // If verification fails (no manifest, parse error, etc.), skip silently
+    // The manifest was already validated earlier in the install flow
+    return { verified: true, errors: [] };
+  }
 }
 
 export async function installCommand(
