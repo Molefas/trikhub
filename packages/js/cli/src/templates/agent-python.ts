@@ -102,8 +102,7 @@ from __future__ import annotations
 from ${provider.importPath} import ${provider.className}
 from langgraph.prebuilt import create_react_agent
 
-from trikhub.gateway import TrikGateway
-from trikhub.langchain import enhance, get_handoff_tools_for_agent, get_exposed_tools_for_agent
+from trikhub.langchain import enhance, EnhanceOptions
 
 SYSTEM_PROMPT = """You are a helpful assistant.
 When a trik can handle the user's request, use the appropriate tool."""
@@ -112,22 +111,15 @@ When a trik can handle the user's request, use the appropriate tool."""
 async def initialize_agent():
     model = ${provider.className}(model="${provider.defaultModel}")
 
-    gateway = TrikGateway()
-    await gateway.initialize()
-    await gateway.load_triks_from_config()
+    app = await enhance(None, EnhanceOptions(
+        create_agent=lambda trik_tools: create_react_agent(
+            model=model,
+            tools=list(trik_tools),
+            prompt=SYSTEM_PROMPT,
+        ),
+    ))
 
-    handoff_tools = get_handoff_tools_for_agent(gateway)
-    exposed_tools = get_exposed_tools_for_agent(gateway)
-
-    agent = create_react_agent(
-        model=model,
-        tools=[*handoff_tools, *exposed_tools],
-        prompt=SYSTEM_PROMPT,
-    )
-
-    app = await enhance(agent, gateway_instance=gateway)
-
-    return app, handoff_tools, exposed_tools
+    return app
 `;
 }
 
@@ -149,12 +141,11 @@ from agent import initialize_agent
 async def main() -> None:
     print("Loading agent...\\n")
 
-    app, handoff_tools, exposed_tools = await initialize_agent()
+    app = await initialize_agent()
 
-    if handoff_tools:
-        print(f"Handoff triks: {', '.join(t.name for t in handoff_tools)}")
-    if exposed_tools:
-        print(f"Tool-mode triks: {', '.join(t.name for t in exposed_tools)}")
+    loaded_triks = app.get_loaded_triks()
+    if loaded_triks:
+        print(f"Loaded triks: {', '.join(loaded_triks)}")
     print('Type "/back" to return from a trik handoff, "exit" to quit.\\n')
 
     session_id = f"cli-{id(app)}"
@@ -218,12 +209,11 @@ logger = logging.getLogger(__name__)
 async def main() -> None:
     print("Loading agent...\\n")
 
-    app, handoff_tools, exposed_tools = await initialize_agent()
+    app = await initialize_agent()
 
-    if handoff_tools:
-        print(f"Handoff triks: {', '.join(t.name for t in handoff_tools)}")
-    if exposed_tools:
-        print(f"Tool-mode triks: {', '.join(t.name for t in exposed_tools)}")
+    loaded_triks = app.get_loaded_triks()
+    if loaded_triks:
+        print(f"Loaded triks: {', '.join(loaded_triks)}")
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
