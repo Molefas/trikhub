@@ -567,3 +567,88 @@ class TestTriksDirectory:
                 ),
             )
             assert "local/auto-trik" in app.get_loaded_triks()
+
+
+# ============================================================================
+# Tests — create_agent factory
+# ============================================================================
+
+
+class TestCreateAgentFactory:
+    @pytest.mark.asyncio
+    async def test_enhance_with_create_agent_factory(self):
+        """enhance() should accept create_agent and rebuild agent on trik changes."""
+        call_count = 0
+
+        def agent_factory(trik_tools):
+            nonlocal call_count
+            call_count += 1
+            return MockAgent()
+
+        gateway = TrikGateway(TrikGatewayConfig(
+            config_store=InMemoryConfigStore(),
+            storage_provider=InMemoryStorageProvider(),
+            session_storage=InMemorySessionStorage(),
+        ))
+        await gateway.initialize()
+
+        app = await enhance(
+            None,
+            EnhanceOptions(
+                gateway_instance=gateway,
+                create_agent=agent_factory,
+            ),
+        )
+
+        # Factory should have been called once during setup
+        assert call_count == 1
+        assert app is not None
+
+    @pytest.mark.asyncio
+    async def test_create_agent_rebuilds_on_trik_load(self):
+        """Agent should be rebuilt when a trik is loaded."""
+        call_count = 0
+
+        def agent_factory(trik_tools):
+            nonlocal call_count
+            call_count += 1
+            return MockAgent()
+
+        gateway = TrikGateway(TrikGatewayConfig(
+            config_store=InMemoryConfigStore(),
+            storage_provider=InMemoryStorageProvider(),
+            session_storage=InMemorySessionStorage(),
+        ))
+        await gateway.initialize()
+
+        app = await enhance(
+            None,
+            EnhanceOptions(
+                gateway_instance=gateway,
+                create_agent=agent_factory,
+            ),
+        )
+        assert call_count == 1
+
+        # Load a trik — should trigger rebuild
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _create_trik_dir(tmpdir, "rebuild-trik")
+            await gateway.load_trik(os.path.join(tmpdir, "rebuild-trik"))
+
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_enhance_raises_without_agent_or_factory(self):
+        """enhance() should raise if neither agent nor create_agent provided."""
+        gateway = TrikGateway(TrikGatewayConfig(
+            config_store=InMemoryConfigStore(),
+            storage_provider=InMemoryStorageProvider(),
+            session_storage=InMemorySessionStorage(),
+        ))
+        await gateway.initialize()
+
+        with pytest.raises(ValueError, match="requires either"):
+            await enhance(
+                None,
+                EnhanceOptions(gateway_instance=gateway),
+            )

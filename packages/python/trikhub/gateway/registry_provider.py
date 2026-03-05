@@ -352,4 +352,11 @@ class GatewayRegistryProvider:
 
         config = json.loads(config_path.read_text())
         config["triks"] = [t for t in config.get("triks", []) if t != trik_id]
+
+        # Clean up version and runtime tracking
+        if "trikhub" in config:
+            config["trikhub"].pop(trik_id, None)
+        if "runtimes" in config:
+            config["runtimes"].pop(trik_id, None)
+
         config_path.write_text(json.dumps(config, indent=2))

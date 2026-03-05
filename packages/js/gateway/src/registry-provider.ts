@@ -328,6 +328,15 @@ export class GatewayRegistryProvider implements TrikRegistryContext {
 
     const config = JSON.parse(readFileSync(configPath, 'utf-8'));
     config.triks = (config.triks ?? []).filter((t: string) => t !== trikId);
+
+    // Clean up version and runtime tracking
+    if (config.trikhub) {
+      delete config.trikhub[trikId];
+    }
+    if (config.runtimes) {
+      delete config.runtimes[trikId];
+    }
+
     writeFileSync(configPath, JSON.stringify(config, null, 2));
   }
 }

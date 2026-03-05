@@ -92,8 +92,7 @@ from __future__ import annotations
 from {provider['importPath']} import {provider['className']}
 from langgraph.prebuilt import create_react_agent
 
-from trikhub.gateway import TrikGateway
-from trikhub.langchain import enhance, get_handoff_tools_for_agent, get_exposed_tools_for_agent
+from trikhub.langchain import enhance, EnhanceOptions
 
 SYSTEM_PROMPT = """You are a helpful assistant.
 When a trik can handle the user's request, use the appropriate tool."""
@@ -102,22 +101,15 @@ When a trik can handle the user's request, use the appropriate tool."""
 async def initialize_agent():
     model = {provider['className']}(model="{provider['defaultModel']}")
 
-    gateway = TrikGateway()
-    await gateway.initialize()
-    await gateway.load_triks_from_config()
+    app = await enhance(None, EnhanceOptions(
+        create_agent=lambda trik_tools: create_react_agent(
+            model=model,
+            tools=list(trik_tools),
+            prompt=SYSTEM_PROMPT,
+        ),
+    ))
 
-    handoff_tools = get_handoff_tools_for_agent(gateway)
-    exposed_tools = get_exposed_tools_for_agent(gateway)
-
-    agent = create_react_agent(
-        model=model,
-        tools=[*handoff_tools, *exposed_tools],
-        prompt=SYSTEM_PROMPT,
-    )
-
-    app = await enhance(agent, gateway_instance=gateway)
-
-    return app, handoff_tools, exposed_tools
+    return app
 '''
 
 
@@ -140,12 +132,11 @@ def _generate_cli_py() -> str:
         'async def main() -> None:\n'
         '    print("Loading agent...\\n")\n'
         '\n'
-        '    app, handoff_tools, exposed_tools = await initialize_agent()\n'
+        '    app = await initialize_agent()\n'
         '\n'
-        '    if handoff_tools:\n'
-        "        print(f\"Handoff triks: {', '.join(t.name for t in handoff_tools)}\")\n"
-        '    if exposed_tools:\n'
-        "        print(f\"Tool-mode triks: {', '.join(t.name for t in exposed_tools)}\")\n"
+        '    loaded_triks = app.get_loaded_triks()\n'
+        '    if loaded_triks:\n'
+        "        print(f\"Loaded triks: {', '.join(loaded_triks)}\")\n"
         '    print(\'Type "/back" to return from a trik handoff, "exit" to quit.\\n\')\n'
         '\n'
         '    session_id = f"cli-{id(app)}"\n'

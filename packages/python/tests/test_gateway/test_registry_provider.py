@@ -503,3 +503,33 @@ async def test_get_info_returns_none_on_exception():
 
             result = await provider.get_info("@test/trik")
             assert result is None
+
+
+# ============================================================================
+# _remove_from_config cleanup
+# ============================================================================
+
+
+def test_remove_from_config_cleans_all_fields():
+    """_remove_from_config should remove trik from triks, trikhub, and runtimes."""
+    with tempfile.TemporaryDirectory() as config_dir:
+        config_path = Path(config_dir) / "config.json"
+        trik_id = "@test/cleanup"
+        config_path.write_text(json.dumps({
+            "triks": [trik_id, "@test/other"],
+            "trikhub": {trik_id: "1.0.0", "@test/other": "2.0.0"},
+            "runtimes": {trik_id: "node", "@test/other": "python"},
+        }))
+
+        gateway = create_mock_gateway()
+        provider = GatewayRegistryProvider(
+            config_dir=config_dir,
+            gateway=gateway,
+        )
+
+        provider._remove_from_config(trik_id)
+
+        config = json.loads(config_path.read_text())
+        assert config["triks"] == ["@test/other"]
+        assert config["trikhub"] == {"@test/other": "2.0.0"}
+        assert config["runtimes"] == {"@test/other": "python"}

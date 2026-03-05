@@ -729,10 +729,13 @@ import { ChatAnthropic } from '@langchain/anthropic';
 import { enhance } from '@trikhub/gateway/langchain';
 
 const model = new ChatAnthropic({ model: 'claude-sonnet-4-6' });
-const agent = createReactAgent({ llm: model, tools: myTools });
 
-// enhance() loads triks from .trikhub/config.json and wraps your agent
-const app = await enhance(agent);
+// enhance() loads triks and manages agent lifecycle — the agent is
+// automatically rebuilt when triks are installed or uninstalled at runtime.
+const app = await enhance(null, {
+  createAgent: (trikTools) =>
+    createReactAgent({ llm: model, tools: [...myTools, ...trikTools] }),
+});
 
 const response = await app.processMessage('Hello');
 console.log(response.message);  // What to show the user
@@ -743,21 +746,25 @@ console.log(response.source);   // "main" or trik ID
 \`\`\`python
 from langgraph.prebuilt import create_react_agent
 from langchain_anthropic import ChatAnthropic
-from trikhub.langchain import enhance
+from trikhub.langchain import enhance, EnhanceOptions
 
 model = ChatAnthropic(model="claude-sonnet-4-6")
-agent = create_react_agent(model=model, tools=my_tools)
 
-app = await enhance(agent)
+app = await enhance(None, EnhanceOptions(
+    create_agent=lambda trik_tools: create_react_agent(
+        model=model, tools=[*my_tools, *trik_tools],
+    ),
+))
 
 response = await app.process_message("Hello")
 print(response.message)
 print(response.source)
 \`\`\`
 
-\`enhance()\` creates a gateway, loads triks, generates handoff tools (\`talk_to_X\`) for conversational
-triks and exposes tool-mode tools directly, then wraps the agent with routing. For more control
-(custom gateway config, manual tool setup), use the Gateway API directly with \`TrikGateway\`.
+\`enhance()\` creates a gateway, loads triks, and manages the agent lifecycle. When using
+\`createAgent\`, the agent is automatically rebuilt when triks are installed or uninstalled at
+runtime. For advanced use cases where you need manual control over tool binding, the
+\`getHandoffToolsForAgent()\` and \`getExposedToolsForAgent()\` helpers are still available.
 `;
 
 // ============================================================================

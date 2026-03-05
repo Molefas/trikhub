@@ -103,12 +103,9 @@ describe('generateAgentTypescriptProject', () => {
     const files = generateAgentTypescriptProject({ name: 'my-agent', provider: 'openai' });
     const agent = files['src/agent.ts'];
 
-    expect(agent).toContain("from '@trikhub/gateway'");
     expect(agent).toContain("from '@trikhub/gateway/langchain'");
-    expect(agent).toContain('TrikGateway');
     expect(agent).toContain('enhance');
-    expect(agent).toContain('getHandoffToolsForAgent');
-    expect(agent).toContain('getExposedToolsForAgent');
+    expect(agent).toContain('createAgent');
   });
 
   it('includes processMessage in cli.ts', () => {
@@ -203,10 +200,8 @@ describe('generateAgentPythonProject', () => {
     const files = generateAgentPythonProject({ name: 'my-agent', provider: 'openai' });
     const agent = files['agent.py'];
 
-    expect(agent).toContain('from trikhub.gateway import TrikGateway');
     expect(agent).toContain('from trikhub.langchain import enhance');
-    expect(agent).toContain('get_handoff_tools_for_agent');
-    expect(agent).toContain('get_exposed_tools_for_agent');
+    expect(agent).toContain('create_agent');
   });
 
   it('includes process_message in cli.py', () => {

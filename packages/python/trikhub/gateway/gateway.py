@@ -218,6 +218,7 @@ class TrikGateway:
         self._trik_loader = TrikLoader()
         self._triks: dict[str, _LoadedTrik] = {}
         self._active_handoff: _ActiveHandoff | None = None
+        self._event_listeners: dict[str, list] = {}
 
         # Compute config dir for registry provider
         if cfg.triks_directory:
@@ -271,13 +272,15 @@ class TrikGateway:
     async def start_handoff(
         self, trik_id: str, context: str, session_id: str
     ) -> RouteToTrik | RouteTransferBack:
-        loaded = self._triks.get(trik_id)
+        # trik_id may be a tool-safe name (e.g. "molefas__trikster") — resolve to scoped name
+        resolved_id = trik_id if trik_id in self._triks else self._from_tool_name(trik_id)
+        loaded = self._triks.get(resolved_id)
         if loaded is None:
             raise ValueError(f'Trik "{trik_id}" is not loaded')
 
-        handoff_session = self._session_storage.create_session(trik_id)
+        handoff_session = self._session_storage.create_session(resolved_id)
         self._active_handoff = _ActiveHandoff(
-            trik_id=trik_id,
+            trik_id=resolved_id,
             session_id=handoff_session.sessionId,
             turn_count=0,
         )
@@ -736,7 +739,7 @@ class TrikGateway:
 
         # Validate required config
         if self._config.validate_config is not False:
-            missing_keys = self._config_store.validate_config(manifest)
+            missing_keys = self._config_store.validate_config(manifest, resolved_scoped_name)
             if missing_keys:
                 keys_str = ", ".join(missing_keys)
                 json_example = ", ".join(f'"{k}": "..."' for k in missing_keys)
@@ -803,6 +806,7 @@ class TrikGateway:
                 scoped_name=resolved_scoped_name,
             )
 
+        self._emit("trik:loaded", {"trik_id": resolved_scoped_name, "manifest": manifest})
         return manifest
 
     @staticmethod
@@ -831,6 +835,23 @@ class TrikGateway:
             local/weather -> local__weather
         """
         return scoped_name.lstrip("@").replace("/", "__")
+
+    @staticmethod
+    def _from_tool_name(tool_name: str) -> str:
+        """Convert a tool-safe identifier back to a scoped name.
+
+        Examples:
+            alice__weather -> @alice/weather
+            local__weather -> local/weather
+        """
+        idx = tool_name.find("__")
+        if idx == -1:
+            return tool_name
+        scope = tool_name[:idx]
+        name = tool_name[idx + 2:]
+        if scope == "local":
+            return f"local/{name}"
+        return f"@{scope}/{name}"
 
     def _create_node_agent_proxy(
         self, manifest: TrikManifest, trik_path: str, scoped_name: str | None = None
@@ -1136,8 +1157,26 @@ class TrikGateway:
     def is_loaded(self, trik_id: str) -> bool:
         return trik_id in self._triks
 
+    def on(self, event: str, callback) -> None:
+        """Register a callback for a lifecycle event."""
+        self._event_listeners.setdefault(event, []).append(callback)
+
+    def off(self, event: str, callback) -> None:
+        """Remove a callback for a lifecycle event."""
+        listeners = self._event_listeners.get(event, [])
+        if callback in listeners:
+            listeners.remove(callback)
+
+    def _emit(self, event: str, payload: dict) -> None:
+        """Emit a lifecycle event to all registered callbacks."""
+        for cb in self._event_listeners.get(event, []):
+            cb(payload)
+
     def unload_trik(self, trik_id: str) -> bool:
-        return self._triks.pop(trik_id, None) is not None
+        removed = self._triks.pop(trik_id, None) is not None
+        if removed:
+            self._emit("trik:unloaded", {"trik_id": trik_id})
+        return removed
 
 
 # ============================================================================

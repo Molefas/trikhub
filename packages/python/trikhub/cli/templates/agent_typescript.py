@@ -122,8 +122,7 @@ dist/
 def _generate_agent_ts(config: CreateAgentConfig, provider: dict[str, str]) -> str:
     return f"""import {{ {provider['className']} }} from '{provider['importPath']}';
 import {{ createReactAgent }} from '@langchain/langgraph/prebuilt';
-import {{ TrikGateway }} from '@trikhub/gateway';
-import {{ enhance, getHandoffToolsForAgent, getExposedToolsForAgent }} from '@trikhub/gateway/langchain';
+import {{ enhance }} from '@trikhub/gateway/langchain';
 
 const SYSTEM_PROMPT = `You are a helpful assistant.
 When a trik can handle the user's request, use the appropriate tool.`;
@@ -131,22 +130,16 @@ When a trik can handle the user's request, use the appropriate tool.`;
 export async function initializeAgent() {{
   const model = new {provider['className']}({{ {provider['modelParam']}: '{provider['defaultModel']}' }});
 
-  const gateway = new TrikGateway();
-  await gateway.initialize();
-  await gateway.loadTriksFromConfig();
-
-  const handoffTools = getHandoffToolsForAgent(gateway);
-  const exposedTools = getExposedToolsForAgent(gateway);
-
-  const agent = createReactAgent({{
-    llm: model,
-    tools: [...handoffTools, ...exposedTools] as any,
-    messageModifier: SYSTEM_PROMPT,
+  const app = await enhance(null, {{
+    createAgent: (trikTools) =>
+      createReactAgent({{
+        llm: model,
+        tools: [...trikTools] as any,
+        messageModifier: SYSTEM_PROMPT,
+      }}),
   }});
 
-  const app = await enhance(agent as any, {{ gatewayInstance: gateway }});
-
-  return {{ app, handoffTools, exposedTools }};
+  return app;
 }}
 """
 
@@ -170,13 +163,11 @@ function prompt(question: string): Promise<string> {
 async function main() {
   console.log('Loading agent...\n');
 
-  const { app, handoffTools, exposedTools } = await initializeAgent();
+  const app = await initializeAgent();
 
-  if (handoffTools.length > 0) {
-    console.log(`Handoff triks: ${handoffTools.map((t) => t.name).join(', ')}`);
-  }
-  if (exposedTools.length > 0) {
-    console.log(`Tool-mode triks: ${exposedTools.map((t) => t.name).join(', ')}`);
+  const loadedTriks = app.getLoadedTriks();
+  if (loadedTriks.length > 0) {
+    console.log(`Loaded triks: ${loadedTriks.join(', ')}`);
   }
   console.log('Type "/back" to return from a trik handoff, "exit" to quit.\n');
 

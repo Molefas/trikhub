@@ -864,7 +864,7 @@ async def test_load_trik_no_warn_when_config_present(capfd):
         })
 
         config_store = InMemoryConfigStore()
-        config_store.set_for_trik("has-config", {"API_KEY": "my-key"})
+        config_store.set_for_trik("local/has-config", {"API_KEY": "my-key"})
 
         gw = TrikGateway(TrikGatewayConfig(
             config_store=config_store,
@@ -929,7 +929,7 @@ async def test_load_trik_warns_only_missing_keys(capfd):
         })
 
         config_store = InMemoryConfigStore()
-        config_store.set_for_trik("partial-config", {"API_KEY": "my-key"})
+        config_store.set_for_trik("local/partial-config", {"API_KEY": "my-key"})
 
         gw = TrikGateway(TrikGatewayConfig(
             config_store=config_store,
@@ -1088,3 +1088,67 @@ async def test_registry_provider_property():
     ))
 
     assert isinstance(gw.registry_provider, GatewayRegistryProvider)
+
+
+# ============================================================================
+# Event tests
+# ============================================================================
+
+
+class TestGatewayEvents:
+    """Tests for trik lifecycle events."""
+
+    @pytest.mark.asyncio
+    async def test_emits_trik_loaded(self, tmp_path):
+        """Gateway should emit trik:loaded after load_trik."""
+        gw = TrikGateway(TrikGatewayConfig(
+            config_store=InMemoryConfigStore(),
+            storage_provider=InMemoryStorageProvider(),
+            session_storage=InMemorySessionStorage(),
+        ))
+        await gw.initialize()
+
+        trik_dir = _create_trik_dir(str(tmp_path), "event-trik")
+        events = []
+        gw.on("trik:loaded", lambda payload: events.append(payload))
+
+        await gw.load_trik(trik_dir)
+
+        assert len(events) == 1
+        assert events[0]["trik_id"] == "local/event-trik"
+        assert events[0]["manifest"].id == "event-trik"
+
+    @pytest.mark.asyncio
+    async def test_emits_trik_unloaded(self, tmp_path):
+        """Gateway should emit trik:unloaded after unload_trik."""
+        gw = TrikGateway(TrikGatewayConfig(
+            config_store=InMemoryConfigStore(),
+            storage_provider=InMemoryStorageProvider(),
+            session_storage=InMemorySessionStorage(),
+        ))
+        await gw.initialize()
+
+        trik_dir = _create_trik_dir(str(tmp_path), "unload-trik")
+        await gw.load_trik(trik_dir)
+
+        events = []
+        gw.on("trik:unloaded", lambda payload: events.append(payload))
+        gw.unload_trik("local/unload-trik")
+
+        assert len(events) == 1
+        assert events[0]["trik_id"] == "local/unload-trik"
+
+    @pytest.mark.asyncio
+    async def test_no_event_for_unknown_unload(self):
+        """No event should fire for unloading a non-existent trik."""
+        gw = TrikGateway(TrikGatewayConfig(
+            config_store=InMemoryConfigStore(),
+            storage_provider=InMemoryStorageProvider(),
+            session_storage=InMemorySessionStorage(),
+        ))
+        await gw.initialize()
+
+        events = []
+        gw.on("trik:unloaded", lambda payload: events.append(payload))
+        gw.unload_trik("nonexistent")
+        assert len(events) == 0

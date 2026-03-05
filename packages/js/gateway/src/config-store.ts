@@ -59,8 +59,10 @@ export interface ConfigStore {
   /**
    * Validate that all required config values are present for a trik.
    * Returns an array of missing required keys, or empty array if all present.
+   * @param manifest - The trik manifest to validate
+   * @param trikId - The scoped trik ID to look up config for (e.g., "@alice/weather")
    */
-  validateConfig(manifest: TrikManifest): string[];
+  validateConfig(manifest: TrikManifest, trikId?: string): string[];
 
   /**
    * Get all configured trik IDs.
@@ -188,14 +190,14 @@ export class FileConfigStore implements ConfigStore {
     return new ConfigContext(mergedConfig);
   }
 
-  validateConfig(manifest: TrikManifest): string[] {
+  validateConfig(manifest: TrikManifest, trikId?: string): string[] {
     const missingKeys: string[] = [];
 
     if (!manifest.config?.required || manifest.config.required.length === 0) {
       return missingKeys;
     }
 
-    const configContext = this.getForTrik(manifest.id);
+    const configContext = this.getForTrik(trikId ?? manifest.id);
 
     for (const requirement of manifest.config.required) {
       if (!configContext.has(requirement.key)) {
@@ -280,14 +282,14 @@ export class InMemoryConfigStore implements ConfigStore {
     return new ConfigContext(config, defaults);
   }
 
-  validateConfig(manifest: TrikManifest): string[] {
+  validateConfig(manifest: TrikManifest, trikId?: string): string[] {
     const missingKeys: string[] = [];
 
     if (!manifest.config?.required || manifest.config.required.length === 0) {
       return missingKeys;
     }
 
-    const configContext = this.getForTrik(manifest.id);
+    const configContext = this.getForTrik(trikId ?? manifest.id);
 
     for (const requirement of manifest.config.required) {
       if (!configContext.has(requirement.key)) {
