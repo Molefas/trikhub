@@ -50,7 +50,7 @@
     "start": "node dist/worker.js"
   },
   "dependencies": {
-    "@trikhub/manifest": "workspace:*",
+    "@trikhub/manifest": "0.17.0",
     "uuid": "^9.0.0"
   },
   "devDependencies": {

@@ -48,7 +48,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@trikhub/manifest": "workspace:*"
+    "@trikhub/manifest": "0.17.0"
   },
   "devDependencies": {
     "@langchain/core": "^0.3.0",
