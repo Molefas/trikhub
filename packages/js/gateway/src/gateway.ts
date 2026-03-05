@@ -48,6 +48,19 @@ interface LoadedTrik {
   scopedName: string;
 }
 
+// Typed event map for gateway lifecycle events
+export interface GatewayEventMap {
+  'handoff:start': { trikId: string; trikName: string; sessionId: string };
+  'handoff:container_start': { trikId: string; trikName: string };
+  'handoff:thinking': { trikId: string; trikName: string };
+  'handoff:message': { trikId: string; trikName: string; direction: 'to_trik' | 'from_trik' };
+  'handoff:transfer_back': { trikId: string; trikName: string; reason: 'voluntary' | 'force' | 'error' | 'max_turns' };
+  'handoff:summary': { trikId: string; trikName: string; sessionId: string };
+  'handoff:error': { trikId: string; trikName: string; error: string };
+  'trik:loaded': { trikId: string; manifest: TrikManifest };
+  'trik:unloaded': { trikId: string };
+}
+
 export interface TrikGatewayConfig {
   allowedTriks?: string[];
   /**
@@ -193,6 +206,12 @@ interface ActiveHandoff {
 // ============================================================================
 
 export class TrikGateway extends EventEmitter {
+  on<K extends keyof GatewayEventMap>(event: K, listener: (payload: GatewayEventMap[K]) => void): this;
+  on(event: string, listener: (...args: unknown[]) => void): this;
+  on(event: string, listener: (...args: unknown[]) => void): this {
+    return super.on(event, listener);
+  }
+
   private config: TrikGatewayConfig;
   private configStore: ConfigStore;
   private storageProvider: StorageProvider;
@@ -328,6 +347,12 @@ export class TrikGateway extends EventEmitter {
       timestamp: Date.now(),
       type: 'handoff_start',
       summary: `Handoff to ${loaded.manifest.name}`,
+    });
+
+    this.emit('handoff:start', {
+      trikId: resolvedId,
+      trikName: loaded.manifest.name,
+      sessionId: handoffSession.sessionId,
     });
 
     // Route the initial context message to the trik
@@ -488,11 +513,25 @@ export class TrikGateway extends EventEmitter {
     // Check max turns safety net
     if (handoff.turnCount > this.maxTurnsPerHandoff) {
       return this.autoTransferBack(
-        `Maximum turns (${this.maxTurnsPerHandoff}) exceeded. Automatically transferring back.`
+        `Maximum turns (${this.maxTurnsPerHandoff}) exceeded. Automatically transferring back.`,
+        undefined,
+        'max_turns',
       );
     }
 
     // Call the trik agent
+    if (loaded.containerized) {
+      this.emit('handoff:container_start', {
+        trikId: handoff.trikId,
+        trikName: loaded.manifest.name,
+      });
+    }
+
+    this.emit('handoff:thinking', {
+      trikId: handoff.trikId,
+      trikName: loaded.manifest.name,
+    });
+
     let response: TrikResponse;
     try {
       response = await loaded.agent.processMessage!(message, trikContext);
@@ -500,12 +539,25 @@ export class TrikGateway extends EventEmitter {
       // Trik threw an error — transfer back with sanitized error
       const rawMsg = error instanceof Error ? error.message : 'Unknown error';
       const sanitized = this.sanitizeErrorMessage(rawMsg);
+
+      this.emit('handoff:error', {
+        trikId: handoff.trikId,
+        trikName: loaded.manifest.name,
+        error: sanitized,
+      });
+
       // User-facing: include sanitized error for debugging
       const userMessage = `Trik "${loaded.manifest.name}" encountered an error: ${sanitized}`;
       // Agent-facing log: generic message, no trik-controlled text
       const agentLog = `Trik "${loaded.manifest.name}" encountered an error and transferred back`;
-      return this.autoTransferBack(userMessage, agentLog);
+      return this.autoTransferBack(userMessage, agentLog, 'error');
     }
+
+    this.emit('handoff:message', {
+      trikId: handoff.trikId,
+      trikName: loaded.manifest.name,
+      direction: 'from_trik',
+    });
 
     // Process tool calls into log entries
     if (response.toolCalls) {
@@ -524,6 +576,18 @@ export class TrikGateway extends EventEmitter {
       const summary = this.buildSessionSummary(handoff.sessionId, loaded.manifest);
       const handoffSessionId = handoff.sessionId;
       const trikId = handoff.trikId;
+
+      this.emit('handoff:summary', {
+        trikId: handoff.trikId,
+        trikName: loaded.manifest.name,
+        sessionId: handoffSessionId,
+      });
+
+      this.emit('handoff:transfer_back', {
+        trikId: handoff.trikId,
+        trikName: loaded.manifest.name,
+        reason: 'voluntary',
+      });
 
       // Clear active handoff (container stays warm with idle TTL)
       this.activeHandoff = null;
@@ -561,6 +625,19 @@ export class TrikGateway extends EventEmitter {
     });
 
     const summary = this.buildSessionSummary(handoff.sessionId, loaded.manifest);
+
+    this.emit('handoff:summary', {
+      trikId: handoff.trikId,
+      trikName: loaded.manifest.name,
+      sessionId: handoff.sessionId,
+    });
+
+    this.emit('handoff:transfer_back', {
+      trikId: handoff.trikId,
+      trikName: loaded.manifest.name,
+      reason: 'force',
+    });
+
     const result: RouteForceBack = {
       target: 'force_back',
       trikId: handoff.trikId,
@@ -589,7 +666,11 @@ export class TrikGateway extends EventEmitter {
   /**
    * Auto transfer-back due to max turns or error.
    */
-  private async autoTransferBack(reason: string, logSummary?: string): Promise<RouteTransferBack> {
+  private async autoTransferBack(
+    reason: string,
+    logSummary?: string,
+    transferReason: 'error' | 'max_turns' = 'error',
+  ): Promise<RouteTransferBack> {
     const handoff = this.activeHandoff!;
     const loaded = this.triks.get(handoff.trikId)!;
 
@@ -601,6 +682,19 @@ export class TrikGateway extends EventEmitter {
     });
 
     const summary = this.buildSessionSummary(handoff.sessionId, loaded.manifest);
+
+    this.emit('handoff:summary', {
+      trikId: handoff.trikId,
+      trikName: loaded.manifest.name,
+      sessionId: handoff.sessionId,
+    });
+
+    this.emit('handoff:transfer_back', {
+      trikId: handoff.trikId,
+      trikName: loaded.manifest.name,
+      reason: transferReason,
+    });
+
     const result: RouteTransferBack = {
       target: 'transfer_back',
       trikId: handoff.trikId,
