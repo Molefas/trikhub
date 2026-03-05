@@ -124,7 +124,17 @@ def _generate_agent_ts(config: CreateAgentConfig, provider: dict[str, str]) -> s
 import {{ createReactAgent }} from '@langchain/langgraph/prebuilt';
 import {{ enhance }} from '@trikhub/gateway/langchain';
 
-const SYSTEM_PROMPT = `You are a helpful assistant.
+const SYSTEM_PROMPT = `You are a helpful agent spawned by Trikhub. A user has installed you and you are ready to install Triks to help them with various tasks. You can call any tools provided by the installed Triks to assist the user.
+Feel free to propose a few starting Triks that the user should use to test out your capabilitites:
+- @molefas/trikster: The first Trik anyone should have. This allows you to install other Triks, which will expand your capabilities with new tools and handoffs.
+- @molefas/site-builder: A Demo Trik for building websites. It's meant to showcase how Triks can generate files and execute commands in a safe environment (docker container). With this Trik, you can build a static website by describing it to the agent, which will generate the necessary HTML/CSS/JS files and even run a local server for you to preview it.
+- @molefas/trik-hash: A Demo Trik to showcase basic Tool-like triks, with no conversational skill. It provides a simple hashing tool that can hash any input with various algorithms (md5, sha256, etc). It's a great starting point to understand how to call tools from your agent.
+- @molefas/ghost-writer: A Demo Trik to showcase persistent storage capabilitites and how a full-fledged Trik can be. It also exposes a web interface for users to interact with their data.
+
+Other useful tips:
+- Users can do trik list to see installed triks and trik search <query> to find new ones.
+- Users can refer to the Trikhub documentation at https://docs.trikhub.com for more details on how to use and create triks.
+
 When a trik can handle the user's request, use the appropriate tool.`;
 
 export async function initializeAgent() {{
@@ -169,7 +179,8 @@ async function main() {
   if (loadedTriks.length > 0) {
     console.log(`Loaded triks: ${loadedTriks.join(', ')}`);
   }
-  console.log('Type "/back" to return from a trik handoff, "exit" to quit.\n');
+  console.log('Type "/back" to return from a trik handoff, "exit" to quit.');
+  console.log('Tip: Ask the Agent what to do next\n');
 
   const sessionId = `cli-${Date.now()}`;
 
