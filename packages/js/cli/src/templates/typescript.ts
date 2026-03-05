@@ -210,7 +210,9 @@ function generateAgentTs(config: InitConfig): string {
     return generateToolModeAgentTs(config);
   }
 
-  // Conversational mode
+  // Conversational mode — inline prompt to avoid unnecessary filesystem dependency
+  const promptContent = generateSystemPrompt(config).replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+
   return `/**
  * ${config.displayName} — conversational agent entry point.
  */
@@ -219,13 +221,9 @@ import { ChatAnthropic } from '@langchain/anthropic';
 import { createReactAgent } from '@langchain/langgraph/prebuilt';
 import { wrapAgent, transferBackTool } from '@trikhub/sdk';
 import type { TrikContext } from '@trikhub/sdk';
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { exampleTool } from './tools/example.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const systemPrompt = readFileSync(join(__dirname, '../src/prompts/system.md'), 'utf-8');
+const systemPrompt = \`${promptContent}\`;
 
 export default wrapAgent((context: TrikContext) => {
   const model = new ChatAnthropic({
@@ -308,7 +306,7 @@ function generateReadme(config: InitConfig): string {
 - Update inputSchema/outputSchema in \`manifest.json\``
     : `- Edit your agent logic in \`src/agent.ts\`
 - Add tools in \`src/tools/\`
-- Customize the system prompt in \`src/prompts/system.md\``;
+- Customize the system prompt in \`src/agent.ts\` (the \`systemPrompt\` constant)`;
 
   const archSection = isToolMode
     ? `Tools from this trik appear as native tools on the main agent — no handoff, no session.`
@@ -364,7 +362,7 @@ export function generateTypescriptProject(config: InitConfig): Record<string, st
   files['src/agent.ts'] = generateAgentTs(config);
 
   if (config.agentMode === 'conversational') {
-    // Conversational mode: example tool + system prompt
+    // Conversational mode: example tool + system prompt file (referenced by manifest.agent.systemPromptFile)
     files['src/tools/example.ts'] = generateExampleTool();
     files['src/prompts/system.md'] = generateSystemPrompt(config);
   }
