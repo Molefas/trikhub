@@ -561,3 +561,136 @@ describe('registry injection into TrikContext', () => {
     expect(provider).toBeInstanceOf(GatewayRegistryProvider);
   });
 });
+
+// ============================================================================
+// Gateway Lifecycle Events
+// ============================================================================
+
+describe('gateway lifecycle events', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function createConversationalTrik(): Promise<string> {
+    const trikDir = await mkdtemp(join(tmpdir(), 'trik-events-'));
+
+    const manifest = {
+      schemaVersion: 2,
+      id: 'event-trik',
+      name: 'Event Trik',
+      description: 'A trik for event testing',
+      version: '1.0.0',
+      agent: {
+        mode: 'conversational',
+        domain: ['testing'],
+        handoffDescription: 'Talk to event trik',
+        systemPrompt: 'You are an event trik.',
+      },
+      entry: { module: 'index.mjs', export: 'agent' },
+    };
+
+    await writeFile(join(trikDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+
+    const entryCode = `export const agent = {
+      async processMessage(message, context) {
+        if (message === 'bye') {
+          return { message: 'goodbye', transferBack: true, toolCalls: [] };
+        }
+        if (message === 'crash') {
+          throw new Error('boom');
+        }
+        return { message: 'hello back', transferBack: false, toolCalls: [] };
+      }
+    };`;
+    await writeFile(join(trikDir, 'index.mjs'), entryCode);
+
+    return trikDir;
+  }
+
+  async function createGatewayWithTrik() {
+    const gw = new TrikGateway({
+      configStore: new InMemoryConfigStore(),
+      storageProvider: new InMemoryStorageProvider(),
+      sessionStorage: new InMemorySessionStorage(),
+    });
+    await gw.initialize();
+
+    const trikDir = await createConversationalTrik();
+    await gw.loadTrik(trikDir);
+
+    return { gw, trikId: 'local/event-trik' };
+  }
+
+  it('emits handoff:start on startHandoff', async () => {
+    const { gw, trikId } = await createGatewayWithTrik();
+    const events: unknown[] = [];
+    gw.on('handoff:start', (e) => events.push(e));
+
+    await gw.startHandoff(trikId, 'hello', 'sess-1');
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      trikId,
+      trikName: 'Event Trik',
+    });
+  });
+
+  it('emits handoff:thinking before handoff:message', async () => {
+    const { gw, trikId } = await createGatewayWithTrik();
+    const order: string[] = [];
+    gw.on('handoff:thinking', () => order.push('thinking'));
+    gw.on('handoff:message', () => order.push('message'));
+
+    await gw.startHandoff(trikId, 'hello', 'sess-1');
+
+    expect(order).toEqual(['thinking', 'message']);
+  });
+
+  it('emits handoff:transfer_back with reason voluntary', async () => {
+    const { gw, trikId } = await createGatewayWithTrik();
+    const events: unknown[] = [];
+    gw.on('handoff:transfer_back', (e) => events.push(e));
+
+    await gw.startHandoff(trikId, 'hello', 'sess-1');
+    await gw.routeMessage('bye', 'sess-1');
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ reason: 'voluntary' });
+  });
+
+  it('emits handoff:summary before handoff:transfer_back', async () => {
+    const { gw, trikId } = await createGatewayWithTrik();
+    const order: string[] = [];
+    gw.on('handoff:summary', () => order.push('summary'));
+    gw.on('handoff:transfer_back', () => order.push('transfer_back'));
+
+    await gw.startHandoff(trikId, 'hello', 'sess-1');
+    await gw.routeMessage('bye', 'sess-1');
+
+    expect(order).toEqual(['summary', 'transfer_back']);
+  });
+
+  it('emits handoff:transfer_back with reason force on /back', async () => {
+    const { gw, trikId } = await createGatewayWithTrik();
+    const events: unknown[] = [];
+    gw.on('handoff:transfer_back', (e) => events.push(e));
+
+    await gw.startHandoff(trikId, 'hello', 'sess-1');
+    await gw.routeMessage('/back', 'sess-1');
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ reason: 'force' });
+  });
+
+  it('emits handoff:error on trik exception', async () => {
+    const { gw, trikId } = await createGatewayWithTrik();
+    const errors: unknown[] = [];
+    gw.on('handoff:error', (e) => errors.push(e));
+
+    await gw.startHandoff(trikId, 'hello', 'sess-1');
+    await gw.routeMessage('crash', 'sess-1');
+
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as any).error).toContain('boom');
+  });
+});
