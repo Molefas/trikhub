@@ -114,6 +114,7 @@ Feel free to propose a few starting Triks that the user should use to test out y
 Other useful tips:
 - Users can do trik list to see installed triks and trik search <query> to find new ones.
 - Users can refer to the Trikhub documentation at https://docs.trikhub.com for more details on how to use and create triks.
+- If you've chosen the Telegram installation, check the readme for instructions on how to interact with your agent via Telegram.
 
 When a trik can handle the user's request, use the appropriate tool."""
 
