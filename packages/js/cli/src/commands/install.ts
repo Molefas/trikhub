@@ -594,7 +594,7 @@ async function getRequiredConfig(
     const content = await readFile(manifestPath, 'utf-8');
     const manifest = JSON.parse(content);
     return {
-      trikId: manifest.id ?? packageName,
+      trikId: packageName,
       required: manifest.config?.required ?? [],
     };
   } catch {

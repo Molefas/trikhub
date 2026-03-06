@@ -1043,14 +1043,6 @@ export class TrikGateway extends EventEmitter {
           exposePorts: manifest.capabilities?.shell?.exposePorts,
         });
 
-        // Log dynamic port mappings on first launch
-        for (const containerPort of manifest.capabilities?.shell?.exposePorts ?? []) {
-          const hostPort = handle.getHostPort(containerPort);
-          if (hostPort) {
-            console.log(`[TrikGateway] ${scopedName ?? manifest.id} port ${containerPort} → http://localhost:${hostPort}`);
-          }
-        }
-
         handle.setStorageContext(context.storage);
         try {
           const result = await handle.processMessage({

@@ -951,12 +951,6 @@ class TrikGateway:
                     ),
                 )
 
-                # Log dynamic port mappings on first launch
-                for cport in expose_ports:
-                    hport = handle.get_host_port(cport)
-                    if hport:
-                        print(f"[TrikGateway] {scoped_name or manifest.id} port {cport} → http://localhost:{hport}")
-
                 handle.set_storage_context(context.storage)
                 try:
                     result = await handle.process_message(

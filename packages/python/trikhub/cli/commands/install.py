@@ -181,9 +181,9 @@ def _show_config_hint(package_name: str, runtime: str) -> None:
             manifest = result[0] if result else None
 
         if manifest and manifest.config and manifest.config.required:
-            trik_id = manifest.id
-            # Ensure secrets.json exists with placeholder entries
-            _ensure_secrets_json(trik_id, manifest.config.required)
+            # Use scoped package_name (e.g. @trikhub/demo-notes) as the secrets key
+            # to match how the gateway looks up config via resolvedScopedName
+            _ensure_secrets_json(package_name, manifest.config.required)
 
             click.echo()
             click.echo(click.style("  This trik requires configuration:", fg="yellow"))
@@ -191,7 +191,7 @@ def _show_config_hint(package_name: str, runtime: str) -> None:
                 click.echo(click.style(f"    - {cfg.key}: {cfg.description}", fg="yellow"))
             click.echo()
             click.echo(f"  Update your secrets in .trikhub/secrets.json:")
-            click.echo(f'    {{ "{trik_id}": {{ ... }} }}')
+            click.echo(f'    {{ "{package_name}": {{ ... }} }}')
     except Exception:
         pass  # Don't fail install if config check fails
 
