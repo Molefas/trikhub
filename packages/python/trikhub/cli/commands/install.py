@@ -235,6 +235,38 @@ def _prompt_capability_consent(
     return click.confirm("  Continue?", default=False)
 
 
+async def _verify_git_tag_sha(
+    github_repo: str, git_tag: str, expected_sha: str,
+) -> tuple[bool, str | None]:
+    """Verify that a GitHub tag points to the expected commit SHA."""
+    try:
+        import httpx
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"https://api.github.com/repos/{github_repo}/git/refs/tags/{git_tag}",
+            )
+            if resp.status_code == 404:
+                return False, None
+            if resp.status_code != 200:
+                return True, None  # Can't verify, proceed with caution
+
+            data = resp.json()
+            current_sha = data["object"]["sha"]
+
+            # Dereference annotated tags
+            if data["object"].get("type") == "tag":
+                tag_resp = await client.get(
+                    f"https://api.github.com/repos/{github_repo}/git/tags/{current_sha}",
+                )
+                if tag_resp.status_code == 200:
+                    current_sha = tag_resp.json()["object"]["sha"]
+
+            return current_sha == expected_sha, current_sha
+    except Exception:
+        return True, None  # Can't verify, proceed
+
+
 async def _install_from_registry(
     registry: RegistryClient, package_name: str, version: str | None,
     skip_prompt: bool = False,
@@ -251,7 +283,13 @@ async def _install_from_registry(
     target_version = next(
         (v for v in trik.versions if v.version == install_version), None,
     )
-    if target_version and target_version.manifest:
+
+    if not target_version:
+        raise FileNotFoundError(
+            f"Version {install_version} not found for {package_name}"
+        )
+
+    if target_version.manifest:
         consent = _prompt_capability_consent(
             target_version.manifest, trik.github_repo, skip_prompt,
         )
@@ -259,9 +297,27 @@ async def _install_from_registry(
             click.echo(click.style("  Installation cancelled.", fg="red"))
             raise SystemExit(1)
 
+    # Verify the commit SHA hasn't changed (security check)
+    if target_version.commit_sha:
+        click.echo(f"  Verifying {package_name}@{install_version}...")
+        valid, current_sha = await _verify_git_tag_sha(
+            trik.github_repo, target_version.git_tag, target_version.commit_sha,
+        )
+        if not valid:
+            click.echo(click.style(
+                f"\n  ⚠ Security warning: Tag {target_version.git_tag} has been modified!", fg="red",
+            ))
+            click.echo(f"    Expected SHA: {target_version.commit_sha}")
+            if current_sha:
+                click.echo(f"    Current SHA:  {current_sha}")
+            click.echo(click.style(
+                "\n  This could indicate tampering. Aborting installation.", fg="red",
+            ))
+            raise SystemExit(1)
+
     # Containerized triks (filesystem/shell) need a self-contained directory
     # for Docker volume mounts, so they always go to .trikhub/triks/
-    manifest_data = target_version.manifest if target_version else None
+    manifest_data = target_version.manifest
     needs_container = False
     if manifest_data:
         caps = manifest_data.get("capabilities") or {}
@@ -270,9 +326,11 @@ async def _install_from_registry(
             or (caps.get("shell") or {}).get("enabled")
         )
 
+    # Use git_tag from registry (not hardcoded v{version})
+    git_tag = target_version.git_tag
+
     if runtime == "python" and not needs_container:
         # Same-runtime, non-containerized: install via pip from git
-        git_tag = f"v{install_version}"
         pip_url = f"git+https://github.com/{trik.github_repo}@{git_tag}"
         click.echo(f"  Installing {package_name}@{install_version} via pip...")
         subprocess.run(
@@ -280,8 +338,7 @@ async def _install_from_registry(
             check=True,
         )
     else:
-        # Node triks: shallow clone to .trikhub/triks/
-        git_tag = f"v{install_version}"
+        # Cross-language or containerized: download to .trikhub/triks/
         click.echo(f"  Downloading {package_name}@{install_version}...")
         _download_to_triks_directory(trik.github_repo, git_tag, package_name)
 
