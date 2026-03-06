@@ -60,6 +60,7 @@ class ContainerOptions:
     network_enabled: bool = True
     memory_limit_mb: int = 512
     cpu_limit: float | None = None
+    expose_ports: list[int] | None = None
 
 
 @dataclass
@@ -144,10 +145,38 @@ class ContainerWorkerHandle:
         self._idle_timer: asyncio.TimerHandle | None = None
         self._on_idle_callback: Callable[[], None] | None = None
         self._idle_timeout_s: float = config.idle_timeout_ms / 1000
+        self._port_mappings: dict[int, int] = {}  # container port → host port
 
     @property
     def ready(self) -> bool:
         return self._is_ready
+
+    def get_host_port(self, container_port: int) -> int | None:
+        """Get the dynamically assigned host port for a container port."""
+        return self._port_mappings.get(container_port)
+
+    async def _resolve_port_mappings(self) -> None:
+        """Resolve dynamically assigned host ports after container starts."""
+        if not self._options.expose_ports:
+            return
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "port", self._container_name,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+            # Output format: "3000/tcp -> 0.0.0.0:55123"
+            for line in stdout.decode("utf-8").splitlines():
+                match = re.match(r"^(\d+)/tcp -> [\d.]+:(\d+)", line)
+                if match:
+                    container_port = int(match.group(1))
+                    host_port = int(match.group(2))
+                    self._port_mappings[container_port] = host_port
+                    if self._config.debug:
+                        print(f"[Container:{self._trik_id}] Port {container_port} -> localhost:{host_port}")
+        except Exception:
+            pass  # Non-critical
 
     # -- Lifecycle ------------------------------------------------------------
 
@@ -191,6 +220,16 @@ class ContainerWorkerHandle:
         if not self._options.network_enabled:
             args.append("--network=none")
 
+        # Expose ports with dynamic host port allocation to avoid conflicts
+        if self._options.expose_ports:
+            for port in self._options.expose_ports:
+                if port < 1024:
+                    raise RuntimeError(
+                        f"Privileged port {port} cannot be exposed. "
+                        f"Only ports 1024-65535 are allowed."
+                    )
+                args.extend(["-p", f"0:{port}"])
+
         # Labels for container identification
         args.extend(["--label", f"trikhub.trik-id={self._trik_id}"])
         args.extend(["--label", "trikhub.managed=true"])
@@ -230,6 +269,7 @@ class ContainerWorkerHandle:
                     f"Container health check failed for trik {self._trik_id}"
                 )
             self._is_ready = True
+            await self._resolve_port_mappings()
             self._emit("ready", health)
         except asyncio.TimeoutError:
             stderr_output = "\n".join(self._stderr_buffer) if self._stderr_buffer else ""
