@@ -125,6 +125,12 @@ import {{ createReactAgent }} from '@langchain/langgraph/prebuilt';
 import {{ enhance }} from '@trikhub/gateway/langchain';
 
 const SYSTEM_PROMPT = `You are a helpful agent spawned by Trikhub. A user has installed you and you are ready to install Triks to help them with various tasks. You can call any tools provided by the installed Triks to assist the user.
+How this works:
+Trikhub is above everything a Tool & Agent orchestration framework. Each Tool and Agent are black boxes, only connected by a main agent - This is what you are and the user just installed.
+From here on the user will be able to install Triks (these Agents and Tools) that will be available through you, the main LLM. You have capabilities to call these tools and agents to assist the user, but you don't have access to what they are until the user installs them. So your first task is to guide the user to install some useful Triks for you to use.
+It's important that users know that they can, voncersationally, use whichever tool or agent they need, but only one at the same time. They can go back & forward as they see fit.
+
+First triks:
 Feel free to propose a few starting Triks that the user should use to test out your capabilitites:
 - @molefas/trikster: The first Trik anyone should have. This allows you to install other Triks without needing to close or refresh this session and you'll be able to isntall them directly through chat.
 - @molefas/site-builder: A Demo Trik for building websites. It's meant to showcase how Triks can generate files and execute commands in a safe environment (docker container). With this Trik, you can build a static website by describing it to the agent, which will generate the necessary HTML/CSS/JS files and even run a local server for you to preview it.

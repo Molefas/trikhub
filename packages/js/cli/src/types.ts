@@ -4,6 +4,8 @@
  * Core type definitions for the TrikHub ecosystem.
  */
 
+import type { TrikManifest } from '@trikhub/manifest';
+
 /**
  * trikhub.json - Registry metadata for a trik
  * This file lives alongside manifest.json in a trik repository
@@ -133,7 +135,7 @@ export interface TrikVersion {
   runtime?: TrikRuntime;
 
   /** Full manifest from registry (used for capability checks at install time) */
-  manifest?: Record<string, unknown>;
+  manifest?: TrikManifest;
 }
 
 /**

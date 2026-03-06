@@ -9,7 +9,7 @@
 
 import { execSync } from 'node:child_process';
 import { existsSync, rmSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type {
   TrikRegistryContext,
   TrikSearchResult,
@@ -137,31 +137,29 @@ export class GatewayRegistryProvider implements TrikRegistryContext {
         };
       }
 
-      const trikDir = this.getTrikDir(trikId);
-      mkdirSync(trikDir, { recursive: true });
+      const trikRuntime = targetVersion.runtime ?? 'node';
+      const isSameRuntime = trikRuntime === 'node';
+      const projectRoot = this.getProjectRoot();
+      const hasPackageJson = existsSync(join(projectRoot, 'package.json'));
+      const needsContainer = this.needsContainerization(targetVersion.manifest);
 
-      const gitUrl = `https://github.com/${trikInfo.githubRepo}.git`;
-      execSync(
-        `git clone --depth 1 --branch ${targetVersion.gitTag} ${gitUrl} ${trikDir}`,
-        { stdio: 'pipe' }
-      );
+      // Containerized triks (filesystem/shell) always go to .trikhub/triks/
+      // so the Docker mount gets a self-contained directory with node_modules.
+      // Non-containerized same-runtime triks use package.json + node_modules.
+      const usePackageManager = isSameRuntime && hasPackageJson && !needsContainer;
 
-      // Remove .git to save space
-      const gitDir = join(trikDir, '.git');
-      if (existsSync(gitDir)) {
-        rmSync(gitDir, { recursive: true, force: true });
+      if (usePackageManager) {
+        await this.installViaPackageManager(trikId, trikInfo.githubRepo, targetVersion.gitTag);
+      } else {
+        this.downloadToTriksDir(trikId, trikInfo.githubRepo, targetVersion.gitTag);
       }
 
-      // Write identity file for trusted scoped name
-      const identityPath = join(trikDir, '.trikhub-identity.json');
-      const identity = {
-        scopedName: trikId,
-        installedAt: new Date().toISOString(),
-      };
-      writeFileSync(identityPath, JSON.stringify(identity, null, 2));
-
-      this.addToConfig(trikId);
-      await this.gateway.loadTrik(trikDir);
+      this.addToConfig(trikId, trikRuntime);
+      await this.gateway.loadTrik(
+        usePackageManager
+          ? join(projectRoot, 'node_modules', ...trikId.split('/'))
+          : this.getTrikDir(trikId)
+      );
 
       return {
         status: 'installed',
@@ -186,8 +184,19 @@ export class GatewayRegistryProvider implements TrikRegistryContext {
     try {
       this.gateway.unloadTrik(trikId);
 
+      // Check if trik lives in node_modules (same-runtime) or .trikhub/triks/ (cross-language)
+      const projectRoot = this.getProjectRoot();
+      const nmPath = join(projectRoot, 'node_modules', ...trikId.split('/'));
       const trikDir = this.getTrikDir(trikId);
+
+      if (existsSync(nmPath)) {
+        // Same-runtime: remove from package.json and node_modules
+        rmSync(nmPath, { recursive: true, force: true });
+        this.removeFromPackageJson(trikId);
+      }
+
       if (existsSync(trikDir)) {
+        // Cross-language: remove from .trikhub/triks/
         rmSync(trikDir, { recursive: true, force: true });
       }
 
@@ -302,6 +311,110 @@ export class GatewayRegistryProvider implements TrikRegistryContext {
   // Private helpers
   // --------------------------------------------------------------------------
 
+  /**
+   * Install a same-runtime JS trik via git URL in package.json.
+   * Mirrors the CLI's installFromTrikhub behavior.
+   */
+  private async installViaPackageManager(
+    trikId: string,
+    githubRepo: string,
+    gitTag: string
+  ): Promise<void> {
+    const projectRoot = this.getProjectRoot();
+    const packageJsonPath = join(projectRoot, 'package.json');
+    const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+
+    if (!pkg.dependencies) {
+      pkg.dependencies = {};
+    }
+    pkg.dependencies[trikId] = `github:${githubRepo}#${gitTag}`;
+    writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n');
+
+    // Remove existing from node_modules to force fresh install
+    const nmPath = join(projectRoot, 'node_modules', ...trikId.split('/'));
+    if (existsSync(nmPath)) {
+      rmSync(nmPath, { recursive: true, force: true });
+    }
+
+    const pm = this.detectPackageManager();
+    const installCmd = pm === 'pnpm'
+      ? `pnpm install`
+      : pm === 'yarn'
+        ? `yarn install`
+        : `npm install`;
+    execSync(installCmd, { cwd: projectRoot, stdio: 'pipe' });
+  }
+
+  /**
+   * Download a cross-language trik to .trikhub/triks/.
+   */
+  private downloadToTriksDir(
+    trikId: string,
+    githubRepo: string,
+    gitTag: string
+  ): void {
+    const trikDir = this.getTrikDir(trikId);
+    mkdirSync(trikDir, { recursive: true });
+
+    const gitUrl = `https://github.com/${githubRepo}.git`;
+    execSync(
+      `git clone --depth 1 --branch ${gitTag} ${gitUrl} ${trikDir}`,
+      { stdio: 'pipe' }
+    );
+
+    // Remove .git to save space
+    const gitDir = join(trikDir, '.git');
+    if (existsSync(gitDir)) {
+      rmSync(gitDir, { recursive: true, force: true });
+    }
+
+    // Install dependencies
+    if (existsSync(join(trikDir, 'package.json'))) {
+      const cmd = existsSync(join(trikDir, 'pnpm-lock.yaml'))
+        ? 'pnpm install --frozen-lockfile --prod'
+        : existsSync(join(trikDir, 'yarn.lock'))
+          ? 'yarn install --production --frozen-lockfile'
+          : 'npm install --production';
+      execSync(cmd, { cwd: trikDir, stdio: 'pipe' });
+    } else if (existsSync(join(trikDir, 'requirements.txt'))) {
+      execSync('pip install -r requirements.txt', { cwd: trikDir, stdio: 'pipe' });
+    }
+
+    // Write identity file for trusted scoped name
+    const identityPath = join(trikDir, '.trikhub-identity.json');
+    const identity = {
+      scopedName: trikId,
+      installedAt: new Date().toISOString(),
+    };
+    writeFileSync(identityPath, JSON.stringify(identity, null, 2));
+  }
+
+  /**
+   * Check if a manifest declares filesystem or shell capabilities,
+   * which require containerized (Docker) execution.
+   */
+  private needsContainerization(manifest?: any): boolean {
+    const caps = manifest?.capabilities;
+    return !!(caps?.filesystem?.enabled || caps?.shell?.enabled);
+  }
+
+  /**
+   * Get the project root directory (parent of configDir/.trikhub).
+   */
+  private getProjectRoot(): string {
+    return resolve(this.configDir, '..');
+  }
+
+  /**
+   * Detect which package manager is used in the project.
+   */
+  private detectPackageManager(): 'npm' | 'pnpm' | 'yarn' {
+    const root = this.getProjectRoot();
+    if (existsSync(join(root, 'pnpm-lock.yaml'))) return 'pnpm';
+    if (existsSync(join(root, 'yarn.lock'))) return 'yarn';
+    return 'npm';
+  }
+
   private getTrikDir(trikId: string): string {
     if (trikId.startsWith('@')) {
       const [scope, name] = trikId.split('/');
@@ -310,7 +423,7 @@ export class GatewayRegistryProvider implements TrikRegistryContext {
     return join(this.configDir, 'triks', trikId);
   }
 
-  private addToConfig(trikId: string): void {
+  private addToConfig(trikId: string, runtime?: string): void {
     const configPath = join(this.configDir, 'config.json');
     const config = existsSync(configPath)
       ? JSON.parse(readFileSync(configPath, 'utf-8'))
@@ -319,7 +432,28 @@ export class GatewayRegistryProvider implements TrikRegistryContext {
     if (!config.triks.includes(trikId)) {
       config.triks.push(trikId);
     }
+
+    if (runtime) {
+      if (!config.runtimes) config.runtimes = {};
+      config.runtimes[trikId] = runtime;
+    }
+
     writeFileSync(configPath, JSON.stringify(config, null, 2));
+  }
+
+  private removeFromPackageJson(trikId: string): void {
+    const packageJsonPath = join(this.getProjectRoot(), 'package.json');
+    if (!existsSync(packageJsonPath)) return;
+
+    try {
+      const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+      if (pkg.dependencies?.[trikId]) {
+        delete pkg.dependencies[trikId];
+        writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n');
+      }
+    } catch {
+      // package.json parsing failed — skip
+    }
   }
 
   private removeFromConfig(trikId: string): void {

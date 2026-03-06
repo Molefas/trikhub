@@ -106,6 +106,8 @@ export class ContainerWorkerHandle extends EventEmitter {
 
   private containerId: string | null = null;
   private readonly containerName: string;
+  /** Maps container port → dynamically assigned host port */
+  private portMappings = new Map<number, number>();
 
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private onIdleCallback: (() => void) | null = null;
@@ -165,7 +167,7 @@ export class ContainerWorkerHandle extends EventEmitter {
       args.push('--network=none');
     }
 
-    // Expose ports for dev servers, preview, etc.
+    // Expose ports with dynamic host port allocation to avoid conflicts
     if (this.options.exposePorts) {
       for (const port of this.options.exposePorts) {
         if (port < 1024) {
@@ -173,7 +175,7 @@ export class ContainerWorkerHandle extends EventEmitter {
             `Privileged port ${port} cannot be exposed. Only ports 1024-65535 are allowed.`
           );
         }
-        args.push('-p', `${port}:${port}`);
+        args.push('-p', `0:${port}`);
       }
     }
 
@@ -272,8 +274,15 @@ export class ContainerWorkerHandle extends EventEmitter {
             return;
           }
           this.isReady = true;
-          this.emit('ready', result);
-          resolveStart();
+          // Resolve dynamic port mappings
+          this.resolvePortMappings().then(() => {
+            this.emit('ready', result);
+            resolveStart();
+          }).catch(() => {
+            // Port resolution is non-critical; continue anyway
+            this.emit('ready', result);
+            resolveStart();
+          });
         })
         .catch((error) => {
           clearTimeout(startupTimeout);
@@ -338,6 +347,36 @@ export class ContainerWorkerHandle extends EventEmitter {
   /** Check if the container worker is ready. */
   get ready(): boolean {
     return this.isReady;
+  }
+
+  /** Get the dynamically assigned host port for a container port. */
+  getHostPort(containerPort: number): number | undefined {
+    return this.portMappings.get(containerPort);
+  }
+
+  /** Resolve dynamically assigned host ports after container starts. */
+  private async resolvePortMappings(): Promise<void> {
+    if (!this.options.exposePorts?.length) return;
+
+    try {
+      const { stdout } = await execFileAsync(
+        'docker', ['port', this.containerName], { timeout: 5000 }
+      );
+      // Output format: "3000/tcp -> 0.0.0.0:55123"
+      for (const line of stdout.split('\n')) {
+        const match = line.match(/^(\d+)\/tcp -> [\d.]+:(\d+)/);
+        if (match) {
+          const containerPort = parseInt(match[1], 10);
+          const hostPort = parseInt(match[2], 10);
+          this.portMappings.set(containerPort, hostPort);
+          if (this.config.debug) {
+            console.log(`[Container:${this.trikId}] Port ${containerPort} -> localhost:${hostPort}`);
+          }
+        }
+      }
+    } catch {
+      // Non-critical — ports may not be in use yet
+    }
   }
 
   /**
