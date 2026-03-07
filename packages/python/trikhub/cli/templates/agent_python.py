@@ -151,6 +151,13 @@ def _generate_cli_py() -> str:
         '\n'
         '    app = await initialize_agent()\n'
         '\n'
+        '    # Subscribe to gateway events for real-time status feedback\n'
+        '    app.gateway.on("handoff:start", lambda e: print(f"\\033[2m[{e[\'trikName\']}] Connecting...\\033[0m"))\n'
+        '    app.gateway.on("handoff:container_start", lambda e: print(f"\\033[2m[{e[\'trikName\']}] Starting container...\\033[0m"))\n'
+        '    app.gateway.on("handoff:thinking", lambda e: print(f"\\033[2m[{e[\'trikName\']}] Thinking...\\033[0m"))\n'
+        '    app.gateway.on("handoff:error", lambda e: print(f"\\033[31m[{e[\'trikName\']}] Error: {e[\'error\']}\\033[0m"))\n'
+        '    app.gateway.on("handoff:transfer_back", lambda e: print(f"\\033[2m[{e[\'trikName\']}] Transferred back ({e[\'reason\']})\\033[0m"))\n'
+        '\n'
         '    loaded_triks = app.get_loaded_triks()\n'
         '    if loaded_triks:\n'
         "        print(f\"Loaded triks: {', '.join(loaded_triks)}\")\n"

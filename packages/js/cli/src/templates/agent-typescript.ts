@@ -198,6 +198,23 @@ async function main() {
 
   const app = await initializeAgent();
 
+  // Subscribe to gateway events for real-time status feedback
+  app.gateway.on('handoff:start', ({ trikName }: { trikName: string }) => {
+    process.stdout.write(\`\\x1b[2m[\${trikName}] Connecting...\\x1b[0m\\n\`);
+  });
+  app.gateway.on('handoff:container_start', ({ trikName }: { trikName: string }) => {
+    process.stdout.write(\`\\x1b[2m[\${trikName}] Starting container...\\x1b[0m\\n\`);
+  });
+  app.gateway.on('handoff:thinking', ({ trikName }: { trikName: string }) => {
+    process.stdout.write(\`\\x1b[2m[\${trikName}] Thinking...\\x1b[0m\\n\`);
+  });
+  app.gateway.on('handoff:error', ({ trikName, error }: { trikName: string; error: string }) => {
+    process.stdout.write(\`\\x1b[31m[\${trikName}] Error: \${error}\\x1b[0m\\n\`);
+  });
+  app.gateway.on('handoff:transfer_back', ({ trikName, reason }: { trikName: string; reason: string }) => {
+    process.stdout.write(\`\\x1b[2m[\${trikName}] Transferred back (\${reason})\\x1b[0m\\n\`);
+  });
+
   const loadedTriks = app.getLoadedTriks();
   if (loadedTriks.length > 0) {
     console.log(\`Loaded triks: \${loadedTriks.join(', ')}\`);
