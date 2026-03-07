@@ -64,7 +64,8 @@ dependencies = [
     "langchain-core>=0.3.0",
     "langgraph>=0.2.0",
     "trikhub>=0.6.0",
-    "python-dotenv>=1.0.0",${config.channels === 'cli+telegram' ? `\n    "python-telegram-bot>=21.0",` : ''}
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0",${config.channels === 'cli+telegram' ? `\n    "python-telegram-bot>=21.0",` : ''}
 ]
 `;
 }
@@ -147,6 +148,7 @@ function generateCliPy(): string {
 from __future__ import annotations
 
 import asyncio
+import sys
 
 from dotenv import load_dotenv
 
@@ -154,30 +156,121 @@ load_dotenv()
 
 from agent import initialize_agent
 
+pretty = "--no-pretty" not in sys.argv
+
+if pretty:
+    from rich.console import Console
+    from rich.markdown import Markdown
+    from rich.theme import Theme
+
+    theme = Theme({"trik.name": "bold magenta", "trik.system": "dim italic", "trik.error": "bold red"})
+    console = Console(theme=theme)
+
+
+def render_response(result) -> None:
+    if not pretty:
+        if result.source == "system":
+            print(f"\\n\\033[2m{result.message}\\033[0m\\n")
+        elif result.source != "main":
+            print(f"\\n[{result.source}] {result.message}\\n")
+        else:
+            print(f"\\nAssistant: {result.message}\\n")
+        return
+
+    if result.source == "system":
+        console.print(f"  [trik.system]{result.message}[/]")
+    elif result.source != "main":
+        console.print(f"\\n  [trik.name]{result.source}[/]\\n")
+        md = Markdown(result.message, code_theme="monokai")
+        console.print(md, width=min(console.width, 100))
+        console.print()
+    else:
+        console.print()
+        md = Markdown(result.message, code_theme="monokai")
+        console.print(md, width=min(console.width, 100))
+        console.print()
+
 
 async def main() -> None:
-    print("Loading agent...\\n")
+    if pretty:
+        with console.status("Loading agent..."):
+            app = await initialize_agent()
+    else:
+        print("Loading agent...\\n")
+        app = await initialize_agent()
 
-    app = await initialize_agent()
+    status = None
 
     # Subscribe to gateway events for real-time status feedback
-    app.gateway.on("handoff:start", lambda e: print(f"\\033[2m[{e['trikName']}] Connecting...\\033[0m"))
-    app.gateway.on("handoff:container_start", lambda e: print(f"\\033[2m[{e['trikName']}] Starting container...\\033[0m"))
-    app.gateway.on("handoff:thinking", lambda e: print(f"\\033[2m[{e['trikName']}] Thinking...\\033[0m"))
-    app.gateway.on("handoff:error", lambda e: print(f"\\033[31m[{e['trikName']}] Error: {e['error']}\\033[0m"))
-    app.gateway.on("handoff:transfer_back", lambda e: print(f"\\033[2m[{e['trikName']}] Transferred back ({e['reason']})\\033[0m"))
+    def on_start(e):
+        nonlocal status
+        if pretty:
+            status = console.status(f"  Connecting to {e['trikName']}...")
+            status.start()
+        else:
+            print(f"[{e['trikName']}] Connecting...")
+
+    def on_container(e):
+        nonlocal status
+        if pretty and status:
+            status.update(f"  Starting {e['trikName']} container...")
+        elif not pretty:
+            print(f"[{e['trikName']}] Starting container...")
+
+    def on_thinking(e):
+        nonlocal status
+        if pretty and status:
+            status.update(f"  {e['trikName']} is thinking...")
+        elif not pretty:
+            print(f"[{e['trikName']}] Thinking...")
+
+    def on_error(e):
+        nonlocal status
+        if status:
+            status.stop()
+            status = None
+        if pretty:
+            console.print(f"  [trik.error]\\u2716 [{e['trikName']}] {e['error']}[/]")
+        else:
+            print(f"[{e['trikName']}] Error: {e['error']}")
+
+    def on_transfer_back(e):
+        nonlocal status
+        if status:
+            status.stop()
+            status = None
+        if pretty:
+            console.print(f"  [dim]\\u2190 {e['trikName']} transferred back ({e['reason']})[/]")
+        else:
+            print(f"[{e['trikName']}] Transferred back ({e['reason']})")
+
+    app.gateway.on("handoff:start", on_start)
+    app.gateway.on("handoff:container_start", on_container)
+    app.gateway.on("handoff:thinking", on_thinking)
+    app.gateway.on("handoff:error", on_error)
+    app.gateway.on("handoff:transfer_back", on_transfer_back)
 
     loaded_triks = app.get_loaded_triks()
     if loaded_triks:
-        print(f"Loaded triks: {', '.join(loaded_triks)}")
-    print('Type "/back" to return from a trik handoff, "exit" to quit.')
-    print('Tip: Ask the Agent what to do next\\n')
+        if pretty:
+            names = ", ".join(f"[cyan]{t}[/]" for t in loaded_triks)
+            console.print(f"  [dim]Loaded triks:[/] {names}")
+        else:
+            print(f"Loaded triks: {', '.join(loaded_triks)}")
+    if pretty:
+        console.print("  [dim]Type /back to return from a trik, exit to quit.[/]\\n")
+    else:
+        print('Type "/back" to return from a trik handoff, "exit" to quit.')
+        print('Tip: Ask the Agent what to do next\\n')
 
     session_id = f"cli-{id(app)}"
 
     while True:
         try:
-            user_input = input("You: ").strip()
+            if pretty:
+                user_input = console.input("[bold green]You:[/] ").strip()
+            else:
+                user_input = input("You: ").strip()
         except (KeyboardInterrupt, EOFError):
             print("\\n\\nGoodbye!")
             break
@@ -185,21 +278,31 @@ async def main() -> None:
         if not user_input:
             continue
         if user_input.lower() in ("exit", "quit"):
-            print("\\nGoodbye!")
+            if pretty:
+                console.print("\\n  [dim]Goodbye![/]\\n")
+            else:
+                print("\\nGoodbye!")
             break
 
         try:
+            if status:
+                status.stop()
+                status = None
             result = await app.process_message(user_input, session_id)
-
-            if result.source == "system":
-                print(f"\\n\\033[2m{result.message}\\033[0m\\n")
-            elif result.source != "main":
-                print(f"\\n[{result.source}] {result.message}\\n")
-            else:
-                print(f"\\nAssistant: {result.message}\\n")
+            if status:
+                status.stop()
+                status = None
+            render_response(result)
         except Exception as e:
-            print(f"\\nError: {e}")
-            print("Please try again.\\n")
+            if status:
+                status.stop()
+                status = None
+            if pretty:
+                console.print(f"  [trik.error]Error: {e}[/]")
+                console.print("  [dim]Please try again.[/]\\n")
+            else:
+                print(f"\\nError: {e}")
+                print("Please try again.\\n")
 
 
 if __name__ == "__main__":
