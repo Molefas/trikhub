@@ -294,6 +294,12 @@ class TrikGateway:
             ),
         )
 
+        self._emit("handoff:start", {
+            "trikId": resolved_id,
+            "trikName": loaded.manifest.name,
+            "sessionId": handoff_session.sessionId,
+        })
+
         return await self._route_to_trik(context, session_id)
 
     def get_active_handoff(self) -> dict[str, Any] | None:
@@ -423,18 +429,43 @@ class TrikGateway:
 
         if handoff.turn_count > self._max_turns:
             return await self._auto_transfer_back(
-                f"Maximum turns ({self._max_turns}) exceeded. Automatically transferring back."
+                f"Maximum turns ({self._max_turns}) exceeded. Automatically transferring back.",
+                transfer_reason="max_turns",
             )
+
+        if loaded.containerized:
+            self._emit("handoff:container_start", {
+                "trikId": handoff.trik_id,
+                "trikName": loaded.manifest.name,
+            })
+
+        self._emit("handoff:thinking", {
+            "trikId": handoff.trik_id,
+            "trikName": loaded.manifest.name,
+        })
 
         try:
             response: TrikResponse = await loaded.agent.process_message(message, ctx)
         except Exception as exc:
             # User-facing: include sanitized error for debugging
             sanitized = self._sanitize_error_message(str(exc))
+
+            self._emit("handoff:error", {
+                "trikId": handoff.trik_id,
+                "trikName": loaded.manifest.name,
+                "error": sanitized,
+            })
+
             user_message = f'Trik "{loaded.manifest.name}" encountered an error: {sanitized}'
             # Agent-facing log: generic message, no trik-controlled text
             agent_log = f'Trik "{loaded.manifest.name}" encountered an error and transferred back'
-            return await self._auto_transfer_back(user_message, log_summary=agent_log)
+            return await self._auto_transfer_back(user_message, log_summary=agent_log, transfer_reason="error")
+
+        self._emit("handoff:message", {
+            "trikId": handoff.trik_id,
+            "trikName": loaded.manifest.name,
+            "direction": "from_trik",
+        })
 
         if response.toolCalls:
             self._process_tool_calls(handoff.session_id, loaded.manifest, response.toolCalls)
@@ -449,6 +480,19 @@ class TrikGateway:
                 ),
             )
             summary = self._build_session_summary(handoff.session_id, loaded.manifest)
+
+            self._emit("handoff:summary", {
+                "trikId": handoff.trik_id,
+                "trikName": loaded.manifest.name,
+                "sessionId": handoff.session_id,
+            })
+
+            self._emit("handoff:transfer_back", {
+                "trikId": handoff.trik_id,
+                "trikName": loaded.manifest.name,
+                "reason": "voluntary",
+            })
+
             result = RouteTransferBack(
                 trik_id=handoff.trik_id,
                 message=response.message,
@@ -478,6 +522,19 @@ class TrikGateway:
             ),
         )
         summary = self._build_session_summary(handoff.session_id, loaded.manifest)
+
+        self._emit("handoff:summary", {
+            "trikId": handoff.trik_id,
+            "trikName": loaded.manifest.name,
+            "sessionId": handoff.session_id,
+        })
+
+        self._emit("handoff:transfer_back", {
+            "trikId": handoff.trik_id,
+            "trikName": loaded.manifest.name,
+            "reason": "force",
+        })
+
         result = RouteForceBack(
             trik_id=handoff.trik_id,
             message="",
@@ -500,7 +557,12 @@ class TrikGateway:
             return cleaned
         return cleaned[:max_length] + "..."
 
-    async def _auto_transfer_back(self, reason: str, log_summary: str | None = None) -> RouteTransferBack:
+    async def _auto_transfer_back(
+        self,
+        reason: str,
+        log_summary: str | None = None,
+        transfer_reason: str = "error",
+    ) -> RouteTransferBack:
         handoff = self._active_handoff
         assert handoff is not None
         loaded = self._triks[handoff.trik_id]
@@ -515,6 +577,19 @@ class TrikGateway:
             ),
         )
         summary = self._build_session_summary(handoff.session_id, loaded.manifest)
+
+        self._emit("handoff:summary", {
+            "trikId": handoff.trik_id,
+            "trikName": loaded.manifest.name,
+            "sessionId": handoff.session_id,
+        })
+
+        self._emit("handoff:transfer_back", {
+            "trikId": handoff.trik_id,
+            "trikName": loaded.manifest.name,
+            "reason": transfer_reason,
+        })
+
         result = RouteTransferBack(
             trik_id=handoff.trik_id,
             message=reason,

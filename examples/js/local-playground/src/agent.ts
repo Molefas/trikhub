@@ -34,6 +34,7 @@ export async function initializeAgent() {
 
   return {
     app,
+    gateway: app.gateway,
     loadedTriks: app.getLoadedTriks(),
     provider: providerInfo,
   };
