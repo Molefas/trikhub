@@ -75,6 +75,16 @@ CAPABILITY_PATTERNS: dict[str, list[re.Pattern[str]]] = {
         re.compile(r"""\bimport\s+os\.path\b"""),
         re.compile(r"""\bfrom\s+os\.path\s+import\b"""),
         re.compile(r"""\bfrom\s+os\s+import\s+path\b"""),
+        # SQLite — direct DB access bypasses storage scoping
+        re.compile(r"""\b(?:require|import)\s*\(?\s*['"](?:node:)?sqlite['"]"""),
+        re.compile(r"""\bfrom\s+['"](?:node:)?sqlite['"]"""),
+        re.compile(r"""\bimport\s+sqlite3\b"""),
+        re.compile(r"""\bfrom\s+sqlite3\s+import\b"""),
+        # better-sqlite3 / sql.js / other popular SQLite packages
+        re.compile(r"""\b(?:require|import)\s*\(?\s*['"]better-sqlite3['"]"""),
+        re.compile(r"""\bfrom\s+['"]better-sqlite3['"]"""),
+        re.compile(r"""\b(?:require|import)\s*\(?\s*['"]sql\.js['"]"""),
+        re.compile(r"""\bfrom\s+['"]sql\.js['"]"""),
     ],
     "network": [
         re.compile(r"""\b(?:require|import)\s*\(?\s*['"](?:node:)?(?:http|https|net)['"]"""),

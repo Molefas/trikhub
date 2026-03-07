@@ -72,6 +72,16 @@ const CAPABILITY_PATTERNS: Record<CapabilityCategory, RegExp[]> = {
     /\bimport\s+os\.path\b/,
     /\bfrom\s+os\.path\s+import\b/,
     /\bfrom\s+os\s+import\s+path\b/,
+    // SQLite — direct DB access bypasses storage scoping
+    /\b(?:require|import)\s*\(?\s*['"](?:node:)?sqlite['"]/,
+    /\bfrom\s+['"](?:node:)?sqlite['"]/,
+    /\bimport\s+sqlite3\b/,
+    /\bfrom\s+sqlite3\s+import\b/,
+    // better-sqlite3 / sql.js / other popular SQLite packages
+    /\b(?:require|import)\s*\(?\s*['"]better-sqlite3['"]/,
+    /\bfrom\s+['"]better-sqlite3['"]/,
+    /\b(?:require|import)\s*\(?\s*['"]sql\.js['"]/,
+    /\bfrom\s+['"]sql\.js['"]/,
   ],
 
   network: [
