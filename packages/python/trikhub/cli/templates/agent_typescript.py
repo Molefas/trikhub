@@ -83,6 +83,11 @@ def _generate_package_json(config: CreateAgentConfig, provider: dict[str, str]) 
             "@langchain/langgraph": "^1.0.0",
             "@trikhub/gateway": "latest",
             "dotenv": "^16.4.0",
+            "marked": "^15.0.0",
+            "marked-terminal": "^7.0.0",
+            "chalk": "^5.3.0",
+            "ora": "^8.0.1",
+            "cli-highlight": "^2.1.11",
         },
         "devDependencies": {
             "tsx": "^4.19.0",
@@ -164,7 +169,60 @@ export async function initializeAgent() {{
 def _generate_cli_ts() -> str:
     return r"""import 'dotenv/config';
 import * as readline from 'readline';
+import chalk from 'chalk';
+import ora from 'ora';
+import { Marked } from 'marked';
+import TerminalRenderer from 'marked-terminal';
+import { highlight } from 'cli-highlight';
 import { initializeAgent } from './agent.js';
+
+const pretty = !process.argv.includes('--no-pretty');
+
+const marked = new Marked();
+if (pretty) {
+  marked.use({
+    renderer: new TerminalRenderer({
+      code: (code: string) => {
+        try {
+          return '\n' + highlight(code, { ignoreIllegals: true }) + '\n';
+        } catch {
+          return '\n' + chalk.gray(code) + '\n';
+        }
+      },
+      heading: (text: string, level: number) => {
+        const prefix = level <= 2 ? chalk.bold.cyan : chalk.bold;
+        return '\n' + prefix(text) + '\n';
+      },
+      listitem: (text: string) => '  ' + chalk.dim('•') + ' ' + text + '\n',
+      paragraph: (text: string) => text + '\n',
+      strong: (text: string) => chalk.bold(text),
+      em: (text: string) => chalk.italic(text),
+      codespan: (text: string) => chalk.cyan(text),
+      link: (href: string, _title: string, text: string) => text + chalk.dim(' (' + href + ')'),
+      hr: () => chalk.dim('─'.repeat(Math.min(process.stdout.columns || 80, 60))) + '\n',
+    } as any),
+  });
+}
+
+function render(text: string): string {
+  if (!pretty) return text;
+  return (marked.parse(text) as string).trimEnd();
+}
+
+function renderResponse(result: { source: string; message: string }): void {
+  if (result.source === 'system') {
+    console.log('\n  ' + chalk.dim.italic(result.message) + '\n');
+  } else if (result.source !== 'main') {
+    console.log('\n  ' + chalk.bold.magenta(result.source) + '\n');
+    const rendered = render(result.message);
+    const indented = rendered.split('\n').map((l: string) => '  ' + l).join('\n');
+    console.log(indented + '\n');
+  } else {
+    const rendered = render(result.message);
+    const indented = rendered.split('\n').map((l: string) => '  ' + l).join('\n');
+    console.log('\n' + indented + '\n');
+  }
+}
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -178,58 +236,86 @@ function prompt(question: string): Promise<string> {
 }
 
 async function main() {
-  console.log('Loading agent...\n');
+  const loadingSpinner = pretty ? ora('Loading agent...').start() : null;
+  if (!pretty) console.log('Loading agent...\n');
 
   const app = await initializeAgent();
 
-  // Subscribe to gateway events for real-time status feedback
+  if (loadingSpinner) loadingSpinner.stop();
+
+  let spinner: ReturnType<typeof ora> | null = null;
+
+  // Subscribe to gateway events
   app.gateway.on('handoff:start', ({ trikName }: { trikName: string }) => {
-    process.stdout.write(`\x1b[2m[${trikName}] Connecting...\x1b[0m\n`);
+    if (pretty) {
+      spinner = ora({ text: chalk.dim(`Connecting to ${trikName}...`), indent: 2 }).start();
+    } else {
+      console.log(`[${trikName}] Connecting...`);
+    }
   });
   app.gateway.on('handoff:container_start', ({ trikName }: { trikName: string }) => {
-    process.stdout.write(`\x1b[2m[${trikName}] Starting container...\x1b[0m\n`);
+    if (pretty && spinner) {
+      spinner.text = chalk.dim(`Starting ${trikName} container...`);
+    } else if (!pretty) {
+      console.log(`[${trikName}] Starting container...`);
+    }
   });
   app.gateway.on('handoff:thinking', ({ trikName }: { trikName: string }) => {
-    process.stdout.write(`\x1b[2m[${trikName}] Thinking...\x1b[0m\n`);
+    if (pretty && spinner) {
+      spinner.text = chalk.dim(`${trikName} is thinking...`);
+    } else if (!pretty) {
+      console.log(`[${trikName}] Thinking...`);
+    }
   });
   app.gateway.on('handoff:error', ({ trikName, error }: { trikName: string; error: string }) => {
-    process.stdout.write(`\x1b[31m[${trikName}] Error: ${error}\x1b[0m\n`);
+    if (spinner) spinner.stop();
+    if (pretty) {
+      console.log('  ' + chalk.red(`\u2716 [${trikName}] ${error}`));
+    } else {
+      console.log(`[${trikName}] Error: ${error}`);
+    }
   });
   app.gateway.on('handoff:transfer_back', ({ trikName, reason }: { trikName: string; reason: string }) => {
-    process.stdout.write(`\x1b[2m[${trikName}] Transferred back (${reason})\x1b[0m\n`);
+    if (spinner) spinner.stop();
+    if (pretty) {
+      console.log('  ' + chalk.dim(`\u2190 ${trikName} transferred back (${reason})`));
+    } else {
+      console.log(`[${trikName}] Transferred back (${reason})`);
+    }
   });
 
   const loadedTriks = app.getLoadedTriks();
   if (loadedTriks.length > 0) {
-    console.log(`Loaded triks: ${loadedTriks.join(', ')}`);
+    console.log(pretty
+      ? chalk.dim('  Loaded triks: ') + loadedTriks.map((t: string) => chalk.cyan(t)).join(chalk.dim(', '))
+      : `Loaded triks: ${loadedTriks.join(', ')}`
+    );
   }
-  console.log('Type "/back" to return from a trik handoff, "exit" to quit.');
-  console.log('Tip: Ask the Agent what to do next\n');
+  console.log(pretty
+    ? chalk.dim('  Type /back to return from a trik, exit to quit.\n')
+    : 'Type "/back" to return from a trik handoff, "exit" to quit.\n'
+  );
 
   const sessionId = `cli-${Date.now()}`;
 
   while (true) {
-    const userInput = await prompt('You: ');
+    const userInput = await prompt(pretty ? chalk.bold.green('You: ') : 'You: ');
 
     if (!userInput.trim()) continue;
     if (userInput.toLowerCase() === 'exit' || userInput.toLowerCase() === 'quit') {
-      console.log('\nGoodbye!');
+      console.log(pretty ? '\n  ' + chalk.dim('Goodbye!') + '\n' : '\nGoodbye!');
       break;
     }
 
     try {
+      if (spinner) spinner.stop();
       const result = await app.processMessage(userInput, sessionId);
-
-      if (result.source === 'system') {
-        console.log(`\n\x1b[2m${result.message}\x1b[0m\n`);
-      } else if (result.source !== 'main') {
-        console.log(`\n[${result.source}] ${result.message}\n`);
-      } else {
-        console.log(`\nAssistant: ${result.message}\n`);
-      }
+      if (spinner) spinner.stop();
+      renderResponse(result);
     } catch (error) {
-      console.error('\nError:', error);
-      console.log('Please try again.\n');
+      if (spinner) spinner.stop();
+      console.error(pretty ? '  ' + chalk.red('Error: ' + error) : '\nError: ' + error);
+      console.log(pretty ? '  ' + chalk.dim('Please try again.') + '\n' : 'Please try again.\n');
     }
   }
 
