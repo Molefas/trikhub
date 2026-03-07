@@ -1,5 +1,24 @@
 # @trikhub/cli
 
+## 0.18.0
+
+### Minor Changes
+
+- [#64](https://github.com/Molefas/trikhub/pull/64) [`29dffb0`](https://github.com/Molefas/trikhub/commit/29dffb0e345cd006519f3c42c4ca6d27a9df0c62) Thanks [@Molefas](https://github.com/Molefas)! - Add config validation warnings: gateway warns on trik load when required config is missing, CLI shows config requirements after install
+
+- [#65](https://github.com/Molefas/trikhub/pull/65) [`beb5491`](https://github.com/Molefas/trikhub/commit/beb5491101065c04827e8752c86e6eeda7e9d287) Thanks [@Molefas](https://github.com/Molefas)! - **BREAKING:** Require Node.js >= 22.5 (previously >= 18.0)
+
+  - Replace `better-sqlite3` native dependency with Node.js built-in `node:sqlite`, eliminating the need for C++ build tools (python3, make, g++) during npm install
+  - Add non-interactive mode (`--yes`) to `trik create-agent` for CI/scripting use
+  - Fix Python trik scaffolds to include `manifest.json` inside the pip-installable package so the gateway can discover it after `pip install`
+  - Add install smoke test CI workflow
+
+### Patch Changes
+
+- Updated dependencies [[`beb5491`](https://github.com/Molefas/trikhub/commit/beb5491101065c04827e8752c86e6eeda7e9d287)]:
+  - @trikhub/manifest@0.18.0
+  - @trikhub/linter@0.18.0
+
 ## 0.17.0
 
 ### Minor Changes
