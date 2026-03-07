@@ -69,6 +69,7 @@ dependencies = [
     "langgraph>=0.2.0",
     "trikhub>=0.6.0",
     "python-dotenv>=1.0.0",
+    "rich>=13.0.0",
 ]
 """
 
@@ -131,68 +132,169 @@ async def initialize_agent():
 
 
 def _generate_cli_py() -> str:
-    return (
-        '#!/usr/bin/env python3\n'
-        '"""CLI for the TrikHub-powered agent."""\n'
-        '\n'
-        'from __future__ import annotations\n'
-        '\n'
-        'import asyncio\n'
-        '\n'
-        'from dotenv import load_dotenv\n'
-        '\n'
-        'load_dotenv()\n'
-        '\n'
-        'from agent import initialize_agent\n'
-        '\n'
-        '\n'
-        'async def main() -> None:\n'
-        '    print("Loading agent...\\n")\n'
-        '\n'
-        '    app = await initialize_agent()\n'
-        '\n'
-        '    # Subscribe to gateway events for real-time status feedback\n'
-        '    app.gateway.on("handoff:start", lambda e: print(f"\\033[2m[{e[\'trikName\']}] Connecting...\\033[0m"))\n'
-        '    app.gateway.on("handoff:container_start", lambda e: print(f"\\033[2m[{e[\'trikName\']}] Starting container...\\033[0m"))\n'
-        '    app.gateway.on("handoff:thinking", lambda e: print(f"\\033[2m[{e[\'trikName\']}] Thinking...\\033[0m"))\n'
-        '    app.gateway.on("handoff:error", lambda e: print(f"\\033[31m[{e[\'trikName\']}] Error: {e[\'error\']}\\033[0m"))\n'
-        '    app.gateway.on("handoff:transfer_back", lambda e: print(f"\\033[2m[{e[\'trikName\']}] Transferred back ({e[\'reason\']})\\033[0m"))\n'
-        '\n'
-        '    loaded_triks = app.get_loaded_triks()\n'
-        '    if loaded_triks:\n'
-        "        print(f\"Loaded triks: {', '.join(loaded_triks)}\")\n"
-        '    print(\'Type "/back" to return from a trik handoff, "exit" to quit.\')\n'
-        '    print(\'Tip: Ask the Agent what to do next\\n\')\n'
-        '\n'
-        '    session_id = f"cli-{id(app)}"\n'
-        '\n'
-        '    while True:\n'
-        '        try:\n'
-        '            user_input = input("You: ").strip()\n'
-        '        except (KeyboardInterrupt, EOFError):\n'
-        '            print("\\n\\nGoodbye!")\n'
-        '            break\n'
-        '\n'
-        '        if not user_input:\n'
-        '            continue\n'
-        '        if user_input.lower() in ("exit", "quit"):\n'
-        '            print("\\nGoodbye!")\n'
-        '            break\n'
-        '\n'
-        '        try:\n'
-        '            result = await app.process_message(user_input, session_id)\n'
-        '\n'
-        '            if result.source == "system":\n'
-        '                print(f"\\n\\033[2m{result.message}\\033[0m\\n")\n'
-        '            elif result.source != "main":\n'
-        '                print(f"\\n[{result.source}] {result.message}\\n")\n'
-        '            else:\n'
-        '                print(f"\\nAssistant: {result.message}\\n")\n'
-        '        except Exception as e:\n'
-        '            print(f"\\nError: {e}")\n'
-        '            print("Please try again.\\n")\n'
-        '\n'
-        '\n'
-        'if __name__ == "__main__":\n'
-        '    asyncio.run(main())\n'
-    )
+    return '''#!/usr/bin/env python3
+"""CLI for the TrikHub-powered agent."""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from agent import initialize_agent
+
+pretty = "--no-pretty" not in sys.argv
+
+if pretty:
+    from rich.console import Console
+    from rich.markdown import Markdown
+    from rich.theme import Theme
+
+    theme = Theme({"trik.name": "bold magenta", "trik.system": "dim italic", "trik.error": "bold red"})
+    console = Console(theme=theme)
+
+
+def render_response(result) -> None:
+    if not pretty:
+        if result.source == "system":
+            print(f"\\n\\033[2m{result.message}\\033[0m\\n")
+        elif result.source != "main":
+            print(f"\\n[{result.source}] {result.message}\\n")
+        else:
+            print(f"\\nAssistant: {result.message}\\n")
+        return
+
+    if result.source == "system":
+        console.print(f"  [trik.system]{result.message}[/]")
+    elif result.source != "main":
+        console.print(f"\\n  [trik.name]{result.source}[/]\\n")
+        md = Markdown(result.message, code_theme="monokai")
+        console.print(md, width=min(console.width, 100))
+        console.print()
+    else:
+        console.print()
+        md = Markdown(result.message, code_theme="monokai")
+        console.print(md, width=min(console.width, 100))
+        console.print()
+
+
+async def main() -> None:
+    if pretty:
+        with console.status("Loading agent..."):
+            app = await initialize_agent()
+    else:
+        print("Loading agent...\\n")
+        app = await initialize_agent()
+
+    status = None
+
+    # Subscribe to gateway events for real-time status feedback
+    def on_start(e):
+        nonlocal status
+        if pretty:
+            status = console.status(f"  Connecting to {e[\'trikName\']}...")
+            status.start()
+        else:
+            print(f"[{e[\'trikName\']}] Connecting...")
+
+    def on_container(e):
+        nonlocal status
+        if pretty and status:
+            status.update(f"  Starting {e[\'trikName\']} container...")
+        elif not pretty:
+            print(f"[{e[\'trikName\']}] Starting container...")
+
+    def on_thinking(e):
+        nonlocal status
+        if pretty and status:
+            status.update(f"  {e[\'trikName\']} is thinking...")
+        elif not pretty:
+            print(f"[{e[\'trikName\']}] Thinking...")
+
+    def on_error(e):
+        nonlocal status
+        if status:
+            status.stop()
+            status = None
+        if pretty:
+            console.print(f"  [trik.error]\\u2716 [{e[\'trikName\']}] {e[\'error\']}[/]")
+        else:
+            print(f"[{e[\'trikName\']}] Error: {e[\'error\']}")
+
+    def on_transfer_back(e):
+        nonlocal status
+        if status:
+            status.stop()
+            status = None
+        if pretty:
+            console.print(f"  [dim]\\u2190 {e[\'trikName\']} transferred back ({e[\'reason\']})[/]")
+        else:
+            print(f"[{e[\'trikName\']}] Transferred back ({e[\'reason\']})")
+
+    app.gateway.on("handoff:start", on_start)
+    app.gateway.on("handoff:container_start", on_container)
+    app.gateway.on("handoff:thinking", on_thinking)
+    app.gateway.on("handoff:error", on_error)
+    app.gateway.on("handoff:transfer_back", on_transfer_back)
+
+    loaded_triks = app.get_loaded_triks()
+    if loaded_triks:
+        if pretty:
+            names = ", ".join(f"[cyan]{t}[/]" for t in loaded_triks)
+            console.print(f"  [dim]Loaded triks:[/] {names}")
+        else:
+            print(f"Loaded triks: {\', \'.join(loaded_triks)}")
+    if pretty:
+        console.print("  [dim]Type /back to return from a trik, exit to quit.[/]\\n")
+    else:
+        print(\'Type "/back" to return from a trik handoff, "exit" to quit.\')
+        print(\'Tip: Ask the Agent what to do next\\n\')
+
+    session_id = f"cli-{id(app)}"
+
+    while True:
+        try:
+            if pretty:
+                user_input = console.input("[bold green]You:[/] ").strip()
+            else:
+                user_input = input("You: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\\n\\nGoodbye!")
+            break
+
+        if not user_input:
+            continue
+        if user_input.lower() in ("exit", "quit"):
+            if pretty:
+                console.print("\\n  [dim]Goodbye![/]\\n")
+            else:
+                print("\\nGoodbye!")
+            break
+
+        try:
+            if status:
+                status.stop()
+                status = None
+            result = await app.process_message(user_input, session_id)
+            if status:
+                status.stop()
+                status = None
+            render_response(result)
+        except Exception as e:
+            if status:
+                status.stop()
+                status = None
+            if pretty:
+                console.print(f"  [trik.error]Error: {e}[/]")
+                console.print("  [dim]Please try again.[/]\\n")
+            else:
+                print(f"\\nError: {e}")
+                print("Please try again.\\n")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+'''
