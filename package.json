@@ -24,7 +24,9 @@
     "lint:trik": "node packages/js/linter/dist/cli.js",
     "changeset": "changeset",
     "version": "changeset version && node scripts/sync-python-version.mjs",
-    "release": "pnpm build && changeset publish"
+    "release": "pnpm build && changeset publish",
+    "dev:publish": "node scripts/dev-publish.mjs",
+    "dev:publish:dry": "node scripts/dev-publish.mjs --dry"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.0",

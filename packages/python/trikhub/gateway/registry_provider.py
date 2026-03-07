@@ -12,6 +12,8 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
@@ -159,42 +161,34 @@ class GatewayRegistryProvider:
                     error="Version not found",
                 )
 
-            trik_dir = self._get_trik_dir(trik_id)
-            trik_dir.mkdir(parents=True, exist_ok=True)
+            trik_runtime = target.get("runtime", "python")
+            is_same_runtime = trik_runtime == "python"
+            project_root = self._get_project_root()
+            has_pyproject = (project_root / "pyproject.toml").exists()
+            needs_container = self._needs_containerization(target.get("manifest"))
 
-            git_url = f"https://github.com/{trik_info['githubRepo']}.git"
-            proc = await asyncio.create_subprocess_exec(
-                "git",
-                "clone",
-                "--depth",
-                "1",
-                "--branch",
-                target["gitTag"],
-                git_url,
-                str(trik_dir),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                raise RuntimeError(
-                    f"git clone failed: {stderr.decode()[:200]}"
+            # Containerized triks (filesystem/shell) always go to .trikhub/triks/
+            # so the Docker mount gets a self-contained directory.
+            use_pip = is_same_runtime and has_pyproject and not needs_container
+
+            if use_pip:
+                # Same runtime, non-containerized: install via pip from git URL
+                git_tag = target["gitTag"]
+                pip_url = f"git+https://github.com/{trik_info['githubRepo']}@{git_tag}"
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", pip_url, "--quiet"],
+                    check=True,
+                    capture_output=True,
                 )
+                # Discover installed path for loading
+                trik_path = self._find_pip_installed_trik(trik_id)
+            else:
+                # Cross-language, containerized, or no pyproject.toml: download to .trikhub/triks/
+                self._download_to_triks_dir(trik_id, trik_info["githubRepo"], target["gitTag"])
+                trik_path = str(self._get_trik_dir(trik_id))
 
-            git_dir = trik_dir / ".git"
-            if git_dir.exists():
-                shutil.rmtree(git_dir)
-
-            # Write identity file for trusted scoped name
-            identity_path = trik_dir / ".trikhub-identity.json"
-            identity = {
-                "scopedName": trik_id,
-                "installedAt": datetime.now(timezone.utc).isoformat(),
-            }
-            identity_path.write_text(json.dumps(identity, indent=2))
-
-            self._add_to_config(trik_id)
-            await self._gateway.load_trik(str(trik_dir))
+            self._add_to_config(trik_id, trik_runtime)
+            await self._gateway.load_trik(trik_path)
 
             return TrikInstallResult(
                 status="installed",
@@ -216,9 +210,13 @@ class GatewayRegistryProvider:
         try:
             self._gateway.unload_trik(trik_id)
 
+            # Try to remove from .trikhub/triks/ (cross-language)
             trik_dir = self._get_trik_dir(trik_id)
             if trik_dir.exists():
                 shutil.rmtree(trik_dir)
+
+            # Try to remove via pip (same-runtime Python triks)
+            self._try_pip_uninstall(trik_id)
 
             self._remove_from_config(trik_id)
 
@@ -328,13 +326,113 @@ class GatewayRegistryProvider:
     # Private helpers
     # --------------------------------------------------------------------------
 
+    @staticmethod
+    def _needs_containerization(manifest: dict | None) -> bool:
+        """Check if a manifest declares filesystem or shell capabilities."""
+        if not manifest:
+            return False
+        caps = manifest.get("capabilities") or {}
+        fs = caps.get("filesystem") or {}
+        sh = caps.get("shell") or {}
+        return bool(fs.get("enabled") or sh.get("enabled"))
+
+    def _get_project_root(self) -> Path:
+        """Get the project root directory (parent of configDir/.trikhub)."""
+        return self._config_dir.parent
+
+    def _download_to_triks_dir(
+        self, trik_id: str, github_repo: str, git_tag: str
+    ) -> None:
+        """Download a cross-language trik to .trikhub/triks/."""
+        trik_dir = self._get_trik_dir(trik_id)
+        if trik_dir.exists():
+            shutil.rmtree(trik_dir)
+        trik_dir.mkdir(parents=True, exist_ok=True)
+
+        git_url = f"https://github.com/{github_repo}.git"
+        subprocess.run(
+            ["git", "clone", "--depth", "1", "--branch", git_tag, git_url, str(trik_dir)],
+            check=True,
+            capture_output=True,
+        )
+
+        git_dir = trik_dir / ".git"
+        if git_dir.exists():
+            shutil.rmtree(git_dir)
+
+        # Install dependencies for JS triks (detect package manager from lockfile)
+        if (trik_dir / "package.json").exists():
+            if (trik_dir / "pnpm-lock.yaml").exists():
+                cmd = ["pnpm", "install", "--frozen-lockfile", "--prod"]
+            elif (trik_dir / "yarn.lock").exists():
+                cmd = ["yarn", "install", "--production", "--frozen-lockfile"]
+            else:
+                cmd = ["npm", "install", "--production"]
+            subprocess.run(
+                cmd,
+                cwd=str(trik_dir),
+                check=False,
+                capture_output=True,
+            )
+        elif (trik_dir / "requirements.txt").exists():
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet"],
+                cwd=str(trik_dir),
+                check=False,
+                capture_output=True,
+            )
+
+        # Write identity file for trusted scoped name
+        identity_path = trik_dir / ".trikhub-identity.json"
+        identity = {
+            "scopedName": trik_id,
+            "installedAt": datetime.now(timezone.utc).isoformat(),
+        }
+        identity_path.write_text(json.dumps(identity, indent=2))
+
+    def _find_pip_installed_trik(self, trik_id: str) -> str:
+        """Find the installed path for a pip-installed Python trik."""
+        # Try to discover via trikhub discovery if available
+        try:
+            from trikhub.cli.discovery import discover_triks_in_site_packages
+            for t in discover_triks_in_site_packages():
+                if t.package_name == trik_id or t.trik_id == trik_id:
+                    return str(t.path)
+        except Exception:
+            pass
+        # Fallback: return the trik_id and let the gateway resolve it
+        return trik_id
+
+    def _try_pip_uninstall(self, trik_id: str) -> None:
+        """Try to uninstall a Python trik via pip."""
+        # Generate pip package name candidates from @scope/name
+        if trik_id.startswith("@"):
+            parts = trik_id.lstrip("@").split("/", 1)
+            if len(parts) == 2:
+                candidates = [parts[1].replace("_", "-"), f"{parts[0]}-{parts[1].replace('_', '-')}"]
+            else:
+                candidates = [parts[0]]
+        else:
+            candidates = [trik_id.replace("_", "-")]
+
+        for pip_name in candidates:
+            try:
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "uninstall", pip_name, "-y", "--quiet"],
+                    check=True,
+                    capture_output=True,
+                )
+                break
+            except subprocess.CalledProcessError:
+                continue
+
     def _get_trik_dir(self, trik_id: str) -> Path:
         if trik_id.startswith("@"):
             scope, name = trik_id.split("/", 1)
             return self._config_dir / "triks" / scope / name
         return self._config_dir / "triks" / trik_id
 
-    def _add_to_config(self, trik_id: str) -> None:
+    def _add_to_config(self, trik_id: str, runtime: str | None = None) -> None:
         config_path = self._config_dir / "config.json"
         if config_path.exists():
             config = json.loads(config_path.read_text())
@@ -343,6 +441,12 @@ class GatewayRegistryProvider:
 
         if trik_id not in config["triks"]:
             config["triks"].append(trik_id)
+
+        if runtime:
+            if "runtimes" not in config:
+                config["runtimes"] = {}
+            config["runtimes"][trik_id] = runtime
+
         config_path.write_text(json.dumps(config, indent=2))
 
     def _remove_from_config(self, trik_id: str) -> None:

@@ -1148,8 +1148,22 @@ export class TrikGateway extends EventEmitter {
             capabilities: context.capabilities,
           });
 
+          // Rewrite container-internal port references to actual host ports
+          let responseMessage = result.message;
+          for (const containerPort of manifest.capabilities?.shell?.exposePorts ?? []) {
+            const hostPort = handle.getHostPort(containerPort);
+            if (hostPort && hostPort !== containerPort) {
+              const portStr = String(containerPort);
+              const hostPortStr = String(hostPort);
+              // Replace localhost:PORT and 127.0.0.1:PORT patterns
+              responseMessage = responseMessage
+                .replace(new RegExp(`localhost:${portStr}\\b`, 'g'), `localhost:${hostPortStr}`)
+                .replace(new RegExp(`127\\.0\\.0\\.1:${portStr}\\b`, 'g'), `127.0.0.1:${hostPortStr}`);
+            }
+          }
+
           return {
-            message: result.message,
+            message: responseMessage,
             transferBack: result.transferBack,
             toolCalls: result.toolCalls,
           };

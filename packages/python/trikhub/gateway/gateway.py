@@ -1005,6 +1005,13 @@ class TrikGateway:
 
         if manifest.agent.mode == "conversational":
 
+            expose_ports = (
+                manifest.capabilities.shell.exposePorts
+                if manifest.capabilities and manifest.capabilities.shell
+                   and hasattr(manifest.capabilities.shell, "exposePorts")
+                else None
+            ) or []
+
             async def _process_message(message: str, context: TrikContext) -> TrikResponse:
                 manager = gateway._ensure_container_manager()
                 container_id = scoped_name or manifest.id
@@ -1015,8 +1022,10 @@ class TrikGateway:
                         runtime=runtime_str,
                         workspace_path=workspace_path,
                         trik_path=os.path.abspath(trik_path),
+                        expose_ports=expose_ports or None,
                     ),
                 )
+
                 handle.set_storage_context(context.storage)
                 try:
                     result = await handle.process_message(
@@ -1026,8 +1035,22 @@ class TrikGateway:
                         config=_config_to_record(context.config),
                         storage_namespace=scoped_name or manifest.id,
                     )
+
+                    # Rewrite container-internal port references to actual host ports
+                    import re as _re
+                    response_message = result.message
+                    for cport in expose_ports:
+                        hport = handle.get_host_port(cport)
+                        if hport and hport != cport:
+                            response_message = _re.sub(
+                                rf"localhost:{cport}\b", f"localhost:{hport}", response_message
+                            )
+                            response_message = _re.sub(
+                                rf"127\.0\.0\.1:{cport}\b", f"127.0.0.1:{hport}", response_message
+                            )
+
                     return TrikResponse(
-                        message=result.message,
+                        message=response_message,
                         transferBack=result.transfer_back,
                         toolCalls=(
                             [ToolCallRecord(**tc) for tc in result.tool_calls]
@@ -1054,6 +1077,7 @@ class TrikGateway:
                         runtime=runtime_str,
                         workspace_path=workspace_path,
                         trik_path=os.path.abspath(trik_path),
+                        expose_ports=expose_ports or None,
                     ),
                 )
                 handle.set_storage_context(context.storage)

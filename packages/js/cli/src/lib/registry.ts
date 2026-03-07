@@ -4,6 +4,7 @@
  * Connects to the TrikHub registry API to search and fetch triks.
  */
 
+import type { TrikManifest } from '@trikhub/manifest';
 import {
   TrikInfo,
   TrikVersion,
@@ -133,7 +134,7 @@ function apiToTrikVersion(api: ApiTrikVersion): TrikVersion {
     publishedAt: api.publishedAt,
     downloads: api.downloads,
     runtime: extractRuntime(api.manifest),
-    manifest: api.manifest as Record<string, unknown> | undefined,
+    manifest: api.manifest as TrikManifest | undefined,
   };
 }
 
