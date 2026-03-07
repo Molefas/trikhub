@@ -71,6 +71,50 @@ describe('filesystem detection', () => {
     const fsCap = result.capabilities.find((c) => c.category === 'filesystem');
     expect(fsCap).toBeDefined();
   });
+
+  it('detects node:sqlite import', async () => {
+    const dir = await makeTrik('fs-sqlite-node', {
+      'src/index.ts': `import { DatabaseSync } from 'node:sqlite';`,
+    });
+
+    const result = await scanCapabilities(dir);
+
+    const fsCap = result.capabilities.find((c) => c.category === 'filesystem');
+    expect(fsCap).toBeDefined();
+  });
+
+  it('detects Python sqlite3 import', async () => {
+    const dir = await makeTrik('fs-sqlite3-py', {
+      'src/db.py': `import sqlite3\nconn = sqlite3.connect('test.db')`,
+    });
+
+    const result = await scanCapabilities(dir);
+
+    const fsCap = result.capabilities.find((c) => c.category === 'filesystem');
+    expect(fsCap).toBeDefined();
+  });
+
+  it('detects better-sqlite3 import', async () => {
+    const dir = await makeTrik('fs-better-sqlite3', {
+      'src/db.ts': `import Database from 'better-sqlite3';`,
+    });
+
+    const result = await scanCapabilities(dir);
+
+    const fsCap = result.capabilities.find((c) => c.category === 'filesystem');
+    expect(fsCap).toBeDefined();
+  });
+
+  it('detects sql.js import', async () => {
+    const dir = await makeTrik('fs-sqljs', {
+      'src/db.ts': `import initSqlJs from 'sql.js';`,
+    });
+
+    const result = await scanCapabilities(dir);
+
+    const fsCap = result.capabilities.find((c) => c.category === 'filesystem');
+    expect(fsCap).toBeDefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
