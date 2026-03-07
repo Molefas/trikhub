@@ -160,6 +160,13 @@ async def main() -> None:
 
     app = await initialize_agent()
 
+    # Subscribe to gateway events for real-time status feedback
+    app.gateway.on("handoff:start", lambda e: print(f"\\033[2m[{e['trikName']}] Connecting...\\033[0m"))
+    app.gateway.on("handoff:container_start", lambda e: print(f"\\033[2m[{e['trikName']}] Starting container...\\033[0m"))
+    app.gateway.on("handoff:thinking", lambda e: print(f"\\033[2m[{e['trikName']}] Thinking...\\033[0m"))
+    app.gateway.on("handoff:error", lambda e: print(f"\\033[31m[{e['trikName']}] Error: {e['error']}\\033[0m"))
+    app.gateway.on("handoff:transfer_back", lambda e: print(f"\\033[2m[{e['trikName']}] Transferred back ({e['reason']})\\033[0m"))
+
     loaded_triks = app.get_loaded_triks()
     if loaded_triks:
         print(f"Loaded triks: {', '.join(loaded_triks)}")
