@@ -27,8 +27,8 @@
   },
   "dependencies": {
     "@inquirer/prompts": "^7.2.1",
-    "@trikhub/linter": "0.17.0",
-    "@trikhub/manifest": "0.17.0",
+    "@trikhub/linter": "workspace:*",
+    "@trikhub/manifest": "workspace:*",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
     "ora": "^8.0.1",
