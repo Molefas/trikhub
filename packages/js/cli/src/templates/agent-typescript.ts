@@ -71,7 +71,6 @@ function generatePackageJson(config: CreateAgentConfig): string {
     '@trikhub/gateway': 'latest',
     dotenv: '^16.4.0',
     marked: '^15.0.0',
-    'marked-terminal': '^7.0.0',
     chalk: '^5.3.0',
     ora: '^8.0.1',
     'cli-highlight': '^2.1.11',
@@ -188,7 +187,6 @@ import * as readline from 'readline';
 import chalk from 'chalk';
 import ora from 'ora';
 import { Marked } from 'marked';
-import TerminalRenderer from 'marked-terminal';
 import { highlight } from 'cli-highlight';
 import { initializeAgent } from './agent.js';
 
@@ -197,32 +195,58 @@ const pretty = !process.argv.includes('--no-pretty');
 const marked = new Marked();
 if (pretty) {
   marked.use({
-    renderer: new TerminalRenderer({
-      code: (code: string) => {
-        try {
-          return '\\n' + highlight(code, { ignoreIllegals: true }) + '\\n';
-        } catch {
-          return '\\n' + chalk.gray(code) + '\\n';
-        }
+    renderer: {
+      code({ text, lang }: { text: string; lang?: string }) {
+        try { return '\\n' + highlight(text, { language: lang || undefined, ignoreIllegals: true }) + '\\n'; }
+        catch { return '\\n' + chalk.gray(text) + '\\n'; }
       },
-      heading: (text: string, level: number) => {
-        const prefix = level <= 2 ? chalk.bold.cyan : chalk.bold;
+      heading({ tokens, depth }: any) {
+        const text = this.parser.parseInline(tokens);
+        const prefix = depth <= 2 ? chalk.bold.cyan : chalk.bold;
         return '\\n' + prefix(text) + '\\n';
       },
-      listitem: (text: string) => '  ' + chalk.dim('•') + ' ' + text + '\\n',
-      paragraph: (text: string) => text + '\\n',
-      strong: (text: string) => chalk.bold(text),
-      em: (text: string) => chalk.italic(text),
-      codespan: (text: string) => chalk.cyan(text),
-      link: (href: string, _title: string, text: string) => text + chalk.dim(' (' + href + ')'),
-      hr: () => chalk.dim('─'.repeat(Math.min(process.stdout.columns || 80, 60))) + '\\n',
-    } as any),
+      list({ items, ordered }: any) {
+        return items.map((item: any, i: number) => {
+          const text = this.parser.parse(item.tokens).trim();
+          const bullet = ordered ? chalk.dim((i + 1) + '.') : chalk.dim('\\u2022');
+          return '  ' + bullet + ' ' + text;
+        }).join('\\n') + '\\n';
+      },
+      paragraph({ tokens }: any) {
+        return this.parser.parseInline(tokens) + '\\n';
+      },
+      strong({ tokens }: any) {
+        return chalk.bold(this.parser.parseInline(tokens));
+      },
+      em({ tokens }: any) {
+        return chalk.italic(this.parser.parseInline(tokens));
+      },
+      codespan({ text }: { text: string }) {
+        return chalk.cyan(text);
+      },
+      link({ href, tokens }: any) {
+        const text = this.parser.parseInline(tokens);
+        return text + chalk.dim(' (' + href + ')');
+      },
+      hr() {
+        return chalk.dim('\\u2500'.repeat(Math.min(process.stdout.columns || 80, 60))) + '\\n';
+      },
+    },
   });
+}
+
+function unescape(text: string): string {
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
 }
 
 function render(text: string): string {
   if (!pretty) return text;
-  return (marked.parse(text) as string).trimEnd();
+  return unescape((marked.parse(text) as string).trimEnd());
 }
 
 function renderResponse(result: { source: string; message: string }): void {
@@ -240,17 +264,6 @@ function renderResponse(result: { source: string; message: string }): void {
   }
 }
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
-
-function prompt(question: string): Promise<string> {
-  return new Promise((resolve) => {
-    rl.question(question, resolve);
-  });
-}
-
 async function main() {
   const loadingSpinner = pretty ? ora('Loading agent...').start() : null;
   if (!pretty) console.log('Loading agent...\\n');
@@ -258,6 +271,17 @@ async function main() {
   const app = await initializeAgent();
 
   if (loadingSpinner) loadingSpinner.stop();
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  function prompt(question: string): Promise<string> {
+    return new Promise((resolve) => {
+      rl.question(question, resolve);
+    });
+  }
 
   let spinner: ReturnType<typeof ora> | null = null;
 
@@ -340,7 +364,7 @@ async function main() {
 
 main().catch((error) => {
   console.error(error);
-  rl.close();
+  process.exit(1);
 });
 `;
 }
