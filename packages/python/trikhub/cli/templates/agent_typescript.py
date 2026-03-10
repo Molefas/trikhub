@@ -261,9 +261,13 @@ async function main() {
     }
   });
   app.gateway.on('handoff:thinking', ({ trikName }: { trikName: string }) => {
-    if (pretty && spinner) {
-      spinner.text = chalk.dim(`${trikName} is thinking...`);
-    } else if (!pretty) {
+    if (pretty) {
+      if (spinner) {
+        spinner.text = chalk.dim(`${trikName} is thinking...`);
+      } else {
+        spinner = ora({ text: chalk.dim(`${trikName} is thinking...`), indent: 2, discardStdin: false }).start();
+      }
+    } else {
       console.log(`[${trikName}] Thinking...`);
     }
   });
