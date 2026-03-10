@@ -236,7 +236,7 @@ function prompt(question: string): Promise<string> {
 }
 
 async function main() {
-  const loadingSpinner = pretty ? ora('Loading agent...').start() : null;
+  const loadingSpinner = pretty ? ora({ text: 'Loading agent...', discardStdin: false }).start() : null;
   if (!pretty) console.log('Loading agent...\n');
 
   const app = await initializeAgent();
@@ -248,7 +248,7 @@ async function main() {
   // Subscribe to gateway events
   app.gateway.on('handoff:start', ({ trikName }: { trikName: string }) => {
     if (pretty) {
-      spinner = ora({ text: chalk.dim(`Connecting to ${trikName}...`), indent: 2 }).start();
+      spinner = ora({ text: chalk.dim(`Connecting to ${trikName}...`), indent: 2, discardStdin: false }).start();
     } else {
       console.log(`[${trikName}] Connecting...`);
     }
