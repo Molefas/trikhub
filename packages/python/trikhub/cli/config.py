@@ -200,6 +200,44 @@ def read_secrets(base_dir: str | None = None) -> dict[str, dict[str, str]]:
         return {}
 
 
+def remove_trik_storage(package_name: str) -> bool:
+    """Remove a trik's data from the storage database (~/.trikhub/storage/storage.db)."""
+    db_path = Path.home() / ".trikhub" / "storage" / "storage.db"
+    if not db_path.exists():
+        return False
+    try:
+        import sqlite3
+
+        conn = sqlite3.connect(str(db_path))
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM storage WHERE trik_id = ?", (package_name,))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+    except Exception:
+        return False
+
+
+def remove_trik_secrets(package_name: str, base_dir: str | None = None) -> bool:
+    """Remove a trik's entry from .trikhub/secrets.json."""
+    secrets_path = get_secrets_path(base_dir)
+    if not secrets_path.exists():
+        return False
+    try:
+        secrets = json.loads(secrets_path.read_text(encoding="utf-8"))
+        if package_name not in secrets:
+            return False
+        del secrets[package_name]
+        secrets_path.write_text(
+            json.dumps(secrets, indent=2) + "\n", encoding="utf-8"
+        )
+        return True
+    except (json.JSONDecodeError, OSError):
+        return False
+
+
 # ============================================================================
 # Defaults (~/.trikhub/defaults.json)
 # ============================================================================

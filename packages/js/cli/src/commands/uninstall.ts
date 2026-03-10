@@ -6,16 +6,20 @@
  * Workflow:
  * 1. Check if it's a cross-language trik (stored in .trikhub/triks/)
  * 2. Remove from .trikhub/config.json
- * 3. If cross-language: delete from .trikhub/triks/
- * 4. If same-language: run npm/pnpm/yarn uninstall
+ * 3. Remove from .trikhub/secrets.json
+ * 4. Remove from .trikhub/triks.lock
+ * 5. If cross-language: delete from .trikhub/triks/
+ * 6. If same-language: run npm/pnpm/yarn uninstall
  */
 
 import { existsSync } from 'node:fs';
 import { readFile, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
 import chalk from 'chalk';
 import ora from 'ora';
+import { removeFromLockfile } from '../lib/storage.js';
 
 type TrikRuntime = 'node' | 'python';
 
@@ -163,6 +167,61 @@ async function removeTrikDirectory(baseDir: string, packageName: string): Promis
   return true;
 }
 
+/**
+ * Remove a trik's data from the storage database (~/.trikhub/storage/storage.db)
+ */
+async function removeTrikStorage(packageName: string): Promise<boolean> {
+  const dbPath = join(homedir(), '.trikhub', 'storage', 'storage.db');
+
+  if (!existsSync(dbPath)) {
+    return false;
+  }
+
+  try {
+    // Use createRequire to avoid TypeScript type-checking node:sqlite (CLI has @types/node@20)
+    const { createRequire } = await import('node:module');
+    const require = createRequire(import.meta.url);
+    const { DatabaseSync } = require('node:sqlite');
+    const db = new DatabaseSync(dbPath);
+
+    try {
+      const stmt = db.prepare('DELETE FROM storage WHERE trik_id = ?');
+      const result = stmt.run(packageName);
+      return result.changes > 0;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Remove a trik's entry from .trikhub/secrets.json
+ */
+async function removeTrikSecrets(packageName: string, baseDir: string): Promise<boolean> {
+  const secretsPath = join(baseDir, NPM_CONFIG_DIR, 'secrets.json');
+
+  if (!existsSync(secretsPath)) {
+    return false;
+  }
+
+  try {
+    const content = await readFile(secretsPath, 'utf-8');
+    const secrets = JSON.parse(content) as Record<string, Record<string, string>>;
+
+    if (!(packageName in secrets)) {
+      return false;
+    }
+
+    delete secrets[packageName];
+    await writeFile(secretsPath, JSON.stringify(secrets, null, 2) + '\n', 'utf-8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function uninstallCommand(trikInput: string): Promise<void> {
   const spinner = ora();
   const baseDir = process.cwd();
@@ -183,6 +242,21 @@ export async function uninstallCommand(trikInput: string): Promise<void> {
       spinner.info(`${chalk.yellow(packageName)} was not in .trikhub/config.json`);
     } else {
       spinner.succeed(`Removed ${chalk.green(packageName)} from .trikhub/config.json`);
+    }
+
+    // Remove from secrets.json
+    const removedSecrets = await removeTrikSecrets(packageName, baseDir);
+    if (removedSecrets) {
+      spinner.succeed(`Removed ${chalk.green(packageName)} secrets from .trikhub/secrets.json`);
+    }
+
+    // Remove from lockfile
+    removeFromLockfile(packageName);
+
+    // Remove from storage database
+    const removedStorage = await removeTrikStorage(packageName);
+    if (removedStorage) {
+      spinner.succeed(`Removed ${chalk.green(packageName)} data from storage`);
     }
 
     // Check if the trik is stored in .trikhub/triks/ (TrikHub-managed)

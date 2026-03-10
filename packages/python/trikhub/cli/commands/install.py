@@ -400,6 +400,18 @@ def uninstall_command(package: str) -> None:
     else:
         warn(f"{package_name} was not in config")
 
+    # Remove secrets
+    from trikhub.cli.config import remove_trik_secrets
+
+    if remove_trik_secrets(package_name):
+        ok(f"Removed {package_name} secrets")
+
+    # Remove storage data
+    from trikhub.cli.config import remove_trik_storage
+
+    if remove_trik_storage(package_name):
+        ok(f"Removed {package_name} data from storage")
+
     # Remove files
     removed_files = False
     if runtime == "node":
