@@ -234,9 +234,37 @@ async def main() -> None:
         else:
             print(f"[{e[\'trikName\']}] Transferred back ({e[\'reason\']})")
 
+    def on_tool_start(e):
+        nonlocal status
+        name = e.get("trikName", "")
+        tool = e.get("toolName", "")
+        if pretty:
+            if status:
+                status.update(f"  {{name}} \\u2192 {{tool}}")
+            else:
+                status = console.status(f"  {{name}} \\u2192 {{tool}}")
+                status.start()
+        else:
+            print(f"[{{name}}] Running {{tool}}...")
+
+    def on_tool_end(e):
+        nonlocal status
+        name = e.get("trikName", "")
+        if status:
+            status.update(f"  {{name}} is thinking...")
+
+    def on_tool_error(e):
+        nonlocal status
+        name = e.get("trikName", "")
+        if status:
+            status.update(f"  {{name}} is thinking...")
+
     app.gateway.on("handoff:start", on_start)
     app.gateway.on("handoff:container_start", on_container)
     app.gateway.on("handoff:thinking", on_thinking)
+    app.gateway.on("handoff:tool_start", on_tool_start)
+    app.gateway.on("handoff:tool_end", on_tool_end)
+    app.gateway.on("handoff:tool_error", on_tool_error)
     app.gateway.on("handoff:error", on_error)
     app.gateway.on("handoff:transfer_back", on_transfer_back)
 

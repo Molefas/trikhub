@@ -311,6 +311,27 @@ async function main() {
       console.log(\`[\${trikName}] Thinking...\`);
     }
   });
+  app.gateway.on('handoff:tool_start', ({ trikName, toolName }: { trikName: string; toolName: string }) => {
+    if (pretty) {
+      if (spinner) {
+        spinner.text = chalk.dim(\`\${trikName} \\u2192 \${toolName}\`);
+      } else {
+        spinner = ora({ text: chalk.dim(\`\${trikName} \\u2192 \${toolName}\`), indent: 2, discardStdin: false }).start();
+      }
+    } else {
+      console.log(\`[\${trikName}] Running \${toolName}...\`);
+    }
+  });
+  app.gateway.on('handoff:tool_end', ({ trikName }: { trikName: string }) => {
+    if (pretty && spinner) {
+      spinner.text = chalk.dim(\`\${trikName} is thinking...\`);
+    }
+  });
+  app.gateway.on('handoff:tool_error', ({ trikName }: { trikName: string }) => {
+    if (pretty && spinner) {
+      spinner.text = chalk.dim(\`\${trikName} is thinking...\`);
+    }
+  });
   app.gateway.on('handoff:error', ({ trikName, error }: { trikName: string; error: string }) => {
     if (spinner) spinner.stop();
     if (pretty) {

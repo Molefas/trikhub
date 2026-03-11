@@ -375,6 +375,8 @@ class TrikContext(BaseModel):
     """Capabilities declared in the trik's manifest, populated by the gateway/worker."""
     registry: Any | None = None
     """TrikRegistryContext at runtime — only populated when trikManagement.enabled is true."""
+    on_progress: Any | None = None
+    """Optional progress callback injected by the gateway. Called with dict events."""
 
 
 class ToolCallRecord(BaseModel):

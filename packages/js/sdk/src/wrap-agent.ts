@@ -1,6 +1,8 @@
 import { HumanMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
-import type { TrikAgent, TrikContext, TrikResponse } from '@trikhub/manifest';
+import { BaseCallbackHandler } from '@langchain/core/callbacks/base';
+import type { Serialized } from '@langchain/core/load/serializable';
+import type { TrikAgent, TrikContext, TrikResponse, TrikProgressEvent } from '@trikhub/manifest';
 import { extractToolInfo } from './interceptor.js';
 import { getActiveWorkspaceToolNames } from './workspace-tools.js';
 import { getActiveRegistryToolNames } from './registry-tools.js';
@@ -35,6 +37,45 @@ function isInvokable(obj: unknown): obj is InvokableAgent {
     'invoke' in obj &&
     typeof (obj as Record<string, unknown>).invoke === 'function'
   );
+}
+
+/**
+ * LangGraph callback handler that bridges tool execution events
+ * to the TrikContext.onProgress callback.
+ */
+class ProgressCallbackHandler extends BaseCallbackHandler {
+  name = 'TrikProgressHandler';
+  private activeTools = new Map<string, string>();
+
+  constructor(private onProgress: (event: TrikProgressEvent) => void) {
+    super();
+  }
+
+  handleToolStart(
+    tool: Serialized,
+    _input: string,
+    runId: string,
+    _parentRunId?: string,
+    _tags?: string[],
+    _metadata?: Record<string, unknown>,
+    runName?: string,
+  ): void {
+    const toolName = runName || ('id' in tool ? tool.id[tool.id.length - 1] : 'unknown');
+    this.activeTools.set(runId, toolName);
+    this.onProgress({ type: 'tool_start', toolName });
+  }
+
+  handleToolEnd(output: unknown, runId: string): void {
+    const toolName = this.activeTools.get(runId) || '';
+    this.activeTools.delete(runId);
+    this.onProgress({ type: 'tool_end', toolName });
+  }
+
+  handleToolError(_err: Error, runId: string): void {
+    const toolName = this.activeTools.get(runId) || '';
+    this.activeTools.delete(runId);
+    this.onProgress({ type: 'tool_error', toolName });
+  }
 }
 
 /**
@@ -98,8 +139,11 @@ export function wrapAgent(
       // Add user message
       messages.push(new HumanMessage(message));
 
-      // Invoke the LangGraph agent
-      const result = await resolvedAgent.invoke({ messages });
+      // Invoke the LangGraph agent (with progress callbacks if available)
+      const config = context.onProgress
+        ? { callbacks: [new ProgressCallbackHandler(context.onProgress)] }
+        : undefined;
+      const result = await resolvedAgent.invoke({ messages }, config);
 
       // Store the full updated message history
       sessionMessages.set(context.sessionId, result.messages);
