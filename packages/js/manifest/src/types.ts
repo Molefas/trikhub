@@ -386,6 +386,20 @@ export interface TrikRegistryContext {
 }
 
 /**
+ * Progress event emitted during trik agent execution.
+ * Used by the gateway to provide real-time visibility into trik processing.
+ */
+export interface TrikProgressEvent {
+  type: 'tool_start' | 'tool_end' | 'tool_error';
+  /** Tool name (e.g., "manage-voice", "scan-blog") */
+  toolName: string;
+  /** Tool input (only on tool_start) */
+  toolInput?: Record<string, unknown>;
+  /** Tool output summary (only on tool_end) */
+  toolOutput?: string;
+}
+
+/**
  * Context passed to a trik agent on each message.
  */
 export interface TrikContext {
@@ -396,6 +410,11 @@ export interface TrikContext {
   capabilities?: TrikCapabilities;
   /** Registry context for trik management, only populated when trikManagement.enabled is true. */
   registry?: TrikRegistryContext;
+  /**
+   * Optional progress callback injected by the gateway.
+   * Triks should NOT call this directly — it's wired automatically by wrapAgent.
+   */
+  onProgress?: (event: TrikProgressEvent) => void;
 }
 
 /**

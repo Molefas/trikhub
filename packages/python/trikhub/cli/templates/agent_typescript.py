@@ -271,8 +271,29 @@ async function main() {
       console.log(`[${trikName}] Thinking...`);
     }
   });
+  app.gateway.on('handoff:tool_start', ({ trikName, toolName }: { trikName: string; toolName: string }) => {
+    if (pretty) {
+      if (spinner) {
+        spinner.text = chalk.dim(`${trikName} \u2192 ${toolName}`);
+      } else {
+        spinner = ora({ text: chalk.dim(`${trikName} \u2192 ${toolName}`), indent: 2, discardStdin: false }).start();
+      }
+    } else {
+      console.log(`[${trikName}] Running ${toolName}...`);
+    }
+  });
+  app.gateway.on('handoff:tool_end', ({ trikName }: { trikName: string }) => {
+    if (pretty && spinner) {
+      spinner.text = chalk.dim(`${trikName} is thinking...`);
+    }
+  });
+  app.gateway.on('handoff:tool_error', ({ trikName }: { trikName: string }) => {
+    if (pretty && spinner) {
+      spinner.text = chalk.dim(`${trikName} is thinking...`);
+    }
+  });
   app.gateway.on('handoff:error', ({ trikName, error }: { trikName: string; error: string }) => {
-    if (spinner) spinner.stop();
+    if (spinner) { spinner.stop(); spinner = null; }
     if (pretty) {
       console.log('  ' + chalk.red(`\u2716 [${trikName}] ${error}`));
     } else {
@@ -280,7 +301,7 @@ async function main() {
     }
   });
   app.gateway.on('handoff:transfer_back', ({ trikName, reason }: { trikName: string; reason: string }) => {
-    if (spinner) spinner.stop();
+    if (spinner) { spinner.stop(); spinner = null; }
     if (pretty) {
       console.log('  ' + chalk.dim(`\u2190 ${trikName} transferred back (${reason})`));
     } else {
@@ -312,12 +333,12 @@ async function main() {
     }
 
     try {
-      if (spinner) spinner.stop();
+      if (spinner) { spinner.stop(); spinner = null; }
       const result = await app.processMessage(userInput, sessionId);
-      if (spinner) spinner.stop();
+      if (spinner) { spinner.stop(); spinner = null; }
       renderResponse(result);
     } catch (error) {
-      if (spinner) spinner.stop();
+      if (spinner) { spinner.stop(); spinner = null; }
       console.error(pretty ? '  ' + chalk.red('Error: ' + error) : '\nError: ' + error);
       console.log(pretty ? '  ' + chalk.dim('Please try again.') + '\n' : 'Please try again.\n');
     }

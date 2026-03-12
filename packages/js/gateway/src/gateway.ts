@@ -53,6 +53,9 @@ export interface GatewayEventMap {
   'handoff:start': { trikId: string; trikName: string; sessionId: string };
   'handoff:container_start': { trikId: string; trikName: string };
   'handoff:thinking': { trikId: string; trikName: string };
+  'handoff:tool_start': { trikId: string; trikName: string; toolName: string };
+  'handoff:tool_end': { trikId: string; trikName: string; toolName: string };
+  'handoff:tool_error': { trikId: string; trikName: string; toolName: string };
   'handoff:message': { trikId: string; trikName: string; direction: 'to_trik' | 'from_trik' };
   'handoff:transfer_back': { trikId: string; trikName: string; reason: 'voluntary' | 'force' | 'error' | 'max_turns' };
   'handoff:summary': { trikId: string; trikName: string; sessionId: string };
@@ -506,6 +509,20 @@ export class TrikGateway extends EventEmitter {
 
     // Build trik context
     const trikContext = this.buildTrikContext(handoff.sessionId, loaded);
+
+    // Inject progress callback for real-time tool visibility
+    const internalTools = new Set(['transfer_back']);
+    trikContext.onProgress = (event) => {
+      if (internalTools.has(event.toolName)) return;
+      const payload = { trikId: handoff.trikId, trikName: loaded.manifest.name, toolName: event.toolName };
+      if (event.type === 'tool_start') {
+        this.emit('handoff:tool_start', payload);
+      } else if (event.type === 'tool_end') {
+        this.emit('handoff:tool_end', payload);
+      } else if (event.type === 'tool_error') {
+        this.emit('handoff:tool_error', payload);
+      }
+    };
 
     // Increment turn count
     handoff.turnCount++;

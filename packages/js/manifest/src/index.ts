@@ -25,6 +25,7 @@ export type {
   TrikConfigContext,
   TrikStorageContext,
   TrikRegistryContext,
+  TrikProgressEvent,
   TrikContext,
   TrikAgent,
   TrikResponse,

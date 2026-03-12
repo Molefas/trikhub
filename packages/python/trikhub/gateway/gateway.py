@@ -425,6 +425,28 @@ class TrikGateway:
         loaded = self._triks[handoff.trik_id]
 
         ctx = self._build_trik_context(handoff.session_id, loaded)
+
+        # Inject progress callback for real-time tool visibility
+        internal_tools = {"transfer_back"}
+        def on_progress(event):
+            tool_name = event.get("toolName", "")
+            if tool_name in internal_tools:
+                return
+            event_type = event.get("type", "")
+            payload = {
+                "trikId": handoff.trik_id,
+                "trikName": loaded.manifest.name,
+                "toolName": tool_name,
+            }
+            if event_type == "tool_start":
+                self._emit("handoff:tool_start", payload)
+            elif event_type == "tool_end":
+                self._emit("handoff:tool_end", payload)
+            elif event_type == "tool_error":
+                self._emit("handoff:tool_error", payload)
+
+        ctx.on_progress = on_progress
+
         handoff.turn_count += 1
 
         if handoff.turn_count > self._max_turns:
